@@ -1,0 +1,11 @@
+# Workspace-wide build/test environment.
+#
+# `RUST_MIN_STACK` sets the minimum stack size (bytes) for spawned threads —
+# critically including the per-test threads cargo creates. Render-prep
+# recurses deeply on large V1 fixtures and overflows the default 2MB
+# per-thread stack. 32MB is enough headroom for the deepest observed
+# nesting.
+#
+# Set here so users and CI do not have to set RUST_MIN_STACK manually.
+[env]
+RUST_MIN_STACK = "33554432"

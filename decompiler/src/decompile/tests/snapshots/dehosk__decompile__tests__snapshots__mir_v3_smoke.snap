@@ -1,0 +1,104 @@
+---
+source: decompiler/src/decompile/tests/snapshots.rs
+expression: rendered
+---
+pub type Unknown_S_1 {
+  Unknown_S_1_0(Data, Data)
+  Unknown_S_1_1(Data, Data)
+}
+
+pub type Unknown_S_2 {
+  Unknown_S_2_0
+  Unknown_S_2_1(Data, Data)
+  Unknown_S_2_2
+}
+
+pub type Unknown_S_3 { Unknown_S_3_0(Data) }
+
+validator decompiled {
+  spend(script_context: ScriptContext) {
+    let redeemer: Redeemer = script_context.redeemer
+    expect Spending(_output_reference, datum) = script_context.script_info
+    expect helper(
+      redeemer,
+      when datum is {
+        Unknown_S_3_0(payload) ->
+          let q: ByteArray = builtin.un_b_data(payload.fields[0]) <> "VAULT"
+          let r: Int =
+            builtin.un_i_data(payload.fields[1]) - builtin.un_i_data(payload.fields[2])
+          when redeemer is {
+            Unknown_S_1_0(field_0, field_1) ->
+              let int: Int = builtin.un_i_data(field_0)
+              int > 0 &&
+              int / 10 <= r &&
+              q != builtin.un_b_data(field_1)
+            Unknown_S_1_1(field_0, field_1) ->
+              let list_3: List<Data> = builtin.un_list_data(field_1)
+              count(list_3) > 0 &&
+              builtin.un_i_data(field_0) > 0 &&
+              ByteArray.slice(
+                0,
+                4,
+                fold(list_3)
+              ) != q
+            _ ->
+              sum(
+                [payload.fields[1], payload.fields[2], builtin.i_data(r)]
+              ) == 0
+          }
+        _ -> False
+      }
+    )
+    Void
+  }
+  mint(script_context: ScriptContext) {
+    let redeemer: Redeemer = script_context.redeemer
+    expect Minting(_policy_id) = script_context.script_info
+    expect helper(
+      redeemer,
+      when redeemer is {
+        Unknown_S_1_0(field_0, field_1) ->
+          builtin.un_i_data(field_0) > 0 && builtin.un_b_data(field_1) != #""
+        Unknown_S_1_1(field_0, field_1) ->
+          builtin.un_i_data(field_0) > 0 && count(builtin.un_list_data(field_1)) > 1
+        _ -> False
+      }
+    )
+    Void
+  }
+  else(_) {
+    fail
+  }
+}
+rec fn count(list: List<Data>) {
+  when list is {
+    [] -> 0
+    [_head, ..tail] -> count(tail) + 1
+  }
+}
+fn helper(x, y) {
+  let field_0: fn(List<Data>) -> _ =
+    rec fn rec_fn_2(list: List<Data>) {
+      when list is {
+        [] -> y
+        [_head, ..tail] -> rec_fn_2(tail)
+      }
+    }
+  when x is {
+    Unknown_S_2_0 | Unknown_S_2_2 -> y
+    Unknown_S_2_1(_, items) -> field_0(builtin.un_list_data(items))
+    _ -> fail
+  }
+}
+rec fn fold(list: List<Data>) {
+  when list is {
+    [] -> #""
+    [head, ..tail] -> builtin.un_b_data(head) <> fold(tail)
+  }
+}
+rec fn sum(list: List<Data>) {
+  when list is {
+    [] -> 0
+    [head, ..tail] -> builtin.un_i_data(head) + sum(tail)
+  }
+}

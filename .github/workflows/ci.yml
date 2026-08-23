@@ -1,0 +1,36 @@
+# Format, lints, tests. Clippy runs WITHOUT `-D warnings`: the deny levels
+# in Cargo.toml are what fail the build, and promoting the rest wholesale
+# would defeat the ratchet.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  check:
+    name: fmt · clippy · test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      # The `uplc` git dependency is the slow part of a cold build.
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo fmt --all --check
+      # `--all-targets`: most of the tree's code lives in `#[cfg(test)]`.
+      - run: cargo clippy --workspace --all-targets
+      - run: cargo test --workspace
+      # A release build is NOT just an optimised debug one: `debug_assertions`
+      # flips off, so an import whose only use sits behind `#[cfg(debug_assertions)]`
+      # becomes an unused import — and `unused = "deny"` turns that into a hard
+      # error. Nothing above can see it: fmt, clippy and test all build in debug.
+      # This exact break shipped once already.
+      - run: cargo build --workspace --release

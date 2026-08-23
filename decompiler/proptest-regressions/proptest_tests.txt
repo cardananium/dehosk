@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 2e501f9a08f259e06ef889cd90517fd4b3b6a27b5bb21f22ca1a255c8698386c # shrinks to term = Apply { function: Apply { function: Lambda { parameter_name: NamedDeBruijn { text: "v", index: DeBruijn(0) }, body: Lambda { parameter_name: NamedDeBruijn { text: "x", index: DeBruijn(0) }, body: Constant { value: Bool(false), uniq_id: 0 }, uniq_id: 0 }, uniq_id: 0 }, argument: Apply { function: Lambda { parameter_name: NamedDeBruijn { text: "v", index: DeBruijn(0) }, body: Constant { value: Bool(false), uniq_id: 0 }, uniq_id: 0 }, argument: Constant { value: Integer(224124550458689895), uniq_id: 0 }, uniq_id: 0 }, uniq_id: 0 }, argument: Apply { function: Constr { tag: 0, fields: [Constant { value: Bool(true), uniq_id: 0 }], uniq_id: 0 }, argument: Constant { value: Unit, uniq_id: 0 }, uniq_id: 0 }, uniq_id: 0 }

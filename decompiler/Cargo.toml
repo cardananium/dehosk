@@ -1,0 +1,62 @@
+[package]
+name = "dehosk"
+version.workspace = true
+edition.workspace = true
+description = "UPLC to readable pseudocode decompiler"
+license.workspace = true
+readme = "README.md"
+
+[dependencies]
+# Core dependencies
+uplc.workspace = true
+pallas-primitives.workspace = true
+
+# Serialization
+hex = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Numbers
+num-bigint = "0.4"
+num-traits = "0.2"
+
+# Collections
+indexmap = "2.1"
+
+# Error handling
+miette = { version = "7.0", features = ["fancy"] }
+thiserror = "1.0"
+
+# CLI
+clap = { version = "4.4", features = ["derive"] }
+
+# Pretty printing
+pretty = "0.12"
+stacker = "0.1"
+
+# Itertools
+itertools = "0.12"
+
+# CSV parsing
+csv = "1.3"
+
+[dev-dependencies]
+pretty_assertions = "1.4"
+indoc = "2.0"
+proptest = "1.4"
+insta = "1.40"
+
+[[bin]]
+name = "dehosk"
+path = "src/main/mod.rs"
+
+[[bin]]
+name = "test-decompiler"
+path = "src/test_decompiler.rs"
+
+[lib]
+name = "dehosk"
+path = "src/lib.rs"
+
+[lints]
+workspace = true

@@ -1,0 +1,124 @@
+@import "tailwindcss";
+
+/* ── Debugger design tokens ──────────────────────────────────────────────────
+   Tailwind v4 only emits a utility (bg-surface-1, text-fg-muted, …) when the
+   backing --color-* token is registered in an @theme block. These tokens back
+   every class used by components/debugger/*; removing one silently unstyles
+   whatever uses it (this happened once — verify the BUILT css after edits). */
+@theme {
+  /* Surfaces: 0 = editor background (matches Monaco's #0a0a0a) → 3 = raised */
+  --color-surface-0: #0a0a0a;
+  --color-surface-1: #111113;
+  --color-surface-2: #18181b;
+  --color-surface-3: #27272a;
+
+  /* Foreground ramp */
+  --color-fg: #fafafa;
+  --color-fg-muted: #a1a1aa;
+  --color-fg-subtle: #71717a;
+  --color-fg-faint: #3f3f46;
+
+  --color-border: #27272a;
+  --color-accent: #34d399;
+  /* Hover state for accent-filled buttons. Unregistered, `hover:bg-accent-hover`
+     emits nothing and the primary button silently loses its hover feedback. */
+  --color-accent-hover: #6ee7b7;
+
+  /* Status colors: run=blue, pause=amber, ok=green, err=red */
+  --color-status-run: #60a5fa;
+  --color-status-pause: #fbbf24;
+  --color-status-ok: #34d399;
+  --color-status-err: #f87171;
+}
+
+:root {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.17 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.65 0.19 160);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.25 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.25 0 0);
+  --muted-foreground: oklch(0.6 0 0);
+  --accent: oklch(0.25 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.55 0.2 25);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.3 0 0);
+  --input: oklch(0.3 0 0);
+  --ring: oklch(0.65 0.19 160);
+  --radius: 0.5rem;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, sans-serif;
+  min-height: 100vh;
+}
+
+/* ── Monaco debugger decorations ─────────────────────────────────────────────
+   Monaco injects these class names directly (DebugView.tsx); they are NOT
+   Tailwind utilities and must exist as plain CSS or the current line has no
+   highlight and breakpoints no glyph. */
+
+/* Current execution line: green band + left edge marker */
+.debugger-current-line {
+  background: rgba(52, 211, 153, 0.13);
+  box-shadow: inset 3px 0 0 rgba(52, 211, 153, 0.75);
+}
+
+/* Current-line glyph: ▶ arrow in the gutter */
+.debugger-current-line-glyph {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+}
+.debugger-current-line-glyph::after {
+  content: '▶';
+  color: #34d399;
+  font-size: 9px;
+  line-height: 1;
+}
+
+/* Where the cursor came from: a dimmer, cooler band than the current line, so
+   the two ends of a several-hundred-line transfer are both visible and cannot
+   be mistaken for each other. Deliberately NOT green — it is not executing. */
+.debugger-origin-line {
+  background: rgba(148, 163, 184, 0.10);
+  box-shadow: inset 3px 0 0 rgba(148, 163, 184, 0.45);
+}
+
+.debugger-origin-line-glyph {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+}
+.debugger-origin-line-glyph::after {
+  content: '↑';
+  color: #94a3b8;
+  font-size: 9px;
+  line-height: 1;
+}
+
+/* Breakpoint glyph: red dot in the gutter */
+.debugger-breakpoint-glyph {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.debugger-breakpoint-glyph::after {
+  content: '';
+  width: 9px;
+  height: 9px;
+  border-radius: 9999px;
+  background: #f87171;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+
+/* Faint red wash on lines that carry a breakpoint */
+.debugger-breakpoint-line {
+  background: rgba(248, 113, 113, 0.06);
+}

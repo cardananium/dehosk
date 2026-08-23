@@ -1,0 +1,43 @@
+[workspace]
+members = ["decompiler", "decompiler-web"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+rust-version = "1.86.0"
+
+[workspace.dependencies]
+# Cardano primitives. Pinned to the versions the `uplc` crate uses, so
+# the two resolve to a single copy. Two pallas majors in one build make
+# `uplc::PlutusData` a different type from ours, and every value that
+# crosses the boundary stops compiling.
+pallas-addresses = "0.35.0"
+pallas-codec = { version = "0.35.0", features = ["num-bigint"] }
+pallas-crypto = "0.35.0"
+pallas-primitives = "0.35.0"
+pallas-traverse = "0.35.0"
+uplc = { git = "https://github.com/cardananium/aiken", rev = "6b8da868d514f40cb855fad6945a613bab2d5d0b" }
+
+# Shared lint policy (`[lints] workspace = true` in both members).
+# `deny` = probably a bug; CI fails on it. `warn` = a backlog the tree
+# already carries — promoting one to `deny` is how it gets ratcheted down.
+[workspace.lints.rust]
+unused = { level = "deny", priority = -1 }
+nonstandard_style = { level = "deny", priority = -1 }
+# Narrowing `pub` to what the web app and the binaries use exposed ~220
+# items nothing calls. `deny` again once they are triaged.
+dead_code = "warn"
+
+[workspace.lints.clippy]
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+perf = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+# Nested `if`s here are split by a comment explaining the second condition.
+collapsible_if = "allow"
+# `DecompileOptions` has ~25 fields: `let mut o = default(); o.x = ..` beats
+# a literal restating the other 24.
+field_reassign_with_default = "allow"

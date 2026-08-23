@@ -1,0 +1,6 @@
+name = "dehosk/smoke"
+version = "0.0.0"
+compiler = "v1.1.21"
+plutus = "v3"
+license = "Apache-2.0"
+description = "Smoke fixture for the dehosk decompiler test-suite"

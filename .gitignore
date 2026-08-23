@@ -1,0 +1,24 @@
+target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Frontend
+decompiler-web/frontend/node_modules/
+decompiler-web/frontend/dist/
+*.local
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Agent / editor local state
+.claude/
+
+# Proptest regressions are committed; ignore other proptest artifacts
+*.proptest-regressions.bak
+
+# Local corpus / notes.
+dev/
+.dehosk-overlay

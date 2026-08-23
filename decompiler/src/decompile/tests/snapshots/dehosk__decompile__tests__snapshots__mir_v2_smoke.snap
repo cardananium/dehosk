@@ -1,0 +1,62 @@
+---
+source: decompiler/src/decompile/tests/snapshots.rs
+expression: rendered
+---
+pub type Unknown_S_1 {
+  Unknown_S_1_0(Data, Data)
+  Unknown_S_1_1
+}
+
+validator decompiled(datum, redeemer, script_context) {
+  let a = helper(fn(x_3) { __y_comb_rec_fn(__y_comb_rec_fn, x_3) })
+  let b = helper_2(fn(x_6) { __y_comb_rec_fn_2(__y_comb_rec_fn_2, x_6) })
+  let c = helper_3(fn(x_9) { __y_comb_rec_fn_3(__y_comb_rec_fn_3, x_9) })
+  let head_bytes: ByteArray = builtin.un_b_data(datum.fields.head)
+  let int: Int = builtin.un_i_data(datum.fields[1])
+  when redeemer is {
+    Unknown_S_1_0(field_0, field_1) ->
+      let head: Int = builtin.un_i_data(field_0)
+      let e: ByteArray = head_bytes <> "VAULT"
+      expect head > 0
+      expect head / 10 <= int
+      if 0 == 0 {
+        expect e != builtin.un_b_data(field_1)
+        True
+      } else {
+        expect e != e
+        True
+      }
+    Unknown_S_1_1 ->
+      let head_list: List<Data> = builtin.un_list_data(script_context.tx_info)
+      let list_partial = [builtin.i_data(int), builtin.i_data(1)]
+      expect a(head_list) + a(list_partial) == int * 2
+      expect b(head_list) > 0
+      True
+    _ ->
+      expect int < int + builtin.un_i_data(redeemer.fields.head)
+      expect ByteArray.slice(
+        0,
+        ByteArray.length(head_bytes),
+        c(builtin.un_list_data(redeemer.fields[1]))
+      ) == head_bytes
+      True
+  }
+}
+fn helper_3(x_7, y_3: List<Data>) {
+  when y_3 is {
+    [] -> #""
+    [head, ..tail] -> builtin.un_b_data(head) <> x_7(tail)
+  }
+}
+fn helper_2(x_4, y_2: List<Data>) -> Int {
+  when y_2 is {
+    [] -> 0
+    [_head, ..tail] -> x_4(tail) + 1
+  }
+}
+fn helper(x, y: List<Data>) -> Int {
+  when y is {
+    [] -> 0
+    [head, ..tail] -> builtin.un_i_data(head) + x(tail)
+  }
+}
