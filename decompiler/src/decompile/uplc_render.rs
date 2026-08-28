@@ -363,9 +363,31 @@ fn collect_apply_spine(term: &Term<Name>) -> (&Term<Name>, Vec<&Term<Name>>) {
 }
 
 /// Reuse the `uplc` crate's constant renderer for the `(con …)` payload
-/// (`integer 42`, `bytestring #ab`, `data …`, lists, pairs).
+/// (`integer 42`, `bytestring #ab`, `data …`, lists, pairs), as one line.
+///
+/// `to_pretty` formats at width 80 from column zero; it does not know the
+/// indent this printer will place the payload at. A nested `(con integer 1)`
+/// would break as `(con integer` then `1)` on the left margin. This printer
+/// also measures the payload as one run, so a pre-baked break would lie
+/// about width. Flattening to single spaces lets the outer printer treat it
+/// as an atom: a long `data` constant is a long line rather than a break at
+/// the wrong column — the better failure.
 fn constant_text(value: &Constant) -> String {
-    value.to_pretty()
+    let rendered = value.to_pretty();
+    let mut out = String::with_capacity(rendered.len());
+    let mut pending_space = false;
+    for ch in rendered.chars() {
+        if ch.is_whitespace() {
+            pending_space = !out.is_empty();
+            continue;
+        }
+        if pending_space {
+            out.push(' ');
+            pending_space = false;
+        }
+        out.push(ch);
+    }
+    out
 }
 
 #[cfg(test)]
