@@ -264,7 +264,14 @@ impl Simplifier {
         }
 
         // Drop the Y-combinator definition itself; it is inlined as a rec fn.
-        if is_y_comb {
+        //
+        // Only once every use is gone. The inlining rewrites the uses this
+        // simplify knows how to read — the half-Z in function position, the
+        // shapes aiken and plutus-tx emit. A script carrying the textbook Z
+        // seeds recursion the other way round, `driver(fn(v) { s(s, v) })`,
+        // which no rewrite here consumes; dropping the binding under a
+        // surviving use strands `__y_comb_*` as a free name in the render.
+        if is_y_comb && body_use_count!() == 0 {
             finish_let!(LetPostResult::Done(simplified_body));
         }
 

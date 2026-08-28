@@ -140,6 +140,7 @@ mod undo_if_on_function_condition;
 mod undo_pair_when_on_lambda_subject;
 mod unfold_y_comb_apply;
 mod unfold_y_comb_helper_apply;
+mod unfold_y_comb_seed_apply;
 mod unfold_y_comb_through_let_pair_when;
 mod unify_constructor_arity;
 mod unname_discarded_check;
@@ -488,6 +489,15 @@ pub(crate) fn prepare_for_render_with_notes(expr: &PseudoExpr, ctx: &RenderCtx) 
     // helper Let is swept by the `drop_dead_pure_lets` re-runs below.
     let y_comb_unfolded = prep.step("unfold_y_comb_helper_applications", || {
         unfold_y_comb_helper_apply::unfold_y_comb_helper_applications(y_comb_unfolded)
+    });
+
+    // Runs AFTER both half-Z-in-function-position unfolds: they consume
+    // the shapes aiken and plutus-tx emit, and this one keys on what is
+    // left — the textbook Z, whose driver takes the half-Z as its first
+    // ARGUMENT. Ordering it last keeps its use-count gates reading a tree
+    // the siblings have already thinned.
+    let y_comb_unfolded = prep.step("unfold_y_comb_seed_applications", || {
+        unfold_y_comb_seed_apply::unfold_y_comb_seed_applications(y_comb_unfolded)
     });
     // Witness-gated producer-side Option relabel: a fn whose result is
     // matched downstream with native Some/None gets its raw Option-shaped

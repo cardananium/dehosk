@@ -55,6 +55,7 @@ pub(super) const PREP_PASS_ORDER: &[&str] = &[
     "recover_church_list_literals",
     "unfold_y_comb_applications",
     "unfold_y_comb_helper_applications",
+    "unfold_y_comb_seed_applications",
     "relabel_option_producer_leaves",
     "relabel_option_consumer_args",
     "relabel_stub_consumer_args",
@@ -202,6 +203,13 @@ pub(super) const MUST_RUN_AFTER: &[(&str, &[&str])] = &[
     (
         "rename_church_list_helper_binders",
         &["lift_list_fold_to_when"],
+    ),
+    (
+        "unfold_y_comb_seed_applications",
+        &[
+            "unfold_y_comb_applications",
+            "unfold_y_comb_helper_applications",
+        ],
     ),
 ];
 
