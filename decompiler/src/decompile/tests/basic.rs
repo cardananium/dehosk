@@ -522,3 +522,35 @@ fn prep_profile_layer_reports_every_step() {
         "the layer must NOT fall through to the rendered program:\n{report}"
     );
 }
+
+/// The Van Rossem builtins and a `value` constant decompile under their
+/// catalogue names instead of failing as unknown builtins.
+#[test]
+fn van_rossem_builtins_and_value_constants_decompile() {
+    use uplc::ast::{DeBruijn, Name, NamedDeBruijn, Program};
+
+    let source = "(program 1.1.0 (lam v \
+        [(builtin valueContains) \
+          [(builtin insertCoin) (con bytestring #aa) (con bytestring #bb) \
+            [(builtin expModInteger) (con integer 2) (con integer 10) (con integer 1000)] \
+            [(builtin unValueData) v]] \
+          (con value [(#aa, [(#cc, 5)])])]))";
+    let program: Program<Name> = uplc::parser::program(source).expect("source parses");
+    let program: Program<DeBruijn> = program.try_into().expect("source de-Bruijnizes");
+    let program: Program<NamedDeBruijn> = program.into();
+
+    let output = decompile_program(&program, DecompileOptions::default())
+        .expect("Van Rossem builtins must decompile");
+    for name in [
+        "Value.contains(",
+        "Value.insert_coin(",
+        "Int.exp_mod(",
+        "builtin.un_value_data(",
+    ] {
+        assert!(output.contains(name), "`{name}` missing from:\n{output}");
+    }
+    assert!(
+        output.contains(r#"[Pair(#"aa", [Pair(#"cc", 5)])]"#),
+        "{output}"
+    );
+}

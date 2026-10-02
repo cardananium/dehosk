@@ -140,7 +140,7 @@ fn builtin_level(fun: DefaultFunction) -> BuiltinSignal {
         F::SerialiseData
         | F::VerifyEcdsaSecp256k1Signature
         | F::VerifySchnorrSecp256k1Signature => BuiltinSignal::V2OnlyObserved,
-        // V3-only builtins (PV9, PV10).
+        // V3-only builtins (PV9 and later).
         F::Bls12_381_G1_Add
         | F::Bls12_381_G1_Neg
         | F::Bls12_381_G1_ScalarMul
@@ -173,7 +173,18 @@ fn builtin_level(fun: DefaultFunction) -> BuiltinSignal {
         | F::RotateByteString
         | F::CountSetBits
         | F::FindFirstSetBit
-        | F::Ripemd_160 => BuiltinSignal::V3OnlyObserved,
+        | F::Ripemd_160
+        | F::ExpModInteger
+        | F::DropList
+        | F::Bls12_381_G1_MultiScalarMul
+        | F::Bls12_381_G2_MultiScalarMul
+        | F::InsertCoin
+        | F::LookupCoin
+        | F::UnionValue
+        | F::ValueContains
+        | F::ValueData
+        | F::UnValueData
+        | F::ScaleValue => BuiltinSignal::V3OnlyObserved,
         // Everything else is V1-compatible.
         _ => BuiltinSignal::V1Compatible,
     }

@@ -235,9 +235,9 @@ checksum = "c4512299f36f043ab09a583e57bceb5a5aab7a73db1805848e8fef3c9e8c78b3"
 
 [[package]]
 name = "bitvec"
-version = "1.0.1"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1bc2832c24239b0141d5674bb9174f9d68a8b5b3f2753311927c172ca46f7e9c"
+checksum = "ddcec3d12c579d40898fe0a9a358a803c23e9c52ca3c425707f81c9436211837"
 dependencies = [
  "funty",
  "radium",
@@ -256,9 +256,9 @@ dependencies = [
 
 [[package]]
 name = "blst"
-version = "0.3.16"
+version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dcdb4c7013139a150f9fc55d123186dbfaba0d912817466282c73ac49e71fb45"
+checksum = "c20659f9bbee16cbbd2f7393e40ab6309f5a98f76a2eb57a995ec508b72387fe"
 dependencies = [
  "cc",
  "glob",
@@ -436,6 +436,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "382ce8820a5bb815055d3553a610e8cb542b2d767bbacea99038afda96cd760d"
 
 [[package]]
+name = "cryptoxide"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8bb2a43afb0fd8b53101f79f153795c449ba80762361d8b868f4a75c6d03057"
+
+[[package]]
 name = "csv"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -467,11 +473,11 @@ dependencies = [
  "indoc",
  "insta",
  "itertools 0.12.1",
- "miette 7.6.0",
+ "miette",
  "num-bigint",
  "num-traits",
  "pallas-primitives",
- "pretty 0.12.5",
+ "pretty",
  "pretty_assertions",
  "proptest",
  "serde",
@@ -1043,18 +1049,6 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
 name = "miette"
-version = "5.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59bb584eaeeab6bd0226ccf3509a69d7936d148cf3d036ad350abe35e8c6856e"
-dependencies = [
- "miette-derive 5.10.0",
- "once_cell",
- "thiserror",
- "unicode-width 0.1.14",
-]
-
-[[package]]
-name = "miette"
 version = "7.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5f98efec8807c63c752b5bd61f862c165c115b0a35685bdcfd9238c7aeb592b7"
@@ -1062,7 +1056,7 @@ dependencies = [
  "backtrace",
  "backtrace-ext",
  "cfg-if",
- "miette-derive 7.6.0",
+ "miette-derive",
  "owo-colors",
  "supports-color",
  "supports-hyperlinks",
@@ -1070,17 +1064,6 @@ dependencies = [
  "terminal_size",
  "textwrap",
  "unicode-width 0.1.14",
-]
-
-[[package]]
-name = "miette-derive"
-version = "5.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49e7bc1560b95a3c4a25d03de42fe76ca718ab92d1a22a55b9b4cf67b3ae635c"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -1226,7 +1209,7 @@ dependencies = [
  "base58",
  "bech32",
  "crc",
- "cryptoxide",
+ "cryptoxide 0.4.4",
  "hex",
  "pallas-codec",
  "pallas-crypto",
@@ -1252,7 +1235,7 @@ version = "0.35.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "89e25299b6992b179144464e410680cf096919f43cf97f9a6fea2f7be5e1cadd"
 dependencies = [
- "cryptoxide",
+ "cryptoxide 0.4.4",
  "hex",
  "pallas-codec",
  "rand_core 0.6.4",
@@ -1356,18 +1339,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9"
 dependencies = [
  "zerocopy",
-]
-
-[[package]]
-name = "pretty"
-version = "0.11.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83f3aa1e3ca87d3b124db7461265ac176b40c277f37e503eaa29c9c75c037846"
-dependencies = [
- "arrayvec",
- "log",
- "typed-arena",
- "unicode-segmentation",
 ]
 
 [[package]]
@@ -2091,12 +2062,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3b09c83c3c29d37506a3e260c08c03743a6bb66a9cd432c6934ab501a190571f"
 
 [[package]]
-name = "unicode-segmentation"
-version = "1.13.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9629274872b2bfaf8d66f5f15725007f635594914870f65218920345aa11aa8c"
-
-[[package]]
 name = "unicode-width"
 version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2116,18 +2081,18 @@ checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
 name = "uplc"
-version = "1.1.22"
-source = "git+https://github.com/cardananium/aiken?rev=6b8da868d514f40cb855fad6945a613bab2d5d0b#6b8da868d514f40cb855fad6945a613bab2d5d0b"
+version = "1.1.24"
+source = "git+https://github.com/cardananium/aiken?rev=775e949829e27f8d619c14dbf49d0f41b5489a4e#775e949829e27f8d619c14dbf49d0f41b5489a4e"
 dependencies = [
  "bitvec",
  "blst",
- "cryptoxide",
+ "cryptoxide 0.6.5",
  "hamming",
  "hex",
  "indexmap 1.9.3",
  "itertools 0.10.5",
  "k256",
- "miette 5.10.0",
+ "miette",
  "num-bigint",
  "num-integer",
  "num-traits",
@@ -2138,7 +2103,7 @@ dependencies = [
  "pallas-primitives",
  "pallas-traverse",
  "peg",
- "pretty 0.11.3",
+ "pretty",
  "secp256k1",
  "serde",
  "serde_json",

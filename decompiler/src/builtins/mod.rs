@@ -116,6 +116,17 @@ pub enum BuiltinId {
     Bls12_381MillerLoop,
     Bls12_381MulMillerLoopResult,
     Bls12_381FinalVerify,
+    Bls12_381G1MultiScalarMul,
+    Bls12_381G2MultiScalarMul,
+    IntExpMod,
+    ListDrop,
+    ValueInsertCoin,
+    ValueLookupCoin,
+    ValueUnion,
+    ValueContains,
+    ValueScale,
+    ValueToData,
+    DataUnValue,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -244,6 +255,17 @@ impl BuiltinId {
             "bls12_381_miller_loop" => Self::Bls12_381MillerLoop,
             "bls12_381_mul_miller_loop_result" => Self::Bls12_381MulMillerLoopResult,
             "bls12_381_final_verify" => Self::Bls12_381FinalVerify,
+            "bls12_381_g1_multi_scalar_mul" => Self::Bls12_381G1MultiScalarMul,
+            "bls12_381_g2_multi_scalar_mul" => Self::Bls12_381G2MultiScalarMul,
+            "exp_mod_integer" | "Int.exp_mod" => Self::IntExpMod,
+            "drop_list" | "List.drop" => Self::ListDrop,
+            "insert_coin" | "Value.insert_coin" => Self::ValueInsertCoin,
+            "lookup_coin" | "Value.lookup_coin" => Self::ValueLookupCoin,
+            "union_value" | "Value.union" => Self::ValueUnion,
+            "value_contains" | "Value.contains" => Self::ValueContains,
+            "scale_value" | "Value.scale" => Self::ValueScale,
+            "value_data" | "Value.to_data" => Self::ValueToData,
+            "un_value_data" | "Data.un_value" => Self::DataUnValue,
             _ => return None,
         })
     }
@@ -371,6 +393,17 @@ impl BuiltinId {
             Self::Bls12_381MillerLoop => "bls12_381_miller_loop",
             Self::Bls12_381MulMillerLoopResult => "bls12_381_mul_miller_loop_result",
             Self::Bls12_381FinalVerify => "bls12_381_final_verify",
+            Self::Bls12_381G1MultiScalarMul => "bls12_381_g1_multi_scalar_mul",
+            Self::Bls12_381G2MultiScalarMul => "bls12_381_g2_multi_scalar_mul",
+            Self::IntExpMod => "Int.exp_mod",
+            Self::ListDrop => "List.drop",
+            Self::ValueInsertCoin => "Value.insert_coin",
+            Self::ValueLookupCoin => "Value.lookup_coin",
+            Self::ValueUnion => "Value.union",
+            Self::ValueContains => "Value.contains",
+            Self::ValueScale => "Value.scale",
+            Self::ValueToData => "Value.to_data",
+            Self::DataUnValue => "Data.un_value",
         }
     }
 
@@ -404,6 +437,7 @@ impl BuiltinId {
                 Self::DataSerialize => "builtin.serialise_data",
                 Self::DataEq => "builtin.equals_data",
                 Self::DataCase => "builtin.choose_data",
+                Self::DataUnValue => "builtin.un_value_data",
                 // Render as the `Pair(a, b)` literal, matching the
                 // `KnownConstructor::Pair` render path.
                 Self::PairNew => "Pair",
@@ -429,6 +463,7 @@ impl BuiltinId {
             | Self::NewList
             | Self::MkNilPairData
             | Self::NewPairs
+            | Self::ListDrop
             | Self::Seq => 1,
             _ => 0,
         }
@@ -500,6 +535,7 @@ impl BuiltinId {
             | Self::ByteArrayLte
             | Self::StringEq
             | Self::DataEq
+            | Self::ValueContains
             | Self::Seq => PseudoType::Bool,
 
             // Int-returning ---
@@ -517,7 +553,9 @@ impl BuiltinId {
             | Self::ByteArrayToInt
             | Self::DataUnInt
             | Self::DataToInt
-            | Self::DataConstrIndex => PseudoType::Int,
+            | Self::DataConstrIndex
+            | Self::IntExpMod
+            | Self::ValueLookupCoin => PseudoType::Int,
 
             // Bool-returning bit predicate ---
             // `ByteArray.read_bit(bytes, index)` is Bool, not Int.
@@ -559,7 +597,8 @@ impl BuiltinId {
             | Self::IntToData
             | Self::ByteArrayToData
             | Self::ListToData
-            | Self::MapToData => PseudoType::Data,
+            | Self::MapToData
+            | Self::ValueToData => PseudoType::Data,
 
             // Unpackers with known shapes ---
             Self::DataUnList | Self::DataToList => PseudoType::List(Rc::new(PseudoType::Data)),
@@ -578,12 +617,14 @@ impl BuiltinId {
             | Self::Bls12_381G1Neg
             | Self::Bls12_381G1ScalarMul
             | Self::Bls12_381G1Uncompress
-            | Self::Bls12_381G1HashToGroup => PseudoType::G1Element,
+            | Self::Bls12_381G1HashToGroup
+            | Self::Bls12_381G1MultiScalarMul => PseudoType::G1Element,
             Self::Bls12_381G2Add
             | Self::Bls12_381G2Neg
             | Self::Bls12_381G2ScalarMul
             | Self::Bls12_381G2Uncompress
-            | Self::Bls12_381G2HashToGroup => PseudoType::G2Element,
+            | Self::Bls12_381G2HashToGroup
+            | Self::Bls12_381G2MultiScalarMul => PseudoType::G2Element,
             Self::Bls12_381MillerLoop | Self::Bls12_381MulMillerLoopResult => {
                 PseudoType::MillerLoopResult
             }
@@ -618,7 +659,13 @@ impl BuiltinId {
             | Self::DataCase
             | Self::ConstrPack
             | Self::Trace
-            | Self::Error => return None,
+            | Self::Error
+            // No pseudo type models a ledger value; `List.drop` keeps its list's type.
+            | Self::ListDrop
+            | Self::ValueInsertCoin
+            | Self::ValueUnion
+            | Self::ValueScale
+            | Self::DataUnValue => return None,
         };
         Some(ty)
     }
@@ -643,6 +690,9 @@ impl BuiltinId {
             | Self::IntEq
             | Self::IntLt
             | Self::IntLte => vec![PseudoType::Int, PseudoType::Int],
+
+            // `expModInteger(base: Int, exponent: Int, modulus: Int) -> Int`.
+            Self::IntExpMod => vec![PseudoType::Int, PseudoType::Int, PseudoType::Int],
 
             // (Int,) → ... — `IntToData(value)`.
             Self::IntToData => vec![PseudoType::Int],

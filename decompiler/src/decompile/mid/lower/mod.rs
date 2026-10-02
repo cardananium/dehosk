@@ -1251,6 +1251,10 @@ impl<'a> Lowerer<'a> {
             | DF::CountSetBits
             | DF::FindFirstSetBit => PseudoType::Int,
 
+            DF::ExpModInteger | DF::LookupCoin => PseudoType::Int,
+            DF::ValueContains => PseudoType::Bool,
+            DF::ValueData => PseudoType::Data,
+
             // Single-bit read returns Bool
             DF::ReadBit => PseudoType::Bool,
 
@@ -2089,6 +2093,17 @@ fn pseudonym_builtin_id(fun: uplc::builtins::DefaultFunction) -> Result<BuiltinI
         Bls12_381_MillerLoop => "bls12_381_miller_loop",
         Bls12_381_MulMlResult => "bls12_381_mul_miller_loop_result",
         Bls12_381_FinalVerify => "bls12_381_final_verify",
+        Bls12_381_G1_MultiScalarMul => "bls12_381_g1_multi_scalar_mul",
+        Bls12_381_G2_MultiScalarMul => "bls12_381_g2_multi_scalar_mul",
+        ExpModInteger => "exp_mod_integer",
+        DropList => "drop_list",
+        InsertCoin => "insert_coin",
+        LookupCoin => "lookup_coin",
+        UnionValue => "union_value",
+        ValueContains => "value_contains",
+        ValueData => "value_data",
+        UnValueData => "un_value_data",
+        ScaleValue => "scale_value",
         // Conway-era bytestring bit-operation builtins. Like the BLS
         // group, these need explicit names: the snake_case spellings
         // below are the aliases `BuiltinId::from_name` accepts.

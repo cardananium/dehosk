@@ -1674,6 +1674,7 @@ fn constant_to_string(c: &Constant) -> String {
         Constant::Bls12_381G1Element(_) => "G1Element(...)".to_string(),
         Constant::Bls12_381G2Element(_) => "G2Element(...)".to_string(),
         Constant::Bls12_381MlResult(_) => "MillerLoopResult(...)".to_string(),
+        Constant::Value(_) => "Value(...)".to_string(),
     }
 }
 

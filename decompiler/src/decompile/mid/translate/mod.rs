@@ -703,7 +703,7 @@ fn constant_to_literal(constant: &Constant) -> MidLiteral {
         Constant::Unit => MidLiteral::Unit,
         Constant::Data(d) => MidLiteral::Data(Box::new(d.clone())),
         Constant::ProtoList(_, items) => {
-            MidLiteral::List(items.iter().map(constant_to_literal).collect())
+            MidLiteral::List(items.iter().map(|item| constant_to_literal(item)).collect())
         }
         Constant::ProtoPair(_, _, a, b) => MidLiteral::Pair(
             Box::new(constant_to_literal(a)),
@@ -713,6 +713,30 @@ fn constant_to_literal(constant: &Constant) -> MidLiteral {
         Constant::Bls12_381G1Element(_) => MidLiteral::Bls12_381G1(vec![]),
         Constant::Bls12_381G2Element(_) => MidLiteral::Bls12_381G2(vec![]),
         Constant::Bls12_381MlResult(_) => MidLiteral::ByteString(b"<ml_result>".to_vec()),
+        // No surface syntax has a value literal: show its entries as
+        // `[(currency, [(token, quantity), …]), …]`.
+        Constant::Value(value) => MidLiteral::List(
+            value
+                .clone()
+                .into_entries()
+                .into_iter()
+                .map(|(currency, tokens)| {
+                    let tokens = tokens
+                        .into_iter()
+                        .map(|(token, quantity)| {
+                            MidLiteral::Pair(
+                                Box::new(MidLiteral::ByteString(token)),
+                                Box::new(MidLiteral::Integer(quantity.into())),
+                            )
+                        })
+                        .collect();
+                    MidLiteral::Pair(
+                        Box::new(MidLiteral::ByteString(currency)),
+                        Box::new(MidLiteral::List(tokens)),
+                    )
+                })
+                .collect(),
+        ),
     }
 }
 
