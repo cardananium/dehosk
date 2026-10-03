@@ -13,6 +13,8 @@ use crate::pseudo::var_id::{VarId, VarInterner};
 
 use super::var_registry::{VarOrigin, VarRegistry};
 
+mod list_cases;
+
 /// One pending unit of work for [`MidTranslator::translate`]'s step machine.
 ///
 /// `Visit` descends; every other variant is a CONTINUATION — the part of a
@@ -81,6 +83,10 @@ pub(crate) struct MidTranslator {
     pub provenance: ProvenanceBuilder,
     /// DeBruijn scope stack: innermost binding is last.
     scope: Vec<VarId>,
+    /// For each let-bound closure: its parameter count and what its body
+    /// evaluates to. Lets a call to it count as a known result when deciding
+    /// whether a case arm can return a function.
+    closure_results: std::collections::HashMap<VarId, (usize, ResultKind)>,
 }
 
 impl MidTranslator {
@@ -90,6 +96,7 @@ impl MidTranslator {
             var_registry: VarRegistry::new(),
             provenance: ProvenanceBuilder::new(),
             scope: Vec::new(),
+            closure_results: std::collections::HashMap::new(),
         }
     }
 
@@ -104,6 +111,15 @@ impl MidTranslator {
                 Step::EnterLetBody { var, body } => {
                     // The value was translated OUTSIDE the binding's scope;
                     // the body is translated inside it.
+                    if let Some(MidExpr::Closure {
+                        params,
+                        body: closure_body,
+                        ..
+                    }) = done.last()
+                    {
+                        let kind = self.result_kind(closure_body);
+                        self.closure_results.insert(var, (params.len(), kind));
+                    }
                     self.scope.push(var);
                     steps.push(Step::Visit(body));
                 }
@@ -187,7 +203,8 @@ impl MidTranslator {
         }
 
         debug_assert_eq!(done.len(), 1, "the step machine must leave one result");
-        done.pop().expect("translation result")
+        let result = done.pop().expect("translation result");
+        self.recover_builtin_list_cases(result)
     }
 
     /// One term: emit its own node, or its header plus the [`Step`]s that will
@@ -428,9 +445,83 @@ impl MidTranslator {
         }
     }
 
+    /// `(case x arms) unit` where every arm ends in a lambda parameter it never
+    /// reads: that parameter is the delay thunk's unit, not a field of the
+    /// scrutinee. Left in the pattern it reads as an extra field (a builtin
+    /// list's `cons(h, t)` becomes a three-field constructor) and the dangling
+    /// `unit` application later "selects" through the arm's result, dropping
+    /// data. Returns the arms without that parameter and the application.
+    ///
+    /// The scrutinee's field counts are not known here, so the rewrite is gated
+    /// on a proof rather than a guess: it only fires when every arm's result is
+    /// certainly not a function (a constructor, literal, saturated builtin or
+    /// `error`, through any `case`/`if`/`let`). Were the last parameter a real
+    /// field, the arm would return that value and the `unit` application would
+    /// fail at runtime, so the delay-parameter reading is the only one a
+    /// program that runs can have. An arm that may return a function (a call
+    /// or a variable) leaves the whole application untouched.
+    fn absorb_delay_param(
+        &mut self,
+        function: MidExpr,
+        args: Vec<MidExpr>,
+    ) -> Result<MidExpr, (MidExpr, Vec<MidExpr>)> {
+        let is_unit = matches!(
+            args.as_slice(),
+            [MidExpr::Constr { tag: 0, fields, .. }] if fields.is_empty()
+        ) || matches!(
+            args.as_slice(),
+            [MidExpr::Lit { value: MidLiteral::Unit, .. }]
+        );
+        let MidExpr::Case { branches, .. } = &function else {
+            return Err((function, args));
+        };
+        let all_end_in_unused_param = is_unit
+            && !branches.is_empty()
+            && branches.iter().all(|b| {
+                b.binders
+                    .last()
+                    .is_some_and(|last| !super::free_vars::free_vars(&b.body).contains(last))
+            })
+            && branches
+                .iter()
+                .map(|b| self.result_kind(&b.body))
+                .fold(ResultKind::Bottom, ResultKind::join)
+                == ResultKind::Value;
+        if !all_end_in_unused_param {
+            return Err((function, args));
+        }
+        let MidExpr::Case {
+            id,
+            scrutinee,
+            mut branches,
+            encoding,
+        } = function
+        else {
+            unreachable!("case shape checked above");
+        };
+        for b in &mut branches {
+            b.binders.pop();
+        }
+        for arg in &args {
+            for uplc_id in self.provenance.uplc_ids(arg.id()).to_vec() {
+                self.provenance.absorb_uplc(id, uplc_id);
+            }
+        }
+        Ok(MidExpr::Case {
+            id,
+            scrutinee,
+            branches,
+            encoding,
+        })
+    }
+
     /// `Apply` reassembly: a `Builtin` head swallows the args instead of being
     /// wrapped, so `builtin(a)(b)` stays one node.
     fn merge_apply(&mut self, mid_id: MidExprId, function: MidExpr, args: Vec<MidExpr>) -> MidExpr {
+        let (function, args) = match self.absorb_delay_param(function, args) {
+            Ok(case) => return case,
+            Err(unchanged) => unchanged,
+        };
         match function {
             MidExpr::Builtin {
                 id: b_id,
@@ -753,3 +844,64 @@ fn sanitize_name(name: &str) -> String {
 
 #[cfg(test)]
 mod tests;
+
+/// What an expression can evaluate to, as far as "is it a function?" goes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ResultKind {
+    /// Always fails (`error`): compatible with any reading.
+    Bottom,
+    /// Certainly a non-function value.
+    Value,
+    /// May be a function, or cannot be told.
+    Unknown,
+}
+
+impl ResultKind {
+    fn join(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Unknown, _) | (_, Self::Unknown) => Self::Unknown,
+            (Self::Value, _) | (_, Self::Value) => Self::Value,
+            _ => Self::Bottom,
+        }
+    }
+}
+
+impl MidTranslator {
+    /// What `expr` evaluates to, as far as "is it a function?" goes.
+    fn result_kind(&self, expr: &MidExpr) -> ResultKind {
+        match expr {
+            MidExpr::Lit { .. } | MidExpr::Data { .. } | MidExpr::Constr { .. } => {
+                ResultKind::Value
+            }
+            MidExpr::Error { .. } => ResultKind::Bottom,
+            MidExpr::Builtin { fun, args, .. } if args.len() >= fun.arity() => ResultKind::Value,
+            MidExpr::Case { branches, .. } => branches
+                .iter()
+                .map(|b| self.result_kind(&b.body))
+                .fold(ResultKind::Bottom, ResultKind::join),
+            MidExpr::If {
+                then_branch,
+                else_branch,
+                ..
+            } => self
+                .result_kind(then_branch)
+                .join(self.result_kind(else_branch)),
+            MidExpr::Let { body, .. } | MidExpr::Trace { body, .. } => self.result_kind(body),
+            MidExpr::Apply { function, args, .. } => match function.as_ref() {
+                // `f(f, …)`: a fixpoint combinator calling itself. It returns
+                // whatever the surrounding arms return, so it adds nothing.
+                MidExpr::Var { var, .. }
+                    if matches!(args.first(), Some(MidExpr::Var { var: a, .. }) if a == var) =>
+                {
+                    ResultKind::Bottom
+                }
+                MidExpr::Var { var, .. } => match self.closure_results.get(var) {
+                    Some((arity, kind)) if *arity == args.len() => *kind,
+                    _ => ResultKind::Unknown,
+                },
+                _ => ResultKind::Unknown,
+            },
+            _ => ResultKind::Unknown,
+        }
+    }
+}

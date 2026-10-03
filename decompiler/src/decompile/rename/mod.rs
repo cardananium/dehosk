@@ -284,6 +284,11 @@ impl Renamer {
                     // call WITH an arg is COMPLETE, not partial — name it by its
                     // descriptive stem (`blake2b`), not `<…>_partial`.
                     Some(Self::builtin_hint(name))
+                } else if let Some(rest) = name.strip_prefix("bls12_381_") {
+                    // The first-word fallback would collapse every curve
+                    // operation to `bls12_partial`; the op itself is the
+                    // informative part.
+                    Some(format!("{rest}_result"))
                 } else {
                     // A builtin applied to some-but-maybe-not-all args; the
                     // conservative `_partial` hint, dot-free via
@@ -394,7 +399,10 @@ impl Renamer {
             _ => {
                 // Take first word or abbreviate
                 if let Some(idx) = name.find('_') {
-                    name[..idx].to_string()
+                    // `ByteArray.to_int` would leave a `.` in the identifier:
+                    // keep only the part after the module prefix.
+                    let word = &name[..idx];
+                    word.rsplit('.').next().unwrap_or(word).to_string()
                 } else if name.len() > 8 {
                     name[..4].to_string()
                 } else {

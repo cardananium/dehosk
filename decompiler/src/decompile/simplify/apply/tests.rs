@@ -631,6 +631,26 @@ fn forced_partial_if_extra_args_moves_residual_args() {
     );
 }
 
+/// A `constr` term of the program is a value, not a continuation selector:
+/// reversing it would drop the fields the selected argument does not take.
+#[test]
+fn data_origin_constr_application_is_not_reversed() {
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+        PseudoExpr::constr(
+            ConstructorShape::unknown_data(0, 2),
+            vec![
+                PseudoExpr::var_with_id("fst", VarId::from_raw(9990)),
+                PseudoExpr::var_with_id("snd", VarId::from_raw(9991)),
+            ],
+        ),
+        vec![PseudoExpr::var_with_id("k", VarId::from_raw(9992))],
+    );
+    assert!(
+        !matches!(action, ApplyAction::ContinueLoop { .. }),
+        "a data-origin Constr must not be treated as a Scott selector"
+    );
+}
+
 #[test]
 fn scott_application_reversal_moves_selected_arg_and_fields() {
     let selected_id = VarId::from_raw(9984);
@@ -639,7 +659,7 @@ fn scott_application_reversal_moves_selected_arg_and_fields() {
     let second_field_id = VarId::from_raw(9987);
     let action = Simplifier::with_safe_mode(false).simplify_apply_match(
         PseudoExpr::constr(
-            ConstructorShape::unknown_data(1, 2),
+            ConstructorShape::scott_positional(1, 2),
             vec![
                 PseudoExpr::var_with_id("first_field", first_field_id),
                 PseudoExpr::var_with_id("second_field", second_field_id),

@@ -281,6 +281,10 @@ impl Simplifier {
             .expect("condition_name_stem produced no result")
     }
 
+    fn is_known_builtin_surface_name(name: &str) -> bool {
+        crate::BuiltinId::is_known_name(name)
+    }
+
     pub(crate) fn builtin_name_stem(name: &str) -> Option<String> {
         let stem = match name {
             "Hash.blake2b_256" => "hash".to_string(),
@@ -288,6 +292,12 @@ impl Simplifier {
             "Data.to_list" | "Data.un_list" => "list".to_string(),
             "Data.to_bytes" | "Data.un_bytearray" => "bytes".to_string(),
             "Data.to_int" | "Data.un_int" => "int".to_string(),
+            // A bare (undotted) builtin renders as a plain identifier, so a
+            // binder named after it would shadow the very call it holds.
+            _ if !name.contains('.') && Self::is_known_builtin_surface_name(name) => {
+                let short = name.strip_prefix("bls12_381_").unwrap_or(name);
+                format!("{}_result", Self::sanitize_name_stem(short))
+            }
             _ => {
                 let raw = name.rsplit('.').next().unwrap_or(name);
                 Self::sanitize_name_stem(raw)

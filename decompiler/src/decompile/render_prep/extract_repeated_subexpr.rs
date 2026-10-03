@@ -416,7 +416,7 @@ enum FvStep<'a> {
 
 /// Collect all VarIds that appear FREE in `expr` (not bound by an
 /// inner Let/Lambda/RecFn/WhenPattern).
-fn collect_free_vars(expr: &PseudoExpr) -> std::collections::HashSet<VarId> {
+pub(super) fn collect_free_vars(expr: &PseudoExpr) -> std::collections::HashSet<VarId> {
     let mut out: std::collections::HashSet<VarId> = std::collections::HashSet::new();
     let mut bound: std::collections::HashSet<VarId> = std::collections::HashSet::new();
     let mut steps: Vec<FvStep<'_>> = vec![FvStep::Visit(expr)];
@@ -513,7 +513,7 @@ fn collect_free_vars(expr: &PseudoExpr) -> std::collections::HashSet<VarId> {
     out
 }
 
-fn pattern_binders(p: &crate::pseudo::ast::WhenPattern) -> Vec<VarId> {
+pub(super) fn pattern_binders(p: &crate::pseudo::ast::WhenPattern) -> Vec<VarId> {
     use crate::pseudo::ast::WhenPattern;
     match p {
         WhenPattern::Constructor { fields, .. } => fields.iter().map(|b| b.id).collect(),
@@ -621,7 +621,7 @@ fn is_extractable(expr: &PseudoExpr) -> bool {
     count_nodes(expr) >= 5
 }
 
-fn count_nodes(expr: &PseudoExpr) -> usize {
+pub(super) fn count_nodes(expr: &PseudoExpr) -> usize {
     let mut n = 0;
     let mut pending: Vec<&PseudoExpr> = vec![expr];
     while let Some(cur) = pending.pop() {
@@ -825,10 +825,25 @@ fn signature(expr: &PseudoExpr) -> String {
     canon.out
 }
 
+/// Signature with free variables replaced by placeholders numbered in order
+/// of first occurrence, and those variables (with their display names) in the
+/// same order. Two expressions that differ only in WHICH variables they read
+/// share the signature; the variable lists say where they differ.
+pub(super) fn abstract_signature(expr: &PseudoExpr) -> (String, Vec<(VarId, String)>) {
+    let mut canon = Canon {
+        abstract_free: true,
+        ..Canon::default()
+    };
+    canon.visit(expr);
+    (canon.out, canon.free)
+}
+
 #[derive(Default)]
-struct Canon {
+pub(super) struct Canon {
     out: String,
     locals: HashMap<VarId, String>,
+    abstract_free: bool,
+    free: Vec<(VarId, String)>,
 }
 
 impl Canon {
@@ -860,6 +875,15 @@ impl Canon {
                         Some(v) => {
                             if let Some(p) = self.locals.get(v).cloned() {
                                 self.out.push_str(&p);
+                            } else if self.abstract_free {
+                                let index = match self.free.iter().position(|(f, _)| f == v) {
+                                    Some(i) => i,
+                                    None => {
+                                        self.free.push((*v, name.clone()));
+                                        self.free.len() - 1
+                                    }
+                                };
+                                write!(self.out, "F{}", index).unwrap();
                             } else {
                                 write!(self.out, "OV{:?}", v).unwrap();
                             }

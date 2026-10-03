@@ -703,7 +703,14 @@ impl<'a> Lowerer<'a> {
                                 .iter()
                                 .map(|id| Binder::new(self.interner.resolve(*id).to_string(), *id))
                                 .collect();
-                            if let Some(o) = orientation {
+                            if encoding == CaseEncoding::BuiltinList {
+                                let kc = if index == 0 {
+                                    KnownConstructor::Cons
+                                } else {
+                                    KnownConstructor::Nil
+                                };
+                                WhenPattern::constructor_known(kc, fields)
+                            } else if let Some(o) = orientation {
                                 use super::bool_orientation::Orientation;
                                 // constructor_known keeps tag/arity consistent
                                 // with the ABI (True=1/False=0) — going through

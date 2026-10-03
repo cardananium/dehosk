@@ -322,7 +322,7 @@ fn test_scott_application_reversal_empty_fields() {
     // Constr<1>()(fn(x) { x + 1 }, fn(y) { y * 2 }) -> fn(y) { y * 2 }
     let expr = PseudoExpr::Apply {
         function: PBox::new(PseudoExpr::constr(
-            ConstructorShape::unknown_data(1, 0),
+            ConstructorShape::scott_positional(1, 0),
             vec![],
         )),
         args: vec![
@@ -361,7 +361,7 @@ fn test_scott_application_reversal_with_fields() {
     // which further simplifies to let a = w1; let b = w2; a + b -> w1 + w2
     let expr = PseudoExpr::Apply {
         function: PBox::new(PseudoExpr::constr(
-            ConstructorShape::unknown_data(0, 2),
+            ConstructorShape::scott_positional(0, 2),
             vec![PseudoExpr::var("w1"), PseudoExpr::var("w2")],
         )),
         args: vec![

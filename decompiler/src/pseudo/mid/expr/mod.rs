@@ -139,6 +139,9 @@ pub(crate) enum CaseEncoding {
     IfChain,
     /// ChooseList-based: chooseList(list, empty, nonempty).
     ChooseList,
+    /// Native `case` whose scrutinee is proven to be a builtin list: branch 0
+    /// is `cons(head, tail)`, branch 1 is `nil`.
+    BuiltinList,
 }
 
 /// Literal values (subset of UPLC Constants).

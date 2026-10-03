@@ -406,7 +406,14 @@ impl Simplifier {
         // the Nth continuation arg and applies the fields to it.
         // Constr<N>(fields)(arg0, arg1, ...) → arg_N(fields) (if N < args.len())
         // Constr<N>()(arg0, arg1, ...) → arg_N (if fields empty)
-        if matches!(&func, PseudoExpr::Constr { tag, .. } if *tag < args.len()) {
+        //
+        // Only a Scott-recovered constructor is a function. A `constr` term of
+        // the program itself (data origin) is a value: applying it is a
+        // runtime error, and "reversing" it would silently drop every field
+        // the selected continuation does not take.
+        if matches!(&func, PseudoExpr::Constr { tag, shape, .. }
+            if *tag < args.len() && !shape.is_data_origin())
+        {
             let PseudoExpr::Constr { tag, fields, .. } = func else {
                 unreachable!("Constr Scott reversal shape checked above");
             };

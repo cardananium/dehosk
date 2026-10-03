@@ -21,6 +21,9 @@ mod clarify_recfn_tail_return;
 mod collapse_bool_identity_when;
 mod collapse_dead_fail_chain;
 mod collapse_empty_when;
+mod fold_unrolled_list_helper;
+mod lift_parametric_duplicates;
+mod list_fail_arm_to_wildcard;
 mod collapse_identity_option_when;
 mod collapse_identity_self_receiver;
 mod collapse_over_applied_fail;
@@ -766,6 +769,22 @@ pub(crate) fn prepare_for_render_with_notes(expr: &PseudoExpr, ctx: &RenderCtx) 
     // (and both-`None` → `None`) before the is_some/is_none fold.
     let yc_cse = prep.step("collapse_identity_option_when", || {
         collapse_identity_option_when::collapse_identity_option_when(yc_cse)
+    });
+    // Fold a list-walking helper that a compiler unrolled N levels deep back
+    // into one call (`when xs { … [f(h), ..helper(a, t)] }` → `helper(a, xs)`);
+    // the identity copy folds to the list itself.
+    let yc_cse = prep.step("fold_unrolled_list_helper", || {
+        fold_unrolled_list_helper::fold_unrolled_list_helper(yc_cse)
+    });
+    // Put a head-peeled list destructure's empty-list `fail` arm last, as the
+    // `expect [h, ..t] = xs` fall-through.
+    let yc_cse = prep.step("list_fail_arm_to_wildcard", || {
+        list_fail_arm_to_wildcard::list_fail_arm_to_wildcard(yc_cse)
+    });
+    // Share a big `when` that recurs with only its variables changed, and a
+    // closed `rec fn` already bound in an enclosing scope.
+    let yc_cse = prep.step("lift_parametric_duplicates", || {
+        lift_parametric_duplicates::lift_parametric_duplicates(yc_cse)
     });
     // Fold `when X is { Some(_) -> True; None -> False }` → `option.is_some(X)`.
     let opt_check_folded = prep.step("fold_when_option_to_is_some", || {

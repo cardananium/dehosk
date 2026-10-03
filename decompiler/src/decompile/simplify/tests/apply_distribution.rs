@@ -15,7 +15,7 @@ fn test_distribution_with_lambda_args() {
                 body: PBox::new(PseudoExpr::var("y")),
             }),
             else_branch: PBox::new(PseudoExpr::constr(
-                ConstructorShape::unknown_data(0, 1),
+                ConstructorShape::scott_positional(0, 1),
                 vec![PseudoExpr::var("w2")],
             )),
         }),

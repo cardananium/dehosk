@@ -554,7 +554,7 @@ impl PseudoExpr {
     /// The single place that knows a node's child order —
     /// [`Self::clone_with_children`] consumes them in exactly this order, and
     /// the two must agree or a clone would silently rewire the tree.
-    fn child_refs_into<'a>(&'a self, out: &mut Vec<&'a PseudoExpr>) {
+    pub(crate) fn child_refs_into<'a>(&'a self, out: &mut Vec<&'a PseudoExpr>) {
         match self {
             PseudoExpr::Lambda { body, .. } => out.push(body.as_ref()),
             PseudoExpr::RecFn { body, .. } => out.push(body.as_ref()),

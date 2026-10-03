@@ -394,6 +394,18 @@ impl ConstructorShape {
         }
     }
 
+    /// Whether the tag is a real data-constructor index (a `constr` term of the
+    /// program), as opposed to a Scott continuation position.
+    pub(crate) fn is_data_origin(&self) -> bool {
+        matches!(
+            self,
+            Self::Unknown {
+                origin: ConstructorOrigin::DataTag,
+                ..
+            }
+        )
+    }
+
     /// This shape's per-bool `church_true` tag witness, if any.
     /// `Known` constructors and unwitnessed `Unknown` shapes return `None`.
     pub(crate) fn church_true(&self) -> Option<usize> {

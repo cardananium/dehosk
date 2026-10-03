@@ -460,3 +460,143 @@ fn test_native_case_branch_extraction_absorbs_lambda_and_thunk_into_surviving_bo
     assert_eq!(translator.provenance.mid_for_uplc(13), Some(branch_body_id));
     assert_eq!(translator.provenance.mid_for_uplc(14), Some(branch_body_id));
 }
+
+fn translate_source(source: &str) -> MidExpr {
+    use uplc::ast::Name;
+    let program: Program<Name> = uplc::parser::program(source).expect("source parses");
+    let program: Program<DeBruijn> = program.try_into().expect("source de-Bruijnizes");
+    let program: Program<NamedDeBruijn> = program.into();
+    MidTranslator::new().translate(&program.term)
+}
+
+fn first_case(expr: &MidExpr) -> Option<&MidExpr> {
+    if matches!(expr, MidExpr::Case { .. }) {
+        return Some(expr);
+    }
+    expr.children().into_iter().find_map(first_case)
+}
+
+#[test]
+fn case_applied_to_unit_drops_the_unused_delay_parameter() {
+    // Arms are `\h \t \u -> constr 0 h` and `\u -> 0`, and the case result is applied to
+    // `unit`: the last parameter is the thunk's, so the arms hold 2 and 0 fields.
+    let mid = translate_source(
+        "(program 1.1.0 (lam xs [(case xs (lam h (lam t (lam u (constr 0 h)))) (lam u (con integer 0))) (constr 0)]))",
+    );
+    let Some(MidExpr::Case { branches, .. }) = first_case(&mid) else {
+        panic!("expected the application to fold into the case: {mid:?}");
+    };
+    let arities: Vec<usize> = branches.iter().map(|b| b.binders.len()).collect();
+    assert_eq!(arities, vec![2, 0]);
+}
+
+#[test]
+fn case_applied_to_unit_keeps_a_parameter_the_body_reads() {
+    // The last parameter of the first arm is used, so it is a real field.
+    let mid = translate_source(
+        "(program 1.1.0 (lam xs [(case xs (lam h (lam t (lam u u))) (lam u (con integer 0))) (constr 0)]))",
+    );
+    assert!(
+        matches!(&mid, MidExpr::Closure { body, .. } if matches!(body.as_ref(), MidExpr::Apply { .. })),
+        "the unit application must stay: {mid:?}"
+    );
+}
+
+#[test]
+fn case_applied_to_unit_is_kept_when_an_arm_may_return_a_function() {
+    // The first arm returns a free variable `f`, which could be a function
+    // that the `unit` application is meant to call: the last parameter may be
+    // a real field, so nothing may be folded.
+    let mid = translate_source(
+        "(program 1.1.0 (lam f (lam xs [(case xs (lam h (lam t (lam u f))) (lam u (constr 0))) (constr 0)])))",
+    );
+    assert!(
+        first_case(&mid).is_none_or(|c| matches!(c, MidExpr::Case { branches, .. }
+            if branches.iter().map(|b| b.binders.len()).collect::<Vec<_>>() == vec![3, 1])),
+        "arms must keep every lambda parameter: {mid:?}"
+    );
+}
+
+#[test]
+fn case_applied_to_unit_folds_through_a_self_application_and_nested_cases() {
+    // Leaves: a constructor, `error`, and a Z-style self call `self(self, …)`.
+    let mid = translate_source(
+        "(program 1.1.0 (lam self (lam xs \
+           [(case xs \
+              (lam h (lam t (lam u [self self t]))) \
+              (lam u (constr 0 (con integer 1)))) \
+            (constr 0)])))",
+    );
+    let Some(MidExpr::Case { branches, .. }) = first_case(&mid) else {
+        panic!("expected a folded case: {mid:?}");
+    };
+    let arities: Vec<usize> = branches.iter().map(|b| b.binders.len()).collect();
+    assert_eq!(arities, vec![2, 0]);
+}
+
+fn case_arities_and_encoding(mid: &MidExpr) -> (Vec<usize>, CaseEncoding) {
+    let Some(MidExpr::Case {
+        branches, encoding, ..
+    }) = first_case(mid)
+    else {
+        panic!("no case in {mid:?}");
+    };
+    (branches.iter().map(|b| b.binders.len()).collect(), *encoding)
+}
+
+#[test]
+fn builtin_list_case_with_a_variable_leaf_is_folded_once_the_list_is_proven() {
+    // `unListData d` is a list, so the arms take 2 and 0 fields and the last
+    // parameter is the thunk's even though an arm returns a variable.
+    let mid = translate_source(
+        "(program 1.1.0 (lam d [(case [(builtin unListData) d] \
+           (lam h (lam t (lam u h))) (lam u d)) (constr 0)]))",
+    );
+    assert_eq!(
+        case_arities_and_encoding(&mid),
+        (vec![2, 0], CaseEncoding::BuiltinList)
+    );
+}
+
+#[test]
+fn case_on_an_unproven_scrutinee_with_a_variable_leaf_is_left_alone() {
+    // Nothing says `xs` is a list, and the arms may return a function.
+    let mid = translate_source(
+        "(program 1.1.0 (lam xs (lam d [(case xs (lam h (lam t (lam u h))) (lam u d)) (constr 0)])))",
+    );
+    assert_eq!(
+        case_arities_and_encoding(&mid),
+        (vec![3, 1], CaseEncoding::Native)
+    );
+}
+
+#[test]
+fn list_parameter_is_proven_from_every_call_site() {
+    // `go` is only called with `unListData d` and with its own tail, so its
+    // parameter is a list and the case folds.
+    let mid = translate_source(
+        "(program 1.1.0 (lam d \
+           [(lam go [go go (con integer 0) [(builtin unListData) d]]) \
+            (lam go (lam n (lam xs \
+              [(case xs (lam h (lam t (lam u [go go n t]))) (lam u n)) (constr 0)])))]))",
+    );
+    assert_eq!(
+        case_arities_and_encoding(&mid),
+        (vec![2, 0], CaseEncoding::BuiltinList)
+    );
+}
+
+#[test]
+fn list_parameter_is_not_proven_when_one_call_passes_a_non_list() {
+    let mid = translate_source(
+        "(program 1.1.0 (lam d \
+           [(lam go [go go (con integer 0) d]) \
+            (lam go (lam n (lam xs \
+              [(case xs (lam h (lam t (lam u [go go n t]))) (lam u n)) (constr 0)])))]))",
+    );
+    assert_eq!(
+        case_arities_and_encoding(&mid).1,
+        CaseEncoding::Native,
+        "a call with an unknown argument must prevent the proof"
+    );
+}
