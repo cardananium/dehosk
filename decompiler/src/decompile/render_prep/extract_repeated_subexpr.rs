@@ -29,9 +29,9 @@
 
 use crate::pseudo::ast::PBox;
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 
 use crate::pseudo::ast::{BinaryOp, PseudoExpr, WhenClause};
-use crate::pseudo::fold::{ExprFolder, FoldAction};
 use crate::pseudo::var_id::VarId;
 
 use super::scope_recurse::rewrite_bottom_up;
@@ -128,7 +128,7 @@ fn try_rewrite(expr: PseudoExpr) -> PseudoExpr {
             body,
         } => {
             let body = if let Some(vid) = id
-                && count_id_refs(&body, vid) >= 2
+                && references_at_least_twice(&body, vid)
             {
                 wrap_with_extracted_lets(body.into_inner(), /* abort_only */ false)
             } else {
@@ -145,24 +145,24 @@ fn try_rewrite(expr: PseudoExpr) -> PseudoExpr {
     }
 }
 
-/// Reference count of `vid` in `expr` (complete walk incl. pattern-literal
-/// payloads via `fold::ExprVisitor`).
-fn count_id_refs(expr: &PseudoExpr, vid: VarId) -> usize {
-    use crate::pseudo::fold::ExprVisitor;
-    struct C {
-        vid: VarId,
-        n: usize,
-    }
-    impl ExprVisitor for C {
-        fn visit_var(&mut self, _name: &str, id: &Option<VarId>) {
-            if *id == Some(self.vid) {
-                self.n += 1;
+/// Whether `vid` is referenced at least twice in `expr`, pattern-literal
+/// payloads included. Stops at the second reference: it runs once per `let`
+/// of a chain, over the rest of the chain.
+fn references_at_least_twice(expr: &PseudoExpr, vid: VarId) -> bool {
+    let mut seen = 0;
+    let mut pending: Vec<&PseudoExpr> = vec![expr];
+    while let Some(current) = pending.pop() {
+        if let PseudoExpr::Var { id: Some(id), .. } = current
+            && *id == vid
+        {
+            seen += 1;
+            if seen == 2 {
+                return true;
             }
         }
+        current.child_refs_into(&mut pending);
     }
-    let mut c = C { vid, n: 0 };
-    c.walk(expr);
-    c.n
+    false
 }
 
 /// Inspect `body` for repeated complex subexpressions and wrap it in
@@ -170,6 +170,13 @@ fn count_id_refs(expr: &PseudoExpr, vid: VarId) -> usize {
 /// new binder. Candidates whose free vars would be unbound at the
 /// body's scope are skipped.
 fn wrap_with_extracted_lets(body: PseudoExpr, abort_only: bool) -> PseudoExpr {
+    // Every nested lambda body, `if` branch and clause body is a root of its
+    // own, so a chain of them would pay one whole-body analysis per level.
+    // Most cannot hold a candidate at all, and their eager spine says so.
+    if !may_hold_candidate(&body) {
+        return body;
+    }
+
     // A candidate can only be hoisted to the top of `body` if every
     // var it references is already visible there. Params in scope
     // aren't tracked here, so the check is the conservative
@@ -177,24 +184,23 @@ fn wrap_with_extracted_lets(body: PseudoExpr, abort_only: bool) -> PseudoExpr {
     // candidates but never allows an unsafe extraction.
     let body_free = collect_free_vars(&body);
 
-    let mut counts: HashMap<String, usize> = HashMap::new();
-    let mut representatives: HashMap<String, PseudoExpr> = HashMap::new();
-    collect_signatures(&body, &mut counts, &mut representatives);
+    let facts = Facts::of(&body);
+    let shared = SharedSignatures::of(&body, &facts);
 
     // Signatures in always-evaluated position relative to `body`. Only
     // these are safe to hoist into an eager `let` at the body's top; a
     // candidate absent here is reached only under a conditional or
     // thunk and must stay put.
-    let mut eval_sigs: std::collections::HashSet<String> = Default::default();
-    collect_eval_position_sigs(&body, &mut eval_sigs);
+    let eval_sigs = collect_eval_position_sigs(&body, &facts, &shared);
 
-    let mut candidates: Vec<(String, usize, PseudoExpr)> = counts
+    // (signature, occurrences, first occurrence, holds a bare abort, its facts)
+    let mut candidates: Vec<(String, usize, PseudoExpr, bool, NodeFacts)> = shared
+        .counts
         .into_iter()
-        .filter(|(sig, c)| *c >= 2 && eval_sigs.contains(sig))
-        .filter_map(|(sig, c)| {
-            let rep = representatives.remove(&sig)?;
+        .filter(|(sig, (c, _))| *c >= 2 && eval_sigs.contains(sig))
+        .filter_map(|(sig, (c, first))| {
             // Reject if rep's free vars escape the body's scope.
-            let rep_free = collect_free_vars(&rep);
+            let rep_free = collect_free_vars(first);
             if !rep_free.is_subset(&body_free) {
                 return None;
             }
@@ -202,13 +208,20 @@ fn wrap_with_extracted_lets(body: PseudoExpr, abort_only: bool) -> PseudoExpr {
             // e.g. a `_ -> fail` guard) is sound to hoist only when its first
             // occurrence DOMINATES the body — nothing fail/diverge-capable runs
             // before it — so the hoisted abort is never reordered ahead of an
-            // earlier effect. `contains_effect` lets a bare abort through as
+            // earlier effect. The effect gate lets a bare abort through as
             // non-blocking; this is the placement gate. At most one candidate
             // can dominate, so two abort candidates can never race.
-            if contains_bare_abort(&rep) && !first_occurrence_dominates(&body, &sig) {
+            let target = facts.get(first);
+            let abort = target.bare_abort;
+            if abort
+                && !first_occurrence_dominates(&body, |node| {
+                    let f = facts.get(node);
+                    f.shape == target.shape && f.size == target.size && signature(node) == sig
+                })
+            {
                 return None;
             }
-            Some((sig, c, rep))
+            Some((sig, c, first.clone(), abort, target))
         })
         .collect();
     // With a dominating bare-abort candidate present, extract only abort
@@ -218,12 +231,8 @@ fn wrap_with_extracted_lets(body: PseudoExpr, abort_only: bool) -> PseudoExpr {
     // pure op BEFORE the abort and reordering a possible divergence ahead of
     // it. Dropped pure candidates stay inside the abort `let`'s value — a
     // missed extraction, never unsound.
-    if abort_only
-        || candidates
-            .iter()
-            .any(|(_, _, rep)| contains_bare_abort(rep))
-    {
-        candidates.retain(|(_, _, rep)| contains_bare_abort(rep));
+    if abort_only || candidates.iter().any(|(_, _, _, abort, _)| *abort) {
+        candidates.retain(|(_, _, _, abort, _)| *abort);
     }
     // A total order over candidates so no HashMap-iteration
     // nondeterminism leaks: two decompile runs of the same input
@@ -237,10 +246,7 @@ fn wrap_with_extracted_lets(body: PseudoExpr, abort_only: bool) -> PseudoExpr {
         // it. Otherwise a pure candidate outside an abort `let` would
         // evaluate before the abort and could diverge/fail first.
         // false (pure) < true (abort).
-        let a_abort = contains_bare_abort(&a.2);
-        let b_abort = contains_bare_abort(&b.2);
-        a_abort
-            .cmp(&b_abort)
+        a.3.cmp(&b.3)
             .then_with(|| b.1.cmp(&a.1))
             .then_with(|| b.0.len().cmp(&a.0.len()))
             .then_with(|| a.0.cmp(&b.0))
@@ -253,15 +259,14 @@ fn wrap_with_extracted_lets(body: PseudoExpr, abort_only: bool) -> PseudoExpr {
     // round by recomputing signatures of the rewritten body.
     let mut current = body;
     let mut consumed: std::collections::HashSet<String> = Default::default();
-    for (sig, _count, rep) in candidates {
+    for (sig, _count, rep, _abort, target) in candidates {
         if consumed.contains(&sig) {
             continue;
         }
         // Re-verify the signature still has ≥2 occurrences in
         // `current` (a previous round may have rewritten some away).
-        let mut recheck: HashMap<String, usize> = HashMap::new();
-        count_signatures_only(&current, &mut recheck);
-        if recheck.get(&sig).copied().unwrap_or(0) < 2 {
+        let occurrences = Occurrences::of(&current, &sig, target);
+        if occurrences.counted < 2 {
             continue;
         }
         let w_id = VarId::fresh_binding();
@@ -273,7 +278,7 @@ fn wrap_with_extracted_lets(body: PseudoExpr, abort_only: bool) -> PseudoExpr {
             name: w_name.clone(),
             id: Some(w_id),
         };
-        current = substitute_by_sig(current, &sig, &w_var);
+        substitute_in_place(&mut current, &occurrences.nodes, &w_var);
         current = PseudoExpr::Let {
             name: w_name,
             id: Some(w_id),
@@ -285,19 +290,299 @@ fn wrap_with_extracted_lets(body: PseudoExpr, abort_only: bool) -> PseudoExpr {
     current
 }
 
-fn collect_signatures(
-    expr: &PseudoExpr,
-    counts: &mut HashMap<String, usize>,
-    reps: &mut HashMap<String, PseudoExpr>,
-) {
-    let mut pending: Vec<&PseudoExpr> = vec![expr];
-    while let Some(cur) = pending.pop() {
-        if is_extractable(cur) {
-            let sig = signature(cur);
-            *counts.entry(sig.clone()).or_insert(0) += 1;
-            reps.entry(sig).or_insert_with(|| cur.clone());
+/// What the extraction asks about each node of one body, folded bottom-up
+/// in a single walk.
+///
+/// Asked one subtree walk at a time — the node count, the effect scans, the
+/// signature string — at every node, the questions cost time and memory
+/// quadratic in the body's depth, and a script picks its depth: 32 KiB of
+/// flat nests tens of thousands of constructors.
+struct Facts {
+    of: HashMap<*const PseudoExpr, NodeFacts>,
+}
+
+#[derive(Clone, Copy)]
+struct NodeFacts {
+    /// [`count_nodes`].
+    size: usize,
+    /// Holds an observable effect — a `trace` or a messaged `fail`, pattern
+    /// literals included — which bars extraction.
+    effect: bool,
+    /// Holds a bare `Error { message: None }`, pattern literals included.
+    bare_abort: bool,
+    /// Eager evaluation always reaches an abort (`Error`, bare or messaged)
+    /// before producing a value, through [`eager_children`] only.
+    eager_abort: bool,
+    /// Worth extracting: not trivial, at least five nodes, free of effects,
+    /// not a builtin call on literals alone.
+    extractable: bool,
+    /// A hash of what [`Canon`] writes for the node, binder placeholders and
+    /// variable references left out. Nodes with one signature share it, so a
+    /// signature is only built for a node that shares its shape.
+    shape: u64,
+}
+
+impl Facts {
+    fn of(root: &PseudoExpr) -> Self {
+        let mut of: HashMap<*const PseudoExpr, NodeFacts> = HashMap::new();
+        // Post-order over every child, pattern literals included: a node is
+        // folded once all of its children are.
+        let mut pending: Vec<(&PseudoExpr, bool)> = vec![(root, false)];
+        let mut kids: Vec<&PseudoExpr> = Vec::new();
+        while let Some((node, expanded)) = pending.pop() {
+            if expanded {
+                let facts = NodeFacts::fold(node, &of);
+                of.insert(node as *const PseudoExpr, facts);
+                continue;
+            }
+            pending.push((node, true));
+            kids.clear();
+            node.child_refs_into(&mut kids);
+            pending.extend(kids.iter().map(|kid| (*kid, false)));
         }
-        pending.extend(scope_children(cur).into_iter().rev());
+        Facts { of }
+    }
+
+    fn get(&self, node: &PseudoExpr) -> NodeFacts {
+        self.of[&(node as *const PseudoExpr)]
+    }
+}
+
+impl NodeFacts {
+    /// The node's facts from its children's, which `of` already holds.
+    fn fold(node: &PseudoExpr, of: &HashMap<*const PseudoExpr, NodeFacts>) -> NodeFacts {
+        let get = |child: &PseudoExpr| of[&(child as *const PseudoExpr)];
+        let mut all: Vec<&PseudoExpr> = Vec::new();
+        node.child_refs_into(&mut all);
+
+        let size = 1 + scope_children(node)
+            .into_iter()
+            .map(|child| get(child).size)
+            .sum::<usize>();
+        let effect = is_trace_node(node)
+            || matches!(node, PseudoExpr::Error { message: Some(_) })
+            || all.iter().any(|child| get(child).effect);
+        let bare_abort = matches!(node, PseudoExpr::Error { message: None })
+            || all.iter().any(|child| get(child).bare_abort);
+        let eager_abort = match node {
+            PseudoExpr::Error { .. } => true,
+            PseudoExpr::Let { value, body, .. } => get(value).eager_abort || get(body).eager_abort,
+            other => eager_children(other)
+                .into_iter()
+                .any(|child| get(child).eager_abort),
+        };
+        // BuiltinCall with only literal args — extracting just adds a
+        // let with no readability gain.
+        let literal_call = matches!(node, PseudoExpr::BuiltinCall { args, .. } if args.iter().all(|a| {
+            matches!(
+                a,
+                PseudoExpr::Int(_)
+                    | PseudoExpr::ByteArray(_)
+                    | PseudoExpr::String(_)
+                    | PseudoExpr::Bool(_)
+                    | PseudoExpr::Unit
+            )
+        }));
+        // Never extract an expression containing an observable effect: a
+        // `trace` or a messaged `fail`. Extraction dedups occurrences —
+        // merging two identical `trace`s into one changes the emitted
+        // log — and hoists the value to the top of the body, which can
+        // move the emission ahead of a preceding binding that would
+        // itself have diverged first. `collect_eval_position_sigs`
+        // already prevents hoisting out of a conditional; this covers
+        // the sequential-reordering case.
+        let extractable = extractable_kind(node) && !effect && !literal_call && size >= 5;
+
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        hash_own_shape(node, &mut hasher);
+        for child in &all {
+            get(child).shape.hash(&mut hasher);
+        }
+        NodeFacts {
+            size,
+            effect,
+            bare_abort,
+            eager_abort,
+            extractable,
+            shape: hasher.finish(),
+        }
+    }
+}
+
+/// Worth extracting by kind alone — the size and effect gates aside:
+/// - Not itself a `Let`, `Lambda`, or `RecFn` (those open new scopes).
+/// - Not a trivial projector (`Var`, a literal, `var.fst`, etc.).
+fn extractable_kind(expr: &PseudoExpr) -> bool {
+    if matches!(
+        expr,
+        PseudoExpr::Var { .. }
+            | PseudoExpr::Int(_)
+            | PseudoExpr::ByteArray(_)
+            | PseudoExpr::String(_)
+            | PseudoExpr::Bool(_)
+            | PseudoExpr::Unit
+            | PseudoExpr::Let { .. }
+            | PseudoExpr::Lambda { .. }
+            | PseudoExpr::RecFn { .. }
+    ) {
+        return false;
+    }
+    // FieldAccess on a Var (e.g., `x.fst`) is trivial.
+    !matches!(expr, PseudoExpr::FieldAccess { record, .. } if matches!(record.as_ref(), PseudoExpr::Var { .. }))
+}
+
+/// Feed `hasher` the part of [`Canon`]'s text that is the node's own: its
+/// kind and its non-child data, but no binder placeholder or variable
+/// reference. Equal signatures therefore always hash alike; the converse is
+/// left to the signature itself.
+fn hash_own_shape(expr: &PseudoExpr, hasher: &mut impl Hasher) {
+    use crate::pseudo::ast::WhenPattern;
+
+    std::mem::discriminant(expr).hash(hasher);
+    match expr {
+        PseudoExpr::Lambda { params, .. } | PseudoExpr::RecFn { params, .. } => {
+            params.len().hash(hasher)
+        }
+        PseudoExpr::Apply { args, .. } => args.len().hash(hasher),
+        PseudoExpr::When { clauses, .. } => {
+            clauses.len().hash(hasher);
+            for clause in clauses {
+                std::mem::discriminant(&clause.pattern).hash(hasher);
+                match &clause.pattern {
+                    WhenPattern::Constructor { tag, fields, .. } => {
+                        tag.hash(hasher);
+                        fields.len().hash(hasher);
+                    }
+                    WhenPattern::List { elements, tail } => {
+                        elements.len().hash(hasher);
+                        tail.is_some().hash(hasher);
+                    }
+                    WhenPattern::Tuple(fields) => fields.len().hash(hasher),
+                    WhenPattern::Pair(..)
+                    | WhenPattern::Wildcard
+                    | WhenPattern::Literal(_)
+                    | WhenPattern::Var(_) => {}
+                }
+                clause.guard.is_some().hash(hasher);
+            }
+        }
+        PseudoExpr::List { elements, tail } => {
+            elements.len().hash(hasher);
+            tail.is_some().hash(hasher);
+        }
+        PseudoExpr::Tuple(elements) => elements.len().hash(hasher),
+        PseudoExpr::Constr {
+            tag, fields, shape, ..
+        } => {
+            tag.hash(hasher);
+            format!("{:?}", shape).hash(hasher);
+            fields.len().hash(hasher);
+        }
+        PseudoExpr::FieldAccess { selector, .. } => format!("{:?}", selector).hash(hasher),
+        PseudoExpr::IndexAccess { index, .. } => index.hash(hasher),
+        PseudoExpr::BinOp { op, .. } => format!("{:?}", op).hash(hasher),
+        PseudoExpr::UnOp { op, .. } => format!("{:?}", op).hash(hasher),
+        PseudoExpr::BuiltinCall { name, args } => {
+            format!("{:?}", name).hash(hasher);
+            args.len().hash(hasher);
+        }
+        PseudoExpr::Int(n) => n.hash(hasher),
+        PseudoExpr::ByteArray(bytes) => bytes.hash(hasher),
+        PseudoExpr::String(text) => text.hash(hasher),
+        PseudoExpr::Bool(b) => b.hash(hasher),
+        PseudoExpr::Error { message } => message.hash(hasher),
+        PseudoExpr::HelperSymbol(symbol) => format!("{:?}", symbol).hash(hasher),
+        // The kind is all `Canon` writes of these (a `Data` or `Raw` payload
+        // is not written at all).
+        PseudoExpr::Var { .. }
+        | PseudoExpr::Let { .. }
+        | PseudoExpr::If { .. }
+        | PseudoExpr::Pair(..)
+        | PseudoExpr::Delay(_)
+        | PseudoExpr::Force(_)
+        | PseudoExpr::Trace { .. }
+        | PseudoExpr::Unit
+        | PseudoExpr::Raw { .. }
+        | PseudoExpr::Data(_) => {}
+    }
+}
+
+/// Whether `body` can hold a candidate at all, judged from its eager spine
+/// without building any facts.
+///
+/// A candidate sits in always-evaluated position and occurs twice, so it is
+/// never `body` itself — nothing inside `body` can repeat the whole of it —
+/// and, being at least five nodes, it has children. This walks a superset of
+/// the always-evaluated positions (it does not stop after an aborting or
+/// effectful sibling).
+fn may_hold_candidate(body: &PseudoExpr) -> bool {
+    let mut pending: Vec<&PseudoExpr> = Vec::new();
+    push_eval_position_children(body, &mut pending);
+    while let Some(current) = pending.pop() {
+        if extractable_kind(current) && !scope_children(current).is_empty() {
+            return true;
+        }
+        push_eval_position_children(current, &mut pending);
+    }
+    false
+}
+
+/// The children [`collect_eval_position_sigs`] descends into, before it
+/// stops at an aborting or effectful sibling.
+fn push_eval_position_children<'a>(expr: &'a PseudoExpr, out: &mut Vec<&'a PseudoExpr>) {
+    match expr {
+        PseudoExpr::If { condition, .. } => out.push(condition),
+        PseudoExpr::When { subject, .. } => out.push(subject),
+        PseudoExpr::BinOp {
+            op: BinaryOp::And | BinaryOp::Or,
+            left,
+            ..
+        } => out.push(left),
+        PseudoExpr::Delay(_) | PseudoExpr::Lambda { .. } | PseudoExpr::RecFn { .. } => {}
+        other => out.extend(scope_children(other)),
+    }
+}
+
+/// Occurrence counts of the signatures `body`'s extractable nodes share,
+/// over the nodes a pre-order walk through [`scope_children`] meets.
+///
+/// A node whose shape no other extractable node has cannot share its
+/// signature: it occurs once, can never be a candidate, and its signature —
+/// a string as long as its subtree — is never built.
+struct SharedSignatures<'a> {
+    /// Signature → (occurrences, first occurrence in pre-order).
+    counts: HashMap<String, (usize, &'a PseudoExpr)>,
+    /// The signature of each node counted in `counts`.
+    of: HashMap<*const PseudoExpr, String>,
+}
+
+impl<'a> SharedSignatures<'a> {
+    fn of(body: &'a PseudoExpr, facts: &Facts) -> Self {
+        let mut extractable: Vec<&'a PseudoExpr> = Vec::new();
+        let mut pending: Vec<&'a PseudoExpr> = vec![body];
+        while let Some(current) = pending.pop() {
+            if facts.get(current).extractable {
+                extractable.push(current);
+            }
+            pending.extend(scope_children(current).into_iter().rev());
+        }
+        let mut per_shape: HashMap<(u64, usize), usize> = HashMap::new();
+        for node in &extractable {
+            let f = facts.get(node);
+            *per_shape.entry((f.shape, f.size)).or_insert(0) += 1;
+        }
+        let mut counts: HashMap<String, (usize, &'a PseudoExpr)> = HashMap::new();
+        let mut of = HashMap::new();
+        for node in extractable {
+            let f = facts.get(node);
+            if per_shape[&(f.shape, f.size)] < 2 {
+                continue;
+            }
+            let sig = signature(node);
+            counts.entry(sig.clone()).or_insert((0, node)).0 += 1;
+            of.insert(node as *const PseudoExpr, sig);
+        }
+        SharedSignatures { counts, of }
     }
 }
 
@@ -311,11 +596,19 @@ fn collect_signatures(
 /// strictness/termination. Conservative — a value in fact always
 /// evaluated but reachable only under a `force(delay …)` is skipped
 /// too, costing a missed extraction, never an unsafe one.
-fn collect_eval_position_sigs(expr: &PseudoExpr, out: &mut std::collections::HashSet<String>) {
+///
+/// Only shared signatures are recorded: any other occurs once and can never
+/// be a candidate.
+fn collect_eval_position_sigs(
+    expr: &PseudoExpr,
+    facts: &Facts,
+    shared: &SharedSignatures<'_>,
+) -> std::collections::HashSet<String> {
+    let mut out: std::collections::HashSet<String> = Default::default();
     let mut pending: Vec<&PseudoExpr> = vec![expr];
     while let Some(cur) = pending.pop() {
-        if is_extractable(cur) {
-            out.insert(signature(cur));
+        if let Some(sig) = shared.of.get(&(cur as *const PseudoExpr)) {
+            out.insert(sig.clone());
         }
         match cur {
             // Only the condition is always evaluated; the branches are not.
@@ -346,7 +639,8 @@ fn collect_eval_position_sigs(expr: &PseudoExpr, out: &mut std::collections::Has
                     // sibling's candidate to the root top would reorder it
                     // ahead of the emission, so a trace is an abort boundary
                     // too.
-                    if eager_aborts(c) || contains_effect(c) {
+                    let f = facts.get(c);
+                    if f.eager_abort || f.effect {
                         break;
                     }
                 }
@@ -354,53 +648,66 @@ fn collect_eval_position_sigs(expr: &PseudoExpr, out: &mut std::collections::Has
             }
         }
     }
+    out
 }
 
-/// Does eager evaluation of `expr` ALWAYS reach an abort (`Error`, bare or
-/// messaged) before producing a value? `collect_eval_position_sigs` uses
-/// it to stop treating later siblings as always-evaluated once an earlier
-/// sibling unconditionally aborts. Conditional aborts (inside an `if`/`when`
-/// branch, `&&`/`||` right operand, or a thunk) do NOT count — only the
-/// eager spine. Fail-closed: anything not provably an unconditional abort
-/// returns false.
-fn eager_aborts(expr: &PseudoExpr) -> bool {
-    let mut pending: Vec<&PseudoExpr> = vec![expr];
-    while let Some(current) = pending.pop() {
-        match current {
-            PseudoExpr::Error { .. } => return true,
-            // Trivial-total leaves + lazy positions never unconditionally abort.
-            PseudoExpr::Var { .. }
-            | PseudoExpr::Int(_)
-            | PseudoExpr::ByteArray(_)
-            | PseudoExpr::String(_)
-            | PseudoExpr::Bool(_)
-            | PseudoExpr::Unit
-            | PseudoExpr::Data(_)
-            | PseudoExpr::HelperSymbol(_)
-            | PseudoExpr::Delay(_)
-            | PseudoExpr::Lambda { .. }
-            | PseudoExpr::RecFn { .. } => {}
-            PseudoExpr::Let { value, body, .. } => {
-                pending.push(value);
-                pending.push(body);
+/// Where `sig` occurs in `expr`: how often among the nodes a pre-order walk
+/// through [`scope_children`] meets (what decides whether it is still worth a
+/// `let`), and every node a substitution replaces — pattern-literal payloads
+/// included.
+struct Occurrences {
+    counted: usize,
+    nodes: std::collections::HashSet<*const PseudoExpr>,
+}
+
+impl Occurrences {
+    /// `target` is the facts of a node with signature `sig`: every node with
+    /// that signature shares its shape and size.
+    fn of(expr: &PseudoExpr, sig: &str, target: NodeFacts) -> Self {
+        use crate::pseudo::ast::WhenPattern;
+
+        let facts = Facts::of(expr);
+        let mut counted = 0;
+        let mut nodes = std::collections::HashSet::new();
+        // (node, reached without passing through a pattern-literal payload)
+        let mut pending: Vec<(&PseudoExpr, bool)> = vec![(expr, true)];
+        let mut kids: Vec<&PseudoExpr> = Vec::new();
+        while let Some((current, scoped)) = pending.pop() {
+            let f = facts.get(current);
+            // An occurrence's descendants are smaller, so none of them can
+            // share its signature: no need to look inside.
+            if f.extractable
+                && f.shape == target.shape
+                && f.size == target.size
+                && signature(current) == sig
+            {
+                nodes.insert(current as *const PseudoExpr);
+                if scoped {
+                    counted += 1;
+                }
+                continue;
             }
-            // A generic node aborts iff some eager child (in eval order) aborts.
-            // `eager_children` already restricts If/When/&&||/Delay to their
-            // always-evaluated parts, so conditional aborts are excluded.
-            other => pending.extend(eager_children(other)),
+            if let PseudoExpr::When {
+                subject, clauses, ..
+            } = current
+            {
+                pending.push((subject, scoped));
+                for clause in clauses {
+                    if let WhenPattern::Literal(lit) = &clause.pattern {
+                        pending.push((lit, false));
+                    }
+                    if let Some(guard) = &clause.guard {
+                        pending.push((guard, scoped));
+                    }
+                    pending.push((&clause.body, scoped));
+                }
+            } else {
+                kids.clear();
+                current.child_refs_into(&mut kids);
+                pending.extend(kids.iter().map(|kid| (*kid, scoped)));
+            }
         }
-    }
-    false
-}
-
-fn count_signatures_only(expr: &PseudoExpr, counts: &mut HashMap<String, usize>) {
-    let mut pending: Vec<&PseudoExpr> = vec![expr];
-    while let Some(cur) = pending.pop() {
-        if is_extractable(cur) {
-            let sig = signature(cur);
-            *counts.entry(sig).or_insert(0) += 1;
-        }
-        pending.extend(scope_children(cur));
+        Occurrences { counted, nodes }
     }
 }
 
@@ -531,94 +838,100 @@ pub(super) fn pattern_binders(p: &crate::pseudo::ast::WhenPattern) -> Vec<VarId>
     }
 }
 
-fn substitute_by_sig(expr: PseudoExpr, target_sig: &str, replacement: &PseudoExpr) -> PseudoExpr {
-    struct Substitute<'a> {
-        target_sig: &'a str,
-        replacement: &'a PseudoExpr,
-    }
-
-    impl ExprFolder for Substitute<'_> {
-        // Folded flat: this implementation overrides none of
-        // `fold_when` / `fold_clause` / `fold_pattern`, so the machine
-        // can reassemble a `when` itself instead of recursing through
-        // the hook once per nesting level.
-        fn machine_folds_when(&self) -> bool {
-            true
+/// Replace every node of `targets` in `expr` with `replacement`.
+///
+/// In place, so the nodes still sit at the addresses they were found at.
+/// The targets never nest — two nodes with one signature have one size — so
+/// the order they are met in does not matter.
+fn substitute_in_place(
+    expr: &mut PseudoExpr,
+    targets: &std::collections::HashSet<*const PseudoExpr>,
+    replacement: &PseudoExpr,
+) {
+    let mut pending: Vec<&mut PseudoExpr> = vec![expr];
+    while let Some(node) = pending.pop() {
+        if targets.contains(&(&*node as *const PseudoExpr)) {
+            *node = replacement.clone();
+            continue;
         }
-        fn pre_expr(&mut self, expr: &PseudoExpr) -> FoldAction {
-            if is_extractable(expr) && signature(expr) == self.target_sig {
-                FoldAction::Replace(self.replacement.clone())
-            } else {
-                FoldAction::Walk
-            }
-        }
+        push_children_mut(node, &mut pending);
     }
-
-    Substitute {
-        target_sig,
-        replacement,
-    }
-    .fold(expr)
 }
 
-/// Worth extracting when:
-/// - Non-trivial size (≥ 5 nodes — accounts for the `let X = V; …`
-///   wrapping cost so size-4 duplicates are a wash, not a win).
-/// - Not itself a `Let`, `Lambda`, or `RecFn` (those open new scopes).
-/// - Not a trivial projector (`Var`, `var.fst`, etc.).
-/// - Free of observable effects (`trace`, messaged `fail`).
-/// - Not a small `BuiltinCall` whose args are all literals
-///   (extracting `add(1, 2)` is shorter inlined).
-fn is_extractable(expr: &PseudoExpr) -> bool {
-    if matches!(
-        expr,
-        PseudoExpr::Var { .. }
-            | PseudoExpr::Int(_)
-            | PseudoExpr::ByteArray(_)
-            | PseudoExpr::String(_)
-            | PseudoExpr::Bool(_)
-            | PseudoExpr::Unit
-            | PseudoExpr::Let { .. }
-            | PseudoExpr::Lambda { .. }
-            | PseudoExpr::RecFn { .. }
-    ) {
-        return false;
-    }
-    // FieldAccess on a Var (e.g., `x.fst`) is trivial.
-    if let PseudoExpr::FieldAccess { record, .. } = expr {
-        if matches!(record.as_ref(), PseudoExpr::Var { .. }) {
-            return false;
+/// Every child of `expr`, pattern-literal payloads included — the mutable
+/// counterpart of [`PseudoExpr::child_refs_into`].
+fn push_children_mut<'a>(expr: &'a mut PseudoExpr, out: &mut Vec<&'a mut PseudoExpr>) {
+    use crate::pseudo::ast::WhenPattern;
+
+    match expr {
+        PseudoExpr::Lambda { body, .. } | PseudoExpr::RecFn { body, .. } => out.push(body),
+        PseudoExpr::Apply { function, args } => {
+            out.push(function);
+            out.extend(args.iter_mut());
         }
-    }
-    // Never extract an expression containing an observable effect: a
-    // `trace` or a messaged `fail`. Extraction dedups occurrences —
-    // merging two identical `trace`s into one changes the emitted
-    // log — and hoists the value to the top of the body, which can
-    // move the emission ahead of a preceding binding that would
-    // itself have diverged first. `collect_eval_position_sigs`
-    // already prevents hoisting out of a conditional; this covers
-    // the sequential-reordering case.
-    if contains_effect(expr) {
-        return false;
-    }
-    // BuiltinCall with only literal args — extracting just adds a
-    // let with no readability gain.
-    if let PseudoExpr::BuiltinCall { args, .. } = expr {
-        let all_literal = args.iter().all(|a| {
-            matches!(
-                a,
-                PseudoExpr::Int(_)
-                    | PseudoExpr::ByteArray(_)
-                    | PseudoExpr::String(_)
-                    | PseudoExpr::Bool(_)
-                    | PseudoExpr::Unit
-            )
-        });
-        if all_literal {
-            return false;
+        PseudoExpr::Let { value, body, .. } => {
+            out.push(value);
+            out.push(body);
         }
+        PseudoExpr::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            out.push(condition);
+            out.push(then_branch);
+            out.push(else_branch);
+        }
+        PseudoExpr::When {
+            subject, clauses, ..
+        } => {
+            out.push(subject);
+            for clause in clauses.iter_mut() {
+                if let WhenPattern::Literal(lit) = &mut clause.pattern {
+                    out.push(lit);
+                }
+                if let Some(guard) = clause.guard.as_mut() {
+                    out.push(guard);
+                }
+                out.push(&mut clause.body);
+            }
+        }
+        PseudoExpr::List { elements, tail } => {
+            out.extend(elements.iter_mut());
+            if let Some(tail) = tail {
+                out.push(tail);
+            }
+        }
+        PseudoExpr::Tuple(elements) => out.extend(elements.iter_mut()),
+        PseudoExpr::Pair(first, second) => {
+            out.push(first);
+            out.push(second);
+        }
+        PseudoExpr::Constr { fields, .. } => out.extend(fields.iter_mut()),
+        PseudoExpr::FieldAccess { record, .. } => out.push(record),
+        PseudoExpr::IndexAccess { collection, .. } => out.push(collection),
+        PseudoExpr::BinOp { left, right, .. } => {
+            out.push(left);
+            out.push(right);
+        }
+        PseudoExpr::UnOp { operand, .. } => out.push(operand),
+        PseudoExpr::BuiltinCall { args, .. } => out.extend(args.iter_mut()),
+        PseudoExpr::Delay(inner) | PseudoExpr::Force(inner) => out.push(inner),
+        PseudoExpr::Trace { message, value } => {
+            out.push(message);
+            out.push(value);
+        }
+        PseudoExpr::Int(_)
+        | PseudoExpr::ByteArray(_)
+        | PseudoExpr::String(_)
+        | PseudoExpr::Bool(_)
+        | PseudoExpr::Unit
+        | PseudoExpr::Var { .. }
+        | PseudoExpr::Error { .. }
+        | PseudoExpr::Raw { .. }
+        | PseudoExpr::Data(_)
+        | PseudoExpr::HelperSymbol(_) => {}
     }
-    count_nodes(expr) >= 5
 }
 
 pub(super) fn count_nodes(expr: &PseudoExpr) -> usize {
@@ -637,7 +950,7 @@ pub(super) fn count_nodes(expr: &PseudoExpr) -> usize {
 /// extraction and count as "risky" for the eager-spine-head check (the
 /// emit precedes the returned value).
 ///
-/// `contains_effect`, below, blocks on those and on
+/// The effect gate ([`NodeFacts::effect`]) blocks on those and on
 /// `Error { message: Some(_) }` — the message is observable. A bare
 /// `Error { message: None }` (what a `_ -> fail` guard becomes once the
 /// earlier `collapse_trace_fail_let` strips its trace message) is NOT
@@ -652,50 +965,6 @@ fn is_trace_node(expr: &PseudoExpr) -> bool {
         PseudoExpr::BuiltinCall { name, .. } => *name == crate::BuiltinId::Trace,
         _ => false,
     }
-}
-
-fn contains_effect(expr: &PseudoExpr) -> bool {
-    let mut pending: Vec<&PseudoExpr> = vec![expr];
-    while let Some(current) = pending.pop() {
-        if is_trace_node(current) || matches!(current, PseudoExpr::Error { message: Some(_) }) {
-            return true;
-        }
-        // A bare `Error { message: None }` is non-blocking (see above).
-        // `scope_children` omits `WhenPattern::Literal` payloads, which are
-        // real executable sub-expressions — check them explicitly so an
-        // effect inside one can't evade the gate.
-        if let PseudoExpr::When { clauses, .. } = current {
-            for c in clauses {
-                if let crate::pseudo::ast::WhenPattern::Literal(e) = &c.pattern {
-                    pending.push(e);
-                }
-            }
-        }
-        pending.extend(scope_children(current));
-    }
-    false
-}
-
-/// Does `expr` contain a bare `Error { message: None }` anywhere? Such a
-/// candidate is sound to hoist ONLY when its abort cannot be reordered
-/// ahead of an earlier effect — see `first_occurrence_dominates`.
-fn contains_bare_abort(expr: &PseudoExpr) -> bool {
-    let mut pending: Vec<&PseudoExpr> = vec![expr];
-    while let Some(current) = pending.pop() {
-        if matches!(current, PseudoExpr::Error { message: None }) {
-            return true;
-        }
-        // `scope_children` omits `WhenPattern::Literal` payloads — check them too.
-        if let PseudoExpr::When { clauses, .. } = current {
-            for c in clauses {
-                if let crate::pseudo::ast::WhenPattern::Literal(e) = &c.pattern {
-                    pending.push(e);
-                }
-            }
-        }
-        pending.extend(scope_children(current));
-    }
-    false
 }
 
 enum EagerHit {
@@ -721,7 +990,7 @@ fn eager_children(expr: &PseudoExpr) -> Vec<&PseudoExpr> {
     }
 }
 
-fn eager_first(expr: &PseudoExpr, sig: &str) -> EagerHit {
+fn eager_first(expr: &PseudoExpr, is_target: &dyn Fn(&PseudoExpr) -> bool) -> EagerHit {
     enum Frame<'a> {
         // Awaiting the result of a Let's `value`; `body` runs next only if
         // that result was `Nothing`.
@@ -742,7 +1011,7 @@ fn eager_first(expr: &PseudoExpr, sig: &str) -> EagerHit {
         // Descend from `node`, pushing frames, until something resolves to
         // a concrete EagerHit.
         let mut result = loop {
-            if signature(node) == sig {
+            if is_target(node) {
                 break EagerHit::Candidate;
             }
             if is_trace_node(node) {
@@ -811,8 +1080,8 @@ fn eager_first(expr: &PseudoExpr, sig: &str) -> EagerHit {
 /// candidate is reached before any other non-trivial node's own
 /// (possibly-aborting) operation, so hoisting `let w = E` to the top keeps E
 /// at its original first position and reorders its abort ahead of nothing.
-fn first_occurrence_dominates(body: &PseudoExpr, sig: &str) -> bool {
-    matches!(eager_first(body, sig), EagerHit::Candidate)
+fn first_occurrence_dominates(body: &PseudoExpr, is_target: impl Fn(&PseudoExpr) -> bool) -> bool {
+    matches!(eager_first(body, &is_target), EagerHit::Candidate)
 }
 
 /// Alpha-canonical signature. Same scheme as
