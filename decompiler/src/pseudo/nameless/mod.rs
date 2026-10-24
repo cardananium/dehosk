@@ -419,6 +419,90 @@ impl NamelessExpr {
         }
     }
 
+    /// Mutable slots for this node's direct children, in
+    /// [`Self::child_refs_into`] order — for walks that take a node's
+    /// children out and put the rewritten ones back in place.
+    pub(crate) fn child_slots_mut(&mut self) -> Vec<&mut NamelessExpr> {
+        let mut out: Vec<&mut NamelessExpr> = Vec::new();
+        match self {
+            NamelessExpr::Lambda { body, .. } | NamelessExpr::RecFn { body, .. } => {
+                out.push(body.as_mut());
+            }
+            NamelessExpr::Apply { function, args } => {
+                out.push(function.as_mut());
+                out.extend(args.iter_mut());
+            }
+            NamelessExpr::Let { value, body, .. } => {
+                out.push(value.as_mut());
+                out.push(body.as_mut());
+            }
+            NamelessExpr::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                out.push(condition.as_mut());
+                out.push(then_branch.as_mut());
+                out.push(else_branch.as_mut());
+            }
+            NamelessExpr::When {
+                subject, clauses, ..
+            } => {
+                out.push(subject.as_mut());
+                for clause in clauses.iter_mut() {
+                    let NamelessClause {
+                        pattern,
+                        guard,
+                        body,
+                    } = clause;
+                    if let NamelessPattern::Literal(lit) = pattern {
+                        out.push(lit);
+                    }
+                    if let Some(guard) = guard {
+                        out.push(guard);
+                    }
+                    out.push(body);
+                }
+            }
+            NamelessExpr::List { elements, tail } => {
+                out.extend(elements.iter_mut());
+                if let Some(tail) = tail {
+                    out.push(tail.as_mut());
+                }
+            }
+            NamelessExpr::Tuple(items) => out.extend(items.iter_mut()),
+            NamelessExpr::Pair(first, second) => {
+                out.push(first.as_mut());
+                out.push(second.as_mut());
+            }
+            NamelessExpr::Constr { fields, .. } => out.extend(fields.iter_mut()),
+            NamelessExpr::FieldAccess { record, .. } => out.push(record.as_mut()),
+            NamelessExpr::IndexAccess { collection, .. } => out.push(collection.as_mut()),
+            NamelessExpr::BinOp { left, right, .. } => {
+                out.push(left.as_mut());
+                out.push(right.as_mut());
+            }
+            NamelessExpr::UnOp { operand, .. } => out.push(operand.as_mut()),
+            NamelessExpr::BuiltinCall { args, .. } => out.extend(args.iter_mut()),
+            NamelessExpr::Delay(inner) | NamelessExpr::Force(inner) => out.push(inner.as_mut()),
+            NamelessExpr::Trace { message, value } => {
+                out.push(message.as_mut());
+                out.push(value.as_mut());
+            }
+            NamelessExpr::Int(_)
+            | NamelessExpr::ByteArray(_)
+            | NamelessExpr::String(_)
+            | NamelessExpr::Bool(_)
+            | NamelessExpr::Unit
+            | NamelessExpr::Var(_)
+            | NamelessExpr::Error { .. }
+            | NamelessExpr::Raw { .. }
+            | NamelessExpr::Data(_)
+            | NamelessExpr::HelperSymbol(_) => {}
+        }
+        out
+    }
+
     /// Rebuild this node around already-cloned children.
     ///
     /// Non-child fields (binders, tags, shapes, selectors) hold no
