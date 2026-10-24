@@ -613,9 +613,13 @@ fn is_single_param_projection_accessor_nameless(params: &[VarId], body: &Nameles
         return false;
     }
     let param = params[0];
-    count_var_uses_nameless(body, param) == 1
+    // The spine test first: it reads only the projection chain, while the
+    // other two walk the whole body. A let-bound lambda's body holds every
+    // let-bound lambda nested in it, so walking it for each of them is
+    // quadratic in a nesting depth the script controls.
+    is_projection_accessor_expr_nameless(body, param, false)
+        && count_var_uses_nameless(body, param) == 1
         && !contains_control_flow_expr_nameless(body)
-        && is_projection_accessor_expr_nameless(body, param, false)
 }
 
 fn is_projection_accessor_expr_nameless(
