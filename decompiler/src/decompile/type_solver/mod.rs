@@ -35,12 +35,6 @@ use self::harvest::harvest_final_type_table;
 use self::seed_builtin_args::seed_builtin_arg_types;
 use self::seed_cardano::seed_cardano_context_types;
 
-fn child_path(path: &[u32], index: u32) -> Vec<u32> {
-    let mut child = path.to_vec();
-    child.push(index);
-    child
-}
-
 fn let_binding_key(id: Option<VarId>) -> BindingKey {
     BindingKey::VarId(id.unwrap_or_else(VarId::fresh_compat_placeholder))
 }
@@ -68,12 +62,7 @@ fn pattern_binders(pattern: &WhenPattern) -> Vec<crate::pseudo::ast::Binder> {
 /// Infer a type variable for an arbitrary expression.
 /// For Var/Let nodes returns their named var. For other expressions
 /// returns a fresh var constrained to the expression's obvious type.
-fn expr_type_var(
-    expr: &PseudoExpr,
-    solver: &mut TypeSolver,
-    env: &LexicalEnv,
-    path: &[u32],
-) -> TypeVarId {
+fn expr_type_var(expr: &PseudoExpr, solver: &mut TypeSolver, env: &LexicalEnv) -> TypeVarId {
     // Constr::Some/Cons and List each wrap a single non-tail recursive
     // call whose result feeds only a fresh-var + constrain_eq (or is
     // discarded); the wrapper always returns its own pre-allocated `tv`.
@@ -85,7 +74,6 @@ fn expr_type_var(
     let mut stack: Vec<Frame> = Vec::new();
     let mut cur_expr = expr;
     let mut cur_env: std::borrow::Cow<LexicalEnv> = std::borrow::Cow::Borrowed(env);
-    let mut cur_path: Vec<u32> = path.to_vec();
 
     let leaf_value: TypeVarId = 'descend: loop {
         let value = match cur_expr {
@@ -95,7 +83,6 @@ fn expr_type_var(
             PseudoExpr::Let { name, id, body, .. } => {
                 let binding_key = let_binding_key(*id);
                 cur_env.to_mut().push(name.clone(), binding_key);
-                cur_path = child_path(&cur_path, 1);
                 cur_expr = body;
                 continue 'descend;
             }
@@ -129,7 +116,6 @@ fn expr_type_var(
                 match shape.as_known() {
                     Some(KnownConstructor::Some) => {
                         stack.push(Frame::ConstrUnify { tv });
-                        cur_path = child_path(&cur_path, 0);
                         cur_expr = &fields[0];
                         continue 'descend;
                     }
@@ -148,7 +134,6 @@ fn expr_type_var(
                     }
                     Some(KnownConstructor::Cons) => {
                         stack.push(Frame::ConstrUnify { tv });
-                        cur_path = child_path(&cur_path, 0);
                         cur_expr = &fields[0];
                         continue 'descend;
                     }
@@ -204,7 +189,6 @@ fn expr_type_var(
             }
             // Then-branch type; the else branch is constrained equal.
             PseudoExpr::If { then_branch, .. } => {
-                cur_path = child_path(&cur_path, 1);
                 cur_expr = then_branch;
                 continue 'descend;
             }
@@ -238,24 +222,12 @@ fn expr_type_var(
             }
             PseudoExpr::When { clauses, .. } => {
                 // Type of when = type of first non-error clause body
-                let mut child_index = 1;
-                let mut matched = None;
-                for clause in clauses {
-                    if matches!(&clause.pattern, WhenPattern::Literal(_)) {
-                        child_index += 1;
-                    }
-                    if clause.guard.is_some() {
-                        child_index += 1;
-                    }
-                    if !matches!(&clause.body, PseudoExpr::Error { .. }) {
-                        matched = Some((&clause.body, child_index));
-                        break;
-                    }
-                    child_index += 1;
-                }
+                let matched = clauses
+                    .iter()
+                    .map(|clause| &clause.body)
+                    .find(|body| !matches!(body, PseudoExpr::Error { .. }));
                 match matched {
-                    Some((body, child_index)) => {
-                        cur_path = child_path(&cur_path, child_index);
+                    Some(body) => {
                         cur_expr = body;
                         continue 'descend;
                     }
@@ -265,7 +237,6 @@ fn expr_type_var(
             PseudoExpr::Trace {
                 value: trace_value, ..
             } => {
-                cur_path = child_path(&cur_path, 1);
                 cur_expr = trace_value;
                 continue 'descend;
             }
@@ -277,7 +248,6 @@ fn expr_type_var(
                         // type is left to `generate_constraints`; only
                         // walked for its constraint side effects.
                         stack.push(Frame::Discard { tv });
-                        cur_path = child_path(&cur_path, 0);
                         cur_expr = first;
                         continue 'descend;
                     }
@@ -407,20 +377,12 @@ fn is_inherently_bool(expr: &PseudoExpr) -> bool {
 
 /// Walk the AST: assign type variables (seeding from existing tipos) and
 /// generate forward unification constraints in a single pass.
-fn generate_constraints(
-    expr: &PseudoExpr,
-    solver: &mut TypeSolver,
-    env: &mut LexicalEnv,
-    path: &[u32],
-) {
+fn generate_constraints(expr: &PseudoExpr, solver: &mut TypeSolver, env: &mut LexicalEnv) {
     use crate::pseudo::ast::{Binder, WhenClause};
 
     enum Step<'a> {
         /// Walk one node: its own constraint work, then its children.
-        Visit {
-            expr: &'a PseudoExpr,
-            path: Vec<u32>,
-        },
+        Visit { expr: &'a PseudoExpr },
         /// `env.push` sitting between a `Let`'s value and body descents.
         PushBinding { name: String, key: BindingKey },
         /// Matching `env.pop`s, after the scoped child.
@@ -432,30 +394,20 @@ fn generate_constraints(
             index: usize,
             subject_name: Option<&'a Binder>,
             subject_tv: TypeVarId,
-            /// Path of the `when` node itself.
-            path: Vec<u32>,
-            /// Running child index at clause entry.
-            child_index: u32,
         },
         /// `body_tvs.push(expr_type_var(body))`, between the guard and body
         /// descents of a clause.
-        WhenBodyTv {
-            body: &'a PseudoExpr,
-            path: Vec<u32>,
-        },
+        WhenBodyTv { body: &'a PseudoExpr },
         /// Cross-clause body unification, then the subject descent — both run
         /// after every clause, as in the recursive original.
-        WhenFinish {
-            subject: &'a PseudoExpr,
-            path: Vec<u32>,
-        },
+        WhenFinish { subject: &'a PseudoExpr },
     }
 
-    fn visit<'a>(expr: &'a PseudoExpr, path: Vec<u32>) -> Step<'a> {
-        Step::Visit { expr, path }
+    fn visit(expr: &PseudoExpr) -> Step<'_> {
+        Step::Visit { expr }
     }
 
-    let mut stack: Vec<Step<'_>> = vec![visit(expr, path.to_vec())];
+    let mut stack: Vec<Step<'_>> = vec![visit(expr)];
     let mut body_tvs_stack: Vec<Vec<TypeVarId>> = Vec::new();
 
     while let Some(step) = stack.pop() {
@@ -466,44 +418,38 @@ fn generate_constraints(
                     env.pop();
                 }
             }
-            Step::WhenBodyTv { body, path } => {
+            Step::WhenBodyTv { body } => {
                 if !matches!(body, PseudoExpr::Error { .. }) {
-                    let tv = expr_type_var(body, solver, env, &path);
+                    let tv = expr_type_var(body, solver, env);
                     if let Some(body_tvs) = body_tvs_stack.last_mut() {
                         body_tvs.push(tv);
                     }
                 }
             }
-            Step::WhenFinish { subject, path } => {
+            Step::WhenFinish { subject } => {
                 let body_tvs = body_tvs_stack.pop().unwrap_or_default();
                 for pair in body_tvs.windows(2) {
                     solver.constrain_eq(pair[0], pair[1]);
                 }
-                stack.push(visit(subject, path));
+                stack.push(visit(subject));
             }
             Step::WhenClausePre {
                 clauses,
                 index,
                 subject_name,
                 subject_tv,
-                path,
-                child_index,
             } => {
                 let clause = &clauses[index];
-                let next_clause = |child_index: u32| {
+                let next_clause = || {
                     (index + 1 < clauses.len()).then(|| Step::WhenClausePre {
                         clauses,
                         index: index + 1,
                         subject_name,
                         subject_tv,
-                        path: path.clone(),
-                        child_index,
                     })
                 };
-                // Set by the `Literal` arm; every other arm leaves the clause's
-                // first child index untouched.
-                let mut literal: Option<(&PseudoExpr, Vec<u32>)> = None;
-                let mut child_index = child_index;
+                // Set by the `Literal` arm.
+                let mut literal: Option<&PseudoExpr> = None;
 
                 if let Some(subject_name) = subject_name {
                     env.push(subject_name.to_string(), BindingKey::VarId(subject_name.id));
@@ -574,9 +520,9 @@ fn generate_constraints(
                                 solver.constrain(left_tv, TypeExpr::Known(left.clone()));
                                 solver.constrain(right_tv, TypeExpr::Known(right.clone()));
                             }
-                            // No children, no `child_index` bump, and no
-                            // `env.pop` for this clause's binders.
-                            if let Some(next) = next_clause(child_index) {
+                            // No children, and no `env.pop` for this
+                            // clause's binders.
+                            if let Some(next) = next_clause() {
                                 stack.push(next);
                             }
                             continue;
@@ -701,47 +647,32 @@ fn generate_constraints(
                         }
                     }
                     WhenPattern::Literal(lit) => {
-                        let lit_path = child_path(&path, child_index);
-                        let lit_tv = expr_type_var(lit, solver, env, &lit_path);
+                        let lit_tv = expr_type_var(lit, solver, env);
                         solver.constrain_eq(subject_tv, lit_tv);
-                        literal = Some((lit, lit_path));
-                        child_index += 1;
+                        literal = Some(lit);
                     }
                     _ => {}
                 }
-
-                let guard = if let Some(guard) = clause.guard.as_ref() {
-                    let guard_path = child_path(&path, child_index);
-                    child_index += 1;
-                    Some((guard, guard_path))
-                } else {
-                    None
-                };
-                let body_path = child_path(&path, child_index);
-                child_index += 1;
 
                 let pop_count = binders.len() + usize::from(subject_name.is_some());
 
                 // Pushed in reverse of the order they run: literal, guard, body
                 // type var, body, the clause's `env.pop`s, then the next clause.
-                if let Some(next) = next_clause(child_index) {
+                if let Some(next) = next_clause() {
                     stack.push(next);
                 }
                 stack.push(Step::PopEnv { count: pop_count });
-                stack.push(visit(&clause.body, body_path.clone()));
-                stack.push(Step::WhenBodyTv {
-                    body: &clause.body,
-                    path: body_path,
-                });
-                if let Some((guard, guard_path)) = guard {
-                    stack.push(visit(guard, guard_path));
+                stack.push(visit(&clause.body));
+                stack.push(Step::WhenBodyTv { body: &clause.body });
+                if let Some(guard) = clause.guard.as_ref() {
+                    stack.push(visit(guard));
                 }
-                if let Some((lit, lit_path)) = literal {
-                    stack.push(visit(lit, lit_path));
+                if let Some(lit) = literal {
+                    stack.push(visit(lit));
                 }
             }
 
-            Step::Visit { expr, path } => match expr {
+            Step::Visit { expr } => match expr {
                 PseudoExpr::If {
                     condition,
                     then_branch,
@@ -750,13 +681,13 @@ fn generate_constraints(
                     // A plain Var condition may be Data checked by constructor tag, so
                     // only inherently-boolean conditions are constrained to Bool.
                     if is_inherently_bool(condition) {
-                        let cond_tv = expr_type_var(condition, solver, env, &child_path(&path, 0));
+                        let cond_tv = expr_type_var(condition, solver, env);
                         solver.constrain_known(cond_tv, PseudoType::Bool);
                     }
 
                     // Both branches share a type unless one is Error.
-                    let then_tv = expr_type_var(then_branch, solver, env, &child_path(&path, 1));
-                    let else_tv = expr_type_var(else_branch, solver, env, &child_path(&path, 2));
+                    let then_tv = expr_type_var(then_branch, solver, env);
+                    let else_tv = expr_type_var(else_branch, solver, env);
                     if !matches!(then_branch.as_ref(), PseudoExpr::Error { .. })
                         && !matches!(else_branch.as_ref(), PseudoExpr::Error { .. })
                     {
@@ -764,14 +695,14 @@ fn generate_constraints(
                     }
 
                     // Recurse
-                    stack.push(visit(else_branch, child_path(&path, 2)));
-                    stack.push(visit(then_branch, child_path(&path, 1)));
-                    stack.push(visit(condition, child_path(&path, 0)));
+                    stack.push(visit(else_branch));
+                    stack.push(visit(then_branch));
+                    stack.push(visit(condition));
                 }
 
                 PseudoExpr::BinOp { op, left, right } => {
-                    let left_tv = expr_type_var(left, solver, env, &child_path(&path, 0));
-                    let right_tv = expr_type_var(right, solver, env, &child_path(&path, 1));
+                    let left_tv = expr_type_var(left, solver, env);
+                    let right_tv = expr_type_var(right, solver, env);
 
                     match op {
                         BinaryOp::Add
@@ -805,18 +736,18 @@ fn generate_constraints(
                         }
                     }
 
-                    stack.push(visit(right, child_path(&path, 1)));
-                    stack.push(visit(left, child_path(&path, 0)));
+                    stack.push(visit(right));
+                    stack.push(visit(left));
                 }
 
                 PseudoExpr::UnOp { op, operand } => {
-                    let operand_tv = expr_type_var(operand, solver, env, &child_path(&path, 0));
+                    let operand_tv = expr_type_var(operand, solver, env);
                     match op {
                         UnaryOp::Not => solver.constrain_known(operand_tv, PseudoType::Bool),
                         UnaryOp::Negate => solver.constrain_known(operand_tv, PseudoType::Int),
                         UnaryOp::Length => {} // operand could be ByteArray or List
                     }
-                    stack.push(visit(operand, child_path(&path, 0)));
+                    stack.push(visit(operand));
                 }
 
                 PseudoExpr::Let {
@@ -828,18 +759,18 @@ fn generate_constraints(
                 } => {
                     let binding_key = let_binding_key(*id);
                     let name_tv = solver.var_for_binding_key(binding_key.clone());
-                    let value_tv = expr_type_var(value, solver, env, &child_path(&path, 0));
+                    let value_tv = expr_type_var(value, solver, env);
                     solver.constrain_eq(name_tv, value_tv);
 
                     // The binding lands between the two descents: the body must
                     // see it, the value must not.
                     stack.push(Step::PopEnv { count: 1 });
-                    stack.push(visit(body, child_path(&path, 1)));
+                    stack.push(visit(body));
                     stack.push(Step::PushBinding {
                         name: name.clone(),
                         key: binding_key,
                     });
-                    stack.push(visit(value, child_path(&path, 0)));
+                    stack.push(visit(value));
                 }
 
                 PseudoExpr::When {
@@ -847,25 +778,20 @@ fn generate_constraints(
                     subject_name,
                     clauses,
                 } => {
-                    let subject_tv = expr_type_var(subject, solver, env, &child_path(&path, 0));
+                    let subject_tv = expr_type_var(subject, solver, env);
                     if let Some(subject_name) = subject_name {
                         let subject_name_tv = solver.var_for_var_id(subject_name.id);
                         solver.constrain_eq(subject_name_tv, subject_tv);
                     }
 
                     body_tvs_stack.push(Vec::new());
-                    stack.push(Step::WhenFinish {
-                        subject,
-                        path: child_path(&path, 0),
-                    });
+                    stack.push(Step::WhenFinish { subject });
                     if !clauses.is_empty() {
                         stack.push(Step::WhenClausePre {
                             clauses: clauses.as_slice(),
                             index: 0,
                             subject_name: subject_name.as_ref(),
                             subject_tv,
-                            path,
-                            child_index: 1,
                         });
                     }
                 }
@@ -874,12 +800,11 @@ fn generate_constraints(
                     // Build a refined type from the field types and constrain the
                     // constructor's own type variable — Let bindings unify with it.
 
-                    let constr_tv = expr_type_var(expr, solver, env, &path);
+                    let constr_tv = expr_type_var(expr, solver, env);
 
                     match shape.as_known() {
                         Some(KnownConstructor::Some) => {
-                            let inner_tv =
-                                expr_type_var(&fields[0], solver, env, &child_path(&path, 0));
+                            let inner_tv = expr_type_var(&fields[0], solver, env);
                             // Build Option(typeof(field)) and constrain the constr to it.
                             let inner_resolved = solver.find(inner_tv);
                             let inner_type = match inner_resolved {
@@ -892,8 +817,7 @@ fn generate_constraints(
                             );
                         }
                         Some(KnownConstructor::Ok) => {
-                            let inner_tv =
-                                expr_type_var(&fields[0], solver, env, &child_path(&path, 0));
+                            let inner_tv = expr_type_var(&fields[0], solver, env);
                             let inner_resolved = solver.find(inner_tv);
                             let ok_type = match inner_resolved {
                                 TypeExpr::Known(t) => t,
@@ -906,8 +830,7 @@ fn generate_constraints(
                             );
                         }
                         Some(KnownConstructor::Error) => {
-                            let inner_tv =
-                                expr_type_var(&fields[0], solver, env, &child_path(&path, 0));
+                            let inner_tv = expr_type_var(&fields[0], solver, env);
                             let inner_resolved = solver.find(inner_tv);
                             let err_type = match inner_resolved {
                                 TypeExpr::Known(t) => t,
@@ -920,10 +843,8 @@ fn generate_constraints(
                             );
                         }
                         Some(KnownConstructor::Pair) => {
-                            let a_tv =
-                                expr_type_var(&fields[0], solver, env, &child_path(&path, 0));
-                            let b_tv =
-                                expr_type_var(&fields[1], solver, env, &child_path(&path, 1));
+                            let a_tv = expr_type_var(&fields[0], solver, env);
+                            let b_tv = expr_type_var(&fields[1], solver, env);
                             let a_resolved = solver.find(a_tv);
                             let b_resolved = solver.find(b_tv);
                             let fst_type = match a_resolved {
@@ -957,8 +878,7 @@ fn generate_constraints(
                             );
                         }
                         Some(KnownConstructor::Cons) => {
-                            let head_tv =
-                                expr_type_var(&fields[0], solver, env, &child_path(&path, 0));
+                            let head_tv = expr_type_var(&fields[0], solver, env);
                             let head_resolved = solver.find(head_tv);
                             let head_type = match head_resolved {
                                 TypeExpr::Known(t) => t,
@@ -981,9 +901,7 @@ fn generate_constraints(
                         Some(_) => {}
                     }
 
-                    for (index, field) in fields.iter().enumerate().rev() {
-                        stack.push(visit(field, child_path(&path, index as u32)));
-                    }
+                    stack.extend(fields.iter().rev().map(visit));
                 }
 
                 PseudoExpr::BuiltinCall { name, args } => {
@@ -994,8 +912,7 @@ fn generate_constraints(
                             BuiltinId::ListIsEmpty | BuiltinId::ListHead | BuiltinId::ListTail
                                 if n >= 1 =>
                             {
-                                let arg_tv =
-                                    expr_type_var(&args[0], solver, env, &child_path(&path, 0));
+                                let arg_tv = expr_type_var(&args[0], solver, env);
                                 solver.constrain_known(
                                     arg_tv,
                                     PseudoType::List(Rc::new(PseudoType::Unknown)),
@@ -1013,31 +930,26 @@ fn generate_constraints(
                             | BuiltinId::DataUnConstr
                                 if n >= 1 =>
                             {
-                                let arg_tv =
-                                    expr_type_var(&args[0], solver, env, &child_path(&path, 0));
+                                let arg_tv = expr_type_var(&args[0], solver, env);
                                 solver.constrain_known(arg_tv, PseudoType::Data);
                             }
                             BuiltinId::DataInt | BuiltinId::IntToData if n >= 1 => {
-                                let arg_tv =
-                                    expr_type_var(&args[0], solver, env, &child_path(&path, 0));
+                                let arg_tv = expr_type_var(&args[0], solver, env);
                                 solver.constrain_known(arg_tv, PseudoType::Int);
                             }
                             BuiltinId::DataByteArray | BuiltinId::ByteArrayToData if n >= 1 => {
-                                let arg_tv =
-                                    expr_type_var(&args[0], solver, env, &child_path(&path, 0));
+                                let arg_tv = expr_type_var(&args[0], solver, env);
                                 solver.constrain_known(arg_tv, PseudoType::ByteArray);
                             }
                             BuiltinId::DataList | BuiltinId::ListToData if n >= 1 => {
-                                let arg_tv =
-                                    expr_type_var(&args[0], solver, env, &child_path(&path, 0));
+                                let arg_tv = expr_type_var(&args[0], solver, env);
                                 solver.constrain_known(
                                     arg_tv,
                                     PseudoType::List(Rc::new(PseudoType::Data)),
                                 );
                             }
                             BuiltinId::DataMap | BuiltinId::MapToData if n >= 1 => {
-                                let arg_tv =
-                                    expr_type_var(&args[0], solver, env, &child_path(&path, 0));
+                                let arg_tv = expr_type_var(&args[0], solver, env);
                                 solver.constrain_known(
                                     arg_tv,
                                     PseudoType::List(Rc::new(PseudoType::Pair(
@@ -1047,12 +959,10 @@ fn generate_constraints(
                                 );
                             }
                             BuiltinId::DataConstr if n >= 2 => {
-                                let tag_tv =
-                                    expr_type_var(&args[0], solver, env, &child_path(&path, 0));
+                                let tag_tv = expr_type_var(&args[0], solver, env);
                                 solver.constrain_known(tag_tv, PseudoType::Int);
 
-                                let fields_tv =
-                                    expr_type_var(&args[1], solver, env, &child_path(&path, 1));
+                                let fields_tv = expr_type_var(&args[1], solver, env);
                                 solver.constrain_known(
                                     fields_tv,
                                     PseudoType::List(Rc::new(PseudoType::Data)),
@@ -1062,16 +972,12 @@ fn generate_constraints(
                         }
                     }
 
-                    for (index, arg) in args.iter().enumerate().rev() {
-                        stack.push(visit(arg, child_path(&path, index as u32)));
-                    }
+                    stack.extend(args.iter().rev().map(visit));
                 }
 
                 PseudoExpr::Apply { function, args } => {
-                    for (index, arg) in args.iter().enumerate().rev() {
-                        stack.push(visit(arg, child_path(&path, index as u32 + 1)));
-                    }
-                    stack.push(visit(function, child_path(&path, 0)));
+                    stack.extend(args.iter().rev().map(visit));
+                    stack.push(visit(function));
                 }
                 PseudoExpr::Lambda { body, params, .. } => {
                     for param in params {
@@ -1081,7 +987,7 @@ fn generate_constraints(
                     stack.push(Step::PopEnv {
                         count: params.len(),
                     });
-                    stack.push(visit(body, child_path(&path, 0)));
+                    stack.push(visit(body));
                 }
                 PseudoExpr::RecFn { name, params, body } => {
                     solver.var_for_var_id(name.id);
@@ -1093,29 +999,25 @@ fn generate_constraints(
                     stack.push(Step::PopEnv {
                         count: params.len() + 1,
                     });
-                    stack.push(visit(body, child_path(&path, 0)));
+                    stack.push(visit(body));
                 }
                 PseudoExpr::List { elements, tail } => {
                     if let Some(t) = tail {
-                        stack.push(visit(t, child_path(&path, elements.len() as u32)));
+                        stack.push(visit(t));
                     }
-                    for (index, element) in elements.iter().enumerate().rev() {
-                        stack.push(visit(element, child_path(&path, index as u32)));
-                    }
+                    stack.extend(elements.iter().rev().map(visit));
                 }
                 PseudoExpr::Tuple(elements) => {
-                    for (index, element) in elements.iter().enumerate().rev() {
-                        stack.push(visit(element, child_path(&path, index as u32)));
-                    }
+                    stack.extend(elements.iter().rev().map(visit));
                 }
                 PseudoExpr::Pair(a, b) => {
-                    stack.push(visit(b, child_path(&path, 1)));
-                    stack.push(visit(a, child_path(&path, 0)));
+                    stack.push(visit(b));
+                    stack.push(visit(a));
                 }
                 PseudoExpr::FieldAccess {
                     record, selector, ..
                 } => {
-                    let record_tv = expr_type_var(record, solver, env, &child_path(&path, 0));
+                    let record_tv = expr_type_var(record, solver, env);
                     match selector.as_pretty_name() {
                         "fields" | "tag" => {
                             solver.constrain_known(record_tv, PseudoType::Data);
@@ -1137,23 +1039,22 @@ fn generate_constraints(
                         }
                         _ => {}
                     }
-                    stack.push(visit(record, child_path(&path, 0)));
+                    stack.push(visit(record));
                 }
                 PseudoExpr::IndexAccess { collection, .. } => {
-                    let collection_tv =
-                        expr_type_var(collection, solver, env, &child_path(&path, 0));
+                    let collection_tv = expr_type_var(collection, solver, env);
                     solver.constrain_known(
                         collection_tv,
                         PseudoType::List(Rc::new(PseudoType::Unknown)),
                     );
-                    stack.push(visit(collection, child_path(&path, 0)));
+                    stack.push(visit(collection));
                 }
                 PseudoExpr::Trace { message, value } => {
-                    stack.push(visit(value, child_path(&path, 1)));
-                    stack.push(visit(message, child_path(&path, 0)));
+                    stack.push(visit(value));
+                    stack.push(visit(message));
                 }
                 PseudoExpr::Delay(inner) | PseudoExpr::Force(inner) => {
-                    stack.push(visit(inner, child_path(&path, 0)));
+                    stack.push(visit(inner));
                 }
                 PseudoExpr::Var { name, id, .. } => {
                     let _tv = solver.resolve_binding_in_env(name, id.get(), env);
@@ -1198,13 +1099,13 @@ pub(crate) fn solve_type_constraints_with_final_table_versioned(
     let mut env = LexicalEnv::default();
 
     // Pass 1: Assign type variables + generate forward constraints
-    generate_constraints(&expr, &mut solver, &mut env, &[]);
+    generate_constraints(&expr, &mut solver, &mut env);
 
     // Solve round 1 (forward)
     solver.solve();
 
     // Pass 2: Generate backward constraints (field types → container types)
-    generate_backward_constraints(&expr, &mut solver, &mut env, &[]);
+    generate_backward_constraints(&expr, &mut solver, &mut env);
 
     // Solve round 2 (backward)
     solver.solve();

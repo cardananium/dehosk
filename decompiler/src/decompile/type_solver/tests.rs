@@ -62,7 +62,7 @@ fn test_generate_constraints_uses_var_id_keys_for_id_backed_binders() {
 
     let mut solver = TypeSolver::new();
     let mut env = LexicalEnv::default();
-    generate_constraints(&expr, &mut solver, &mut env, &[]);
+    generate_constraints(&expr, &mut solver, &mut env);
 
     for id in [
         lambda_param.id,
@@ -122,7 +122,7 @@ fn test_compat_placeholder_let_is_tracked_by_var_id_key() {
 
     let mut solver = TypeSolver::new();
     let mut env = LexicalEnv::default();
-    generate_constraints(&expr, &mut solver, &mut env, &[]);
+    generate_constraints(&expr, &mut solver, &mut env);
 
     let PseudoExpr::Let { id, .. } = expr else {
         panic!("expected let");
