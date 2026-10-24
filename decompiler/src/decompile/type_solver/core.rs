@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -35,6 +36,16 @@ pub(super) struct TypeSolver {
     constraints: Vec<Constraint>,
     /// Map from binding identity to its type variable.
     pub(super) var_map: HashMap<BindingKey, TypeVarId>,
+    /// What [`Self::find`] already walked to, for every variable on the
+    /// walked chain. Valid while `parent` stays as it is, so it is cleared
+    /// and bypassed while [`Self::solve`] runs.
+    ///
+    /// Chains are never compressed — `unify` can write a merged type onto a
+    /// variable in the middle of one, so rewiring would change answers — and
+    /// one chain can be as long as the program. Without the memo, the
+    /// passes that look up every binder walk the same chain once per binder.
+    find_memo: RefCell<HashMap<TypeVarId, TypeExpr>>,
+    solving: bool,
 }
 
 #[derive(Default, Clone)]
@@ -66,6 +77,8 @@ impl TypeSolver {
             parent: HashMap::new(),
             constraints: Vec::new(),
             var_map: HashMap::new(),
+            find_memo: RefCell::new(HashMap::new()),
+            solving: false,
         }
     }
 
@@ -131,21 +144,57 @@ impl TypeSolver {
     }
 
     /// Find the representative for a type variable.
+    ///
+    /// A loop rather than a recursion: a chain of unified variables grows
+    /// with the program, which the script chooses.
     pub(super) fn find(&self, id: TypeVarId) -> TypeExpr {
-        match self.parent.get(&id) {
-            None => TypeExpr::Var(id),
-            Some(TypeExpr::Var(parent)) if *parent == id => TypeExpr::Var(id),
-            Some(TypeExpr::Var(parent)) => self.find(*parent),
-            Some(TypeExpr::Known(t)) => TypeExpr::Known(t.clone()),
+        if self.solving {
+            return self.walk_to_representative(id, |_| {});
+        }
+        if let Some(resolved) = self.find_memo.borrow().get(&id) {
+            return resolved.clone();
+        }
+        let mut walked = Vec::new();
+        let resolved = self.walk_to_representative(id, |link| walked.push(link));
+        let mut memo = self.find_memo.borrow_mut();
+        for link in walked {
+            memo.insert(link, resolved.clone());
+        }
+        resolved
+    }
+
+    /// Follow `parent` links from `id` to its representative, reporting each
+    /// variable that only links onward.
+    fn walk_to_representative(
+        &self,
+        id: TypeVarId,
+        mut on_link: impl FnMut(TypeVarId),
+    ) -> TypeExpr {
+        let mut current = id;
+        loop {
+            match self.parent.get(&current) {
+                None => return TypeExpr::Var(current),
+                Some(TypeExpr::Var(parent)) if *parent == current => {
+                    return TypeExpr::Var(current);
+                }
+                Some(TypeExpr::Var(parent)) => {
+                    on_link(current);
+                    current = *parent;
+                }
+                Some(TypeExpr::Known(t)) => return TypeExpr::Known(t.clone()),
+            }
         }
     }
 
     /// Process all constraints via unification.
     pub(super) fn solve(&mut self) {
         let constraints = std::mem::take(&mut self.constraints);
+        self.find_memo.get_mut().clear();
+        self.solving = true;
         for c in constraints {
             self.unify(c.left, c.right);
         }
+        self.solving = false;
     }
 
     /// Resolved concrete type for a final-AST `VarId`.
