@@ -128,18 +128,6 @@ impl Simplifier {
     }
 
     fn data_node_count(data: &PseudoData) -> usize {
-        match data {
-            PseudoData::Integer(_) | PseudoData::ByteString(_) => 1,
-            PseudoData::List(items) => 1 + items.iter().map(Self::data_node_count).sum::<usize>(),
-            PseudoData::Map(entries) => {
-                1 + entries
-                    .iter()
-                    .map(|(k, v)| Self::data_node_count(k) + Self::data_node_count(v))
-                    .sum::<usize>()
-            }
-            PseudoData::Constr(_, fields) => {
-                1 + fields.iter().map(Self::data_node_count).sum::<usize>()
-            }
-        }
+        data.nodes().count()
     }
 }

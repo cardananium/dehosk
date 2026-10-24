@@ -716,41 +716,58 @@ fn render_plutus_data_inline(d: &uplc::PlutusData) -> String {
     out
 }
 
+/// Writes from a job stack: a parameter's nesting is chosen by the script.
 fn push_pseudo_data_inline(out: &mut String, d: &PseudoData) {
-    match d {
-        PseudoData::Integer(n) => out.push_str(&n.to_string()),
-        PseudoData::ByteString(b) => out.push_str(&format_data_bytes(b)),
-        PseudoData::List(items) => {
-            out.push('[');
-            for (i, item) in items.iter().enumerate() {
-                if i > 0 {
-                    out.push_str(", ");
-                }
-                push_pseudo_data_inline(out, item);
+    enum Piece<'a> {
+        Node(&'a PseudoData),
+        Text(&'static str),
+    }
+
+    // Pushed in reverse, so they pop in output order.
+    let mut pending = vec![Piece::Node(d)];
+    while let Some(piece) = pending.pop() {
+        let d = match piece {
+            Piece::Text(text) => {
+                out.push_str(text);
+                continue;
             }
-            out.push(']');
-        }
-        PseudoData::Map(pairs) => {
-            out.push('{');
-            for (i, (k, v)) in pairs.iter().enumerate() {
-                if i > 0 {
-                    out.push_str(", ");
+            Piece::Node(d) => d,
+        };
+        match d {
+            PseudoData::Integer(n) => out.push_str(&n.to_string()),
+            PseudoData::ByteString(b) => out.push_str(&format_data_bytes(b)),
+            PseudoData::List(items) => {
+                out.push('[');
+                pending.push(Piece::Text("]"));
+                for (i, item) in items.iter().enumerate().rev() {
+                    pending.push(Piece::Node(item));
+                    if i > 0 {
+                        pending.push(Piece::Text(", "));
+                    }
                 }
-                push_pseudo_data_inline(out, k);
-                out.push_str(": ");
-                push_pseudo_data_inline(out, v);
             }
-            out.push('}');
-        }
-        PseudoData::Constr(tag, fields) => {
-            out.push_str(&format!("Constr({tag}, ["));
-            for (i, f) in fields.iter().enumerate() {
-                if i > 0 {
-                    out.push_str(", ");
+            PseudoData::Map(pairs) => {
+                out.push('{');
+                pending.push(Piece::Text("}"));
+                for (i, (k, v)) in pairs.iter().enumerate().rev() {
+                    pending.push(Piece::Node(v));
+                    pending.push(Piece::Text(": "));
+                    pending.push(Piece::Node(k));
+                    if i > 0 {
+                        pending.push(Piece::Text(", "));
+                    }
                 }
-                push_pseudo_data_inline(out, f);
             }
-            out.push_str("])");
+            PseudoData::Constr(tag, fields) => {
+                out.push_str(&format!("Constr({tag}, ["));
+                pending.push(Piece::Text("])"));
+                for (i, f) in fields.iter().enumerate().rev() {
+                    pending.push(Piece::Node(f));
+                    if i > 0 {
+                        pending.push(Piece::Text(", "));
+                    }
+                }
+            }
         }
     }
 }

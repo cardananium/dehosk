@@ -531,3 +531,81 @@ fn test_provenance_node_id_from_path_hash_matches_path_lookup() {
         other => panic!("expected apply, got {other:?}"),
     }
 }
+
+/// What `#[derive(Debug)]` printed before `PseudoData` got a hand-written
+/// impl. The printed form is load-bearing (fingerprints, literal patterns),
+/// so the replacement must match it in both layouts.
+#[derive(Debug)]
+enum DerivedData {
+    Integer(num_bigint::BigInt),
+    ByteString(Vec<u8>),
+    List(Vec<DerivedData>),
+    Map(Vec<(DerivedData, DerivedData)>),
+    Constr(usize, Vec<DerivedData>),
+}
+
+fn derived(data: &PseudoData) -> DerivedData {
+    match data {
+        PseudoData::Integer(n) => DerivedData::Integer(n.clone()),
+        PseudoData::ByteString(bytes) => DerivedData::ByteString(bytes.clone()),
+        PseudoData::List(items) => DerivedData::List(items.iter().map(derived).collect()),
+        PseudoData::Map(pairs) => DerivedData::Map(
+            pairs
+                .iter()
+                .map(|(k, v)| (derived(k), derived(v)))
+                .collect(),
+        ),
+        PseudoData::Constr(tag, fields) => {
+            DerivedData::Constr(*tag, fields.iter().map(derived).collect())
+        }
+    }
+}
+
+#[test]
+fn pseudo_data_debug_prints_what_the_derive_printed() {
+    let data = PseudoData::Constr(
+        3,
+        vec![
+            PseudoData::Integer((-7).into()),
+            PseudoData::ByteString(vec![0, 255]),
+            PseudoData::ByteString(Vec::new()),
+            PseudoData::List(Vec::new()),
+            PseudoData::Map(vec![(
+                PseudoData::Map(Vec::new()),
+                PseudoData::List(vec![PseudoData::Constr(0, Vec::new())]),
+            )]),
+        ],
+    );
+    let reference = derived(&data);
+    assert_eq!(format!("{data:?}"), format!("{reference:?}"));
+    assert_eq!(format!("{data:#?}"), format!("{reference:#?}"));
+}
+
+/// Clone, equality, `Debug` and the destructor all walk a heap stack: a
+/// constant nests as deep as its CBOR says, and none of them may take a call
+/// frame per level.
+#[test]
+fn deep_pseudo_data_never_recurses() {
+    const DEPTH: usize = 200_000;
+    let handle = std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(|| {
+            let mut data = PseudoData::Integer(1.into());
+            for level in 0..DEPTH {
+                data = match level % 3 {
+                    0 => PseudoData::List(vec![data]),
+                    1 => PseudoData::Map(vec![(data, PseudoData::Integer(2.into()))]),
+                    _ => PseudoData::Constr(level, vec![data]),
+                };
+            }
+            let copy = data.clone();
+            assert!(copy == data);
+            // One node per level, the innermost leaf, and each map's value.
+            assert_eq!(data.nodes().count(), DEPTH + 1 + (DEPTH + 1) / 3);
+            assert!(format!("{copy:?}").contains("[Integer(1)]"));
+        })
+        .expect("spawn");
+    handle
+        .join()
+        .expect("deep data must not overflow the stack");
+}

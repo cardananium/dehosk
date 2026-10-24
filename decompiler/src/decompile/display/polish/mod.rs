@@ -130,14 +130,11 @@ fn is_static_data_expr(expr: &PseudoExpr) -> bool {
 }
 
 fn is_static_data_value(data: &PseudoData) -> bool {
-    match data {
+    data.nodes().all(|node| match node {
         PseudoData::Integer(_) | PseudoData::ByteString(_) => true,
-        PseudoData::List(items) => items.iter().all(is_static_data_value),
-        PseudoData::Map(entries) => entries
-            .iter()
-            .all(|(key, value)| is_static_data_value(key) && is_static_data_value(value)),
-        PseudoData::Constr(_, fields) => fields.iter().all(is_static_data_value),
-    }
+        // Static when its children are, and `nodes` yields those too.
+        PseudoData::List(_) | PseudoData::Map(_) | PseudoData::Constr(..) => true,
+    })
 }
 
 fn expr_node_count(expr: &PseudoExpr) -> usize {
@@ -213,17 +210,7 @@ fn expr_node_count(expr: &PseudoExpr) -> usize {
 }
 
 fn data_node_count(data: &PseudoData) -> usize {
-    match data {
-        PseudoData::Integer(_) | PseudoData::ByteString(_) => 1,
-        PseudoData::List(items) => 1 + items.iter().map(data_node_count).sum::<usize>(),
-        PseudoData::Map(entries) => {
-            1 + entries
-                .iter()
-                .map(|(key, value)| data_node_count(key) + data_node_count(value))
-                .sum::<usize>()
-        }
-        PseudoData::Constr(_, fields) => 1 + fields.iter().map(data_node_count).sum::<usize>(),
-    }
+    data.nodes().count()
 }
 
 fn contains_long_bytearray(expr: &PseudoExpr) -> bool {
@@ -260,15 +247,8 @@ fn contains_long_bytearray(expr: &PseudoExpr) -> bool {
 }
 
 fn data_contains_long_bytearray(data: &PseudoData) -> bool {
-    match data {
-        PseudoData::ByteString(bytes) => bytes.len() >= 20,
-        PseudoData::List(items) => items.iter().any(data_contains_long_bytearray),
-        PseudoData::Map(entries) => entries.iter().any(|(key, value)| {
-            data_contains_long_bytearray(key) || data_contains_long_bytearray(value)
-        }),
-        PseudoData::Constr(_, fields) => fields.iter().any(data_contains_long_bytearray),
-        PseudoData::Integer(_) => false,
-    }
+    data.nodes()
+        .any(|node| matches!(node, PseudoData::ByteString(bytes) if bytes.len() >= 20))
 }
 
 #[cfg(test)]

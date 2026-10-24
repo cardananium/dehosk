@@ -1177,7 +1177,10 @@ impl std::fmt::Display for PseudoType {
 }
 
 /// Plutus Data representation.
-#[derive(Debug, Clone, PartialEq)]
+///
+/// `Clone`, `PartialEq`, `Debug` and `Drop` are heap walks — see the `impl`s
+/// below. A `Data` constant nests as deep as its CBOR says, one byte a level,
+/// so the script chooses the depth. Do not derive any of them back.
 pub(crate) enum PseudoData {
     /// Integer data.
     Integer(BigInt),
@@ -1189,6 +1192,186 @@ pub(crate) enum PseudoData {
     Map(Vec<(PseudoData, PseudoData)>),
     /// Constructor data.
     Constr(usize, Vec<PseudoData>),
+}
+
+impl PseudoData {
+    /// This node's direct children, in order. A map contributes each key
+    /// followed by its value.
+    fn child_refs_into<'a>(&'a self, out: &mut Vec<&'a PseudoData>) {
+        match self {
+            PseudoData::List(items) | PseudoData::Constr(_, items) => out.extend(items),
+            PseudoData::Map(pairs) => {
+                for (key, value) in pairs {
+                    out.push(key);
+                    out.push(value);
+                }
+            }
+            PseudoData::Integer(_) | PseudoData::ByteString(_) => {}
+        }
+    }
+
+    /// Move the children out, in [`Self::child_refs_into`]'s order, leaving
+    /// this node childless.
+    fn take_children(&mut self) -> Vec<PseudoData> {
+        match self {
+            PseudoData::List(items) | PseudoData::Constr(_, items) => std::mem::take(items),
+            PseudoData::Map(pairs) => std::mem::take(pairs)
+                .into_iter()
+                .flat_map(|(key, value)| [key, value])
+                .collect(),
+            PseudoData::Integer(_) | PseudoData::ByteString(_) => Vec::new(),
+        }
+    }
+
+    /// Every node of this value, itself first, in pre-order.
+    pub(crate) fn nodes(&self) -> DataNodes<'_> {
+        DataNodes {
+            pending: vec![self],
+        }
+    }
+}
+
+/// Pre-order walk over a [`PseudoData`] on a heap stack; see
+/// [`PseudoData::nodes`].
+pub(crate) struct DataNodes<'a> {
+    pending: Vec<&'a PseudoData>,
+}
+
+impl<'a> Iterator for DataNodes<'a> {
+    type Item = &'a PseudoData;
+
+    fn next(&mut self) -> Option<&'a PseudoData> {
+        let node = self.pending.pop()?;
+        let first_child = self.pending.len();
+        node.child_refs_into(&mut self.pending);
+        // Reversed so the first child is the next one out.
+        self.pending[first_child..].reverse();
+        Some(node)
+    }
+}
+
+impl Clone for PseudoData {
+    fn clone(&self) -> Self {
+        enum Step<'a> {
+            Visit(&'a PseudoData),
+            /// Rebuild this compound node from the `usize` clones on `done`.
+            Build(&'a PseudoData, usize),
+        }
+
+        let mut steps = vec![Step::Visit(self)];
+        let mut done: Vec<PseudoData> = Vec::new();
+        let mut children: Vec<&PseudoData> = Vec::new();
+        while let Some(step) = steps.pop() {
+            match step {
+                Step::Visit(PseudoData::Integer(n)) => done.push(PseudoData::Integer(n.clone())),
+                Step::Visit(PseudoData::ByteString(bytes)) => {
+                    done.push(PseudoData::ByteString(bytes.clone()))
+                }
+                Step::Visit(node) => {
+                    children.clear();
+                    node.child_refs_into(&mut children);
+                    steps.push(Step::Build(node, children.len()));
+                    // Reversed so they pop — and so land on `done` — in order.
+                    steps.extend(children.iter().rev().map(|child| Step::Visit(child)));
+                }
+                Step::Build(node, count) => {
+                    let cloned = done.split_off(done.len() - count);
+                    done.push(match node {
+                        PseudoData::List(_) => PseudoData::List(cloned),
+                        PseudoData::Constr(tag, _) => PseudoData::Constr(*tag, cloned),
+                        PseudoData::Map(_) => {
+                            let mut cloned = cloned.into_iter();
+                            let mut pairs = Vec::with_capacity(count / 2);
+                            while let (Some(key), Some(value)) = (cloned.next(), cloned.next()) {
+                                pairs.push((key, value));
+                            }
+                            PseudoData::Map(pairs)
+                        }
+                        PseudoData::Integer(_) | PseudoData::ByteString(_) => {
+                            unreachable!("leaves are cloned on visit")
+                        }
+                    });
+                }
+            }
+        }
+        done.pop().expect("clone leaves exactly one result")
+    }
+}
+
+impl PartialEq for PseudoData {
+    fn eq(&self, other: &Self) -> bool {
+        let mut pending = vec![(self, other)];
+        while let Some(pair) = pending.pop() {
+            match pair {
+                (PseudoData::Integer(a), PseudoData::Integer(b)) => {
+                    if a != b {
+                        return false;
+                    }
+                }
+                (PseudoData::ByteString(a), PseudoData::ByteString(b)) => {
+                    if a != b {
+                        return false;
+                    }
+                }
+                (PseudoData::List(a), PseudoData::List(b)) => {
+                    if a.len() != b.len() {
+                        return false;
+                    }
+                    pending.extend(a.iter().zip(b));
+                }
+                (PseudoData::Map(a), PseudoData::Map(b)) => {
+                    if a.len() != b.len() {
+                        return false;
+                    }
+                    for ((key_a, value_a), (key_b, value_b)) in a.iter().zip(b) {
+                        pending.push((key_a, key_b));
+                        pending.push((value_a, value_b));
+                    }
+                }
+                (PseudoData::Constr(tag_a, a), PseudoData::Constr(tag_b, b)) => {
+                    if tag_a != tag_b || a.len() != b.len() {
+                        return false;
+                    }
+                    pending.extend(a.iter().zip(b));
+                }
+                _ => return false,
+            }
+        }
+        true
+    }
+}
+
+impl crate::pseudo::debug_walk::DebugLayers for PseudoData {
+    fn layer<'a>(&'a self, out: &mut crate::pseudo::debug_walk::Layer<'a, Self>) {
+        use crate::pseudo::debug_walk::Field;
+        match self {
+            PseudoData::Integer(n) => out.tuple("Integer", &[Field::Leaf(n)]),
+            PseudoData::ByteString(bytes) => out.tuple("ByteString", &[Field::Leaf(bytes)]),
+            PseudoData::List(items) => out.tuple("List", &[Field::Nodes(items)]),
+            PseudoData::Map(pairs) => out.tuple("Map", &[Field::Pairs(pairs)]),
+            PseudoData::Constr(tag, fields) => {
+                out.tuple("Constr", &[Field::Leaf(tag), Field::Nodes(fields)])
+            }
+        }
+    }
+}
+
+impl std::fmt::Debug for PseudoData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        crate::pseudo::debug_walk::write(self, f)
+    }
+}
+
+/// Releases the value without recursing: each node is emptied before it goes
+/// out of scope, so the implicit drop at the end of the loop body only ever
+/// frees a childless node.
+impl Drop for PseudoData {
+    fn drop(&mut self) {
+        let mut pending = self.take_children();
+        while let Some(mut node) = pending.pop() {
+            pending.append(&mut node.take_children());
+        }
+    }
 }
 
 /// Stable node identifier for pseudo AST provenance graph.

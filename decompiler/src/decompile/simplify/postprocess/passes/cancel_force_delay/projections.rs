@@ -57,14 +57,16 @@ pub(super) fn simplify_field_access_root(record: PseudoExpr, selector: FieldSele
                 selector,
             ))
         }
-        PseudoExpr::Data(data) => match *data {
+        // `PseudoData` releases itself iteratively, so it is taken apart
+        // through `&mut` rather than moved out of.
+        PseudoExpr::Data(mut data) => match data.as_mut() {
             PseudoData::Constr(tag, fields) => {
                 if selector.as_pretty_name() == "tag" {
-                    return RootStep::Continue(PseudoExpr::Int(tag.into()));
+                    return RootStep::Continue(PseudoExpr::Int((*tag).into()));
                 }
                 if selector.as_pretty_name() == "fields" {
                     return RootStep::Continue(PseudoExpr::List {
-                        elements: fields
+                        elements: std::mem::take(fields)
                             .into_iter()
                             .map(|d| PseudoExpr::Data(Box::new(d)))
                             .collect(),
@@ -72,12 +74,12 @@ pub(super) fn simplify_field_access_root(record: PseudoExpr, selector: FieldSele
                     });
                 }
                 RootStep::Return(PseudoExpr::field_access_typed(
-                    PseudoExpr::Data(Box::new(PseudoData::Constr(tag, fields))),
+                    PseudoExpr::Data(data),
                     selector,
                 ))
             }
-            other => RootStep::Return(PseudoExpr::field_access_typed(
-                PseudoExpr::Data(Box::new(other)),
+            _ => RootStep::Return(PseudoExpr::field_access_typed(
+                PseudoExpr::Data(data),
                 selector,
             )),
         },

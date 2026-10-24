@@ -10,26 +10,72 @@ use crate::pseudo::ast::PseudoData;
 /// Convert `uplc::PlutusData` to `PseudoData`,
 /// normalizing constructor tags to logical
 /// indices.
+///
+/// Walks a heap stack: a constant nests as deep as its CBOR says, one byte a
+/// level, so the script chooses the depth.
 pub(crate) fn convert_plutus_data(data: &uplc::PlutusData) -> PseudoData {
     use uplc::PlutusData;
 
-    match data {
-        PlutusData::BigInt(n) => PseudoData::Integer(convert_pallas_bigint(n)),
-        PlutusData::BoundedBytes(bytes) => PseudoData::ByteString(bytes.to_vec()),
-        PlutusData::Array(items) => {
-            PseudoData::List(items.iter().map(convert_plutus_data).collect())
-        }
-        PlutusData::Map(pairs) => PseudoData::Map(
-            pairs
-                .iter()
-                .map(|(k, v)| (convert_plutus_data(k), convert_plutus_data(v)))
-                .collect(),
-        ),
-        PlutusData::Constr(constr) => {
-            let fields: Vec<PseudoData> = constr.fields.iter().map(convert_plutus_data).collect();
-            PseudoData::Constr(constructor_index(constr), fields)
+    enum Step<'a> {
+        Visit(&'a PlutusData),
+        /// Rebuild this compound node from its converted children, the last
+        /// ones on `done` — a map's as key, value, key, value, ...
+        Build(&'a PlutusData),
+    }
+
+    let mut steps = vec![Step::Visit(data)];
+    let mut done: Vec<PseudoData> = Vec::new();
+    while let Some(step) = steps.pop() {
+        match step {
+            Step::Visit(node) => match node {
+                PlutusData::BigInt(n) => done.push(PseudoData::Integer(convert_pallas_bigint(n))),
+                PlutusData::BoundedBytes(bytes) => {
+                    done.push(PseudoData::ByteString(bytes.to_vec()))
+                }
+                // Children are pushed in REVERSE so they convert in order.
+                PlutusData::Array(items) => {
+                    steps.push(Step::Build(node));
+                    steps.extend(items.iter().rev().map(Step::Visit));
+                }
+                PlutusData::Map(pairs) => {
+                    steps.push(Step::Build(node));
+                    for (k, v) in pairs.iter().rev() {
+                        steps.push(Step::Visit(v));
+                        steps.push(Step::Visit(k));
+                    }
+                }
+                PlutusData::Constr(constr) => {
+                    steps.push(Step::Build(node));
+                    steps.extend(constr.fields.iter().rev().map(Step::Visit));
+                }
+            },
+            Step::Build(node) => {
+                let rebuilt = match node {
+                    PlutusData::Array(items) => {
+                        PseudoData::List(done.split_off(done.len() - items.len()))
+                    }
+                    PlutusData::Map(pairs) => {
+                        let mut converted =
+                            done.split_off(done.len() - 2 * pairs.len()).into_iter();
+                        let mut entries = Vec::with_capacity(pairs.len());
+                        while let (Some(k), Some(v)) = (converted.next(), converted.next()) {
+                            entries.push((k, v));
+                        }
+                        PseudoData::Map(entries)
+                    }
+                    PlutusData::Constr(constr) => {
+                        let fields = done.split_off(done.len() - constr.fields.len());
+                        PseudoData::Constr(constructor_index(constr), fields)
+                    }
+                    PlutusData::BigInt(_) | PlutusData::BoundedBytes(_) => {
+                        unreachable!("leaves are converted on visit")
+                    }
+                };
+                done.push(rebuilt);
+            }
         }
     }
+    done.pop().expect("conversion leaves exactly one result")
 }
 
 /// The logical constructor index a decoded `Constr` node stands for.

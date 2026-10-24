@@ -12,6 +12,7 @@
 pub mod abstract_value;
 pub mod ast;
 pub mod constructor;
+pub(crate) mod debug_walk;
 pub mod field_selector;
 pub mod fold;
 mod layering;

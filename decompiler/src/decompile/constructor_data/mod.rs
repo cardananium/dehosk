@@ -48,11 +48,10 @@ pub(crate) fn normalize_constructor_data_expr(
 pub(crate) fn normalize_convertible_data_expr(expr: PseudoExpr) -> PseudoExpr {
     match expr {
         PseudoExpr::Data(data) => {
-            let data = *data;
             if pseudo_data_is_convertible(&data) {
-                pseudo_data_to_expr(data.clone()).unwrap_or(PseudoExpr::Data(Box::new(data)))
+                pseudo_data_to_expr(&data).unwrap_or(PseudoExpr::Data(data))
             } else {
-                PseudoExpr::Data(Box::new(data))
+                PseudoExpr::Data(data)
             }
         }
         other => other,
@@ -597,39 +596,58 @@ pub(crate) fn make_standard_option_some(fields: Vec<PseudoExpr>) -> PseudoExpr {
     PseudoExpr::constr_known(KnownConstructor::Some, fields)
 }
 
+/// A map has no expression form; everything else lowers.
 fn pseudo_data_is_convertible(data: &PseudoData) -> bool {
-    match data {
-        PseudoData::Constr(_, fields) => fields.iter().all(pseudo_data_is_convertible),
-        PseudoData::List(items) => items.iter().all(pseudo_data_is_convertible),
-        PseudoData::Integer(_) | PseudoData::ByteString(_) => true,
-        PseudoData::Map(_) => false,
-    }
+    !data.nodes().any(|node| matches!(node, PseudoData::Map(_)))
 }
 
-fn pseudo_data_to_expr(data: PseudoData) -> Option<PseudoExpr> {
-    match data {
-        PseudoData::Constr(tag, fields) => {
-            let lowered_fields: Option<Vec<PseudoExpr>> =
-                fields.into_iter().map(pseudo_data_to_expr).collect();
-            let fields = lowered_fields?;
-            let arity = fields.len();
-            Some(PseudoExpr::constr(
-                ConstructorShape::unknown_data(tag, arity),
-                fields,
-            ))
-        }
-        PseudoData::Integer(n) => Some(PseudoExpr::Int(n)),
-        PseudoData::ByteString(bs) => Some(PseudoExpr::ByteArray(bs)),
-        PseudoData::List(items) => {
-            let lowered: Option<Vec<PseudoExpr>> =
-                items.into_iter().map(pseudo_data_to_expr).collect();
-            Some(PseudoExpr::List {
-                elements: (lowered?).into(),
-                tail: None,
-            })
-        }
-        PseudoData::Map(_) => None,
+/// The expression a `Data` constant denotes, or `None` if it holds a map.
+///
+/// Builds on a heap stack: the constant's nesting is chosen by the script.
+fn pseudo_data_to_expr(data: &PseudoData) -> Option<PseudoExpr> {
+    enum Step<'a> {
+        Visit(&'a PseudoData),
+        /// Rebuild this node from its lowered children, the last ones on `done`.
+        Build(&'a PseudoData),
     }
+
+    let mut steps = vec![Step::Visit(data)];
+    let mut done: Vec<PseudoExpr> = Vec::new();
+    while let Some(step) = steps.pop() {
+        match step {
+            Step::Visit(node) => match node {
+                PseudoData::Integer(n) => done.push(PseudoExpr::Int(n.clone())),
+                PseudoData::ByteString(bs) => done.push(PseudoExpr::ByteArray(bs.clone())),
+                PseudoData::Map(_) => return None,
+                // Children are pushed in REVERSE so they lower in order.
+                PseudoData::Constr(_, children) | PseudoData::List(children) => {
+                    steps.push(Step::Build(node));
+                    steps.extend(children.iter().rev().map(Step::Visit));
+                }
+            },
+            Step::Build(node) => match node {
+                PseudoData::Constr(tag, fields) => {
+                    let fields = done.split_off(done.len() - fields.len());
+                    let arity = fields.len();
+                    done.push(PseudoExpr::constr(
+                        ConstructorShape::unknown_data(*tag, arity),
+                        fields,
+                    ));
+                }
+                PseudoData::List(items) => {
+                    let elements = done.split_off(done.len() - items.len());
+                    done.push(PseudoExpr::List {
+                        elements: elements.into(),
+                        tail: None,
+                    });
+                }
+                PseudoData::Integer(_) | PseudoData::ByteString(_) | PseudoData::Map(_) => {
+                    unreachable!("only constructors and lists are rebuilt")
+                }
+            },
+        }
+    }
+    done.pop()
 }
 
 #[cfg(test)]
