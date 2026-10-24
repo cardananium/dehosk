@@ -15,7 +15,7 @@
 
 use std::collections::HashMap;
 
-use crate::pseudo::ast::{PseudoExpr, WhenClause};
+use crate::pseudo::ast::PseudoExpr;
 use crate::pseudo::fold::{ExprFolder, FoldAction};
 use crate::pseudo::var_id::VarId;
 
@@ -25,7 +25,11 @@ pub(super) fn fold_force_on_lambda_var(expr: PseudoExpr) -> PseudoExpr {
     if lambda_bound.is_empty() {
         return expr;
     }
-    ForceOnLambdaVarFolder { env: &lambda_bound }.fold(expr)
+    ForceOnLambdaVarFolder {
+        env: &lambda_bound,
+        unmatched_below: 0,
+    }
+    .fold(expr)
 }
 
 fn collect_lambda_bindings(expr: &PseudoExpr, env: &mut HashMap<VarId, ()>) {
@@ -127,6 +131,11 @@ fn collect_lambda_bindings(expr: &PseudoExpr, env: &mut HashMap<VarId, ()>) {
 
 struct ForceOnLambdaVarFolder<'a> {
     env: &'a HashMap<VarId, ()>,
+    /// The `Force`s straight below the last one peeled without a match. They
+    /// end at the same node, so they cannot match either — and peeling each
+    /// again would cost time quadratic in the chain, whose length is the
+    /// script's to choose. The machine enters them next, one after another.
+    unmatched_below: usize,
 }
 
 impl ExprFolder for ForceOnLambdaVarFolder<'_> {
@@ -136,15 +145,22 @@ impl ExprFolder for ForceOnLambdaVarFolder<'_> {
             // `Var(c)`. The renderer prints `Force(x)` as `x()`, so
             // peeling every wrapper folds `c()`, `c()()` and deeper.
             PseudoExpr::Force(inner) => {
+                if self.unmatched_below > 0 {
+                    self.unmatched_below -= 1;
+                    return FoldAction::Walk;
+                }
                 let mut cur: &PseudoExpr = inner.as_ref();
+                let mut below = 0;
                 while let PseudoExpr::Force(deeper) = cur {
                     cur = deeper.as_ref();
+                    below += 1;
                 }
                 if let PseudoExpr::Var { id: Some(vid), .. } = cur {
                     if self.env.contains_key(vid) {
                         return FoldAction::Replace(cur.clone());
                     }
                 }
+                self.unmatched_below = below;
                 FoldAction::Walk
             }
             // Also handle the rare direct `Apply { Var(c), [] }` shape
@@ -161,11 +177,13 @@ impl ExprFolder for ForceOnLambdaVarFolder<'_> {
         }
     }
 
-    fn fold_clause(&mut self, clause: WhenClause) -> WhenClause {
-        WhenClause {
-            pattern: clause.pattern,
-            guard: clause.guard.map(|g| self.fold(g)),
-            body: self.fold(clause.body),
-        }
+    // Folded flat — each clause's guard, then its body, patterns left as
+    // they are, as the old clause hook did — so a deep `when` costs no
+    // stack.
+    fn machine_folds_when(&self) -> bool {
+        true
+    }
+    fn machine_keeps_pattern_literals(&self) -> bool {
+        true
     }
 }

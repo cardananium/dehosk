@@ -24,10 +24,11 @@
 use std::collections::HashMap;
 
 use crate::decompile::blueprint_registry::TypeHintId;
-use crate::pseudo::ast::{Binder, PseudoExpr, WhenClause, WhenPattern};
+use crate::pseudo::ast::{Binder, PBox, PseudoExpr, WhenClause, WhenPattern};
 use crate::pseudo::constructor::ConstructorShape;
-use crate::pseudo::fold::ExprFolder;
 use crate::pseudo::var_id::VarId;
+
+use super::scope_recurse::{PlainPost, plain_children, rebuild_plain, take};
 
 use super::scope_recurse::children;
 
@@ -84,33 +85,153 @@ fn record_pattern(pattern: &WhenPattern, max: &mut HashMap<(TypeHintId, usize), 
     }
 }
 
-struct PadFolder<'a> {
-    max: &'a HashMap<(TypeHintId, usize), usize>,
-}
-
-impl ExprFolder for PadFolder<'_> {
-    fn fold_pattern(&mut self, pattern: WhenPattern) -> WhenPattern {
-        pad_pattern(pattern, self.max)
-    }
-
-    // `pad_pattern` allocates fresh `VarId`s in call order
-    // (`VarId::fresh_binding`). A `when`'s clauses are folded before its
-    // subject, the reverse of `ExprFolder::fold_when`'s default, so that
-    // relative order is preserved here.
-    fn fold_when(
-        &mut self,
-        subject: PseudoExpr,
-        subject_name: Option<Binder>,
-        clauses: Vec<WhenClause>,
-    ) -> PseudoExpr {
-        let clauses = clauses.into_iter().map(|c| self.fold_clause(c)).collect();
-        let subject = self.fold(subject);
-        self.post_when(subject, subject_name, clauses)
-    }
-}
-
+/// Pad every short constructor pattern in `expr`.
+///
+/// A job stack, because `when`s nest as deep as the script likes and on
+/// `wasm32` the call stack cannot grow to match. `pad_pattern` allocates
+/// fresh `VarId`s in call order (`VarId::fresh_binding`), and a `when`'s
+/// clauses — each pattern, then its guard and body — are padded before its
+/// subject, so the walk keeps exactly that order.
 fn pad(expr: PseudoExpr, max: &HashMap<(TypeHintId, usize), usize>) -> PseudoExpr {
-    PadFolder { max }.fold(expr)
+    enum Step {
+        Enter(PseudoExpr),
+        /// Pad a clause's pattern, now that the clauses before it are done.
+        Pattern(WhenPattern),
+        Let {
+            name: String,
+            id: Option<VarId>,
+        },
+        Lambda {
+            params: Vec<Binder>,
+        },
+        RecFn {
+            name: Binder,
+            params: Vec<Binder>,
+        },
+        /// The clauses' guards and bodies, then the subject, are on `done`;
+        /// the padded patterns are on `patterns`.
+        When {
+            subject_name: Option<Binder>,
+            guards: Vec<bool>,
+        },
+        Plain(PlainPost),
+    }
+
+    let mut steps: Vec<Step> = vec![Step::Enter(expr)];
+    let mut done: Vec<PseudoExpr> = Vec::new();
+    let mut patterns: Vec<WhenPattern> = Vec::new();
+    while let Some(step) = steps.pop() {
+        match step {
+            Step::Enter(expr) => match expr {
+                PseudoExpr::Let {
+                    name,
+                    id,
+                    value,
+                    body,
+                } => {
+                    steps.push(Step::Let { name, id });
+                    steps.push(Step::Enter(body.into_inner()));
+                    steps.push(Step::Enter(value.into_inner()));
+                }
+                PseudoExpr::Lambda { params, body } => {
+                    steps.push(Step::Lambda { params });
+                    steps.push(Step::Enter(body.into_inner()));
+                }
+                PseudoExpr::RecFn { name, params, body } => {
+                    steps.push(Step::RecFn { name, params });
+                    steps.push(Step::Enter(body.into_inner()));
+                }
+                PseudoExpr::When {
+                    subject,
+                    subject_name,
+                    clauses,
+                } => {
+                    let guards = clauses.iter().map(|c| c.guard.is_some()).collect();
+                    steps.push(Step::When {
+                        subject_name,
+                        guards,
+                    });
+                    // Popped in order: each clause's pattern, guard and body,
+                    // then the subject.
+                    steps.push(Step::Enter(subject.into_inner()));
+                    for clause in clauses.into_iter().rev() {
+                        steps.push(Step::Enter(clause.body));
+                        if let Some(guard) = clause.guard {
+                            steps.push(Step::Enter(guard));
+                        }
+                        steps.push(Step::Pattern(clause.pattern));
+                    }
+                }
+                other => match plain_children(other) {
+                    Ok((kind, children)) => {
+                        steps.push(Step::Plain(kind));
+                        for child in children.into_iter().rev() {
+                            steps.push(Step::Enter(child));
+                        }
+                    }
+                    Err(leaf) => done.push(leaf),
+                },
+            },
+            Step::Pattern(pattern) => patterns.push(pad_pattern(pattern, max)),
+            Step::Let { name, id } => {
+                let body = done.pop().expect("let body");
+                let value = done.pop().expect("let value");
+                done.push(PseudoExpr::Let {
+                    name,
+                    id,
+                    value: PBox::new(value),
+                    body: PBox::new(body),
+                });
+            }
+            Step::Lambda { params } => {
+                let body = done.pop().expect("lambda body");
+                done.push(PseudoExpr::Lambda {
+                    params,
+                    body: PBox::new(body),
+                });
+            }
+            Step::RecFn { name, params } => {
+                let body = done.pop().expect("recfn body");
+                done.push(PseudoExpr::RecFn {
+                    name,
+                    params,
+                    body: PBox::new(body),
+                });
+            }
+            Step::When {
+                subject_name,
+                guards,
+            } => {
+                let subject = done.pop().expect("when subject");
+                let parts = guards.iter().map(|g| usize::from(*g) + 1).sum();
+                let mut parts = take(&mut done, parts).into_iter();
+                let padded = patterns.split_off(patterns.len() - guards.len());
+                let clauses = padded
+                    .into_iter()
+                    .zip(guards)
+                    .map(|(pattern, has_guard)| {
+                        let guard = has_guard.then(|| parts.next().expect("when guard"));
+                        let body = parts.next().expect("when clause body");
+                        WhenClause {
+                            pattern,
+                            guard,
+                            body,
+                        }
+                    })
+                    .collect();
+                done.push(PseudoExpr::When {
+                    subject: PBox::new(subject),
+                    subject_name,
+                    clauses,
+                });
+            }
+            Step::Plain(kind) => {
+                let rebuilt = rebuild_plain(kind, &mut done);
+                done.push(rebuilt);
+            }
+        }
+    }
+    done.pop().expect("one result")
 }
 
 fn pad_pattern(pattern: WhenPattern, max: &HashMap<(TypeHintId, usize), usize>) -> WhenPattern {

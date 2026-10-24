@@ -25,6 +25,12 @@ pub(crate) enum FoldStep {
     Enter(PseudoExpr),
     /// Its children are done: reassemble the node.
     Post(PostKind),
+    /// A clause's guard and body come next: open its scope
+    /// ([`ExprFolder::enter_clause`]).
+    ClauseEnter(Option<Binder>, WhenPattern),
+    /// The clause's body is done: close its scope
+    /// ([`ExprFolder::exit_clause`]).
+    ClauseExit(Option<Binder>, WhenPattern),
 }
 
 /// The node a [`FoldStep::Post`] reassembles, carrying the parts that are not
@@ -348,6 +354,15 @@ pub(crate) trait ExprFolder {
     /// Called after folding a Let body.
     fn exit_let(&mut self, _name: &str) {}
 
+    /// Called before folding a clause's guard and body — after its literal
+    /// pattern, if the machine folds that — when the implementation opts in
+    /// through [`Self::machine_scopes_clauses`]. `subject_name` is the
+    /// `when`'s subject binder, in scope for every clause.
+    fn enter_clause(&mut self, _subject_name: Option<&Binder>, _pattern: &WhenPattern) {}
+
+    /// Called after folding the clause's body.
+    fn exit_clause(&mut self, _subject_name: Option<&Binder>, _pattern: &WhenPattern) {}
+
     /// Entry point. Folds an expression bottom-up with stack safety.
     fn fold(&mut self, expr: PseudoExpr) -> PseudoExpr {
         crate::stack::grow_deep(|| self.fold_inner(expr))
@@ -383,6 +398,12 @@ pub(crate) trait ExprFolder {
                         let finished = self.post_expr(rebuilt);
                         done.push(finished);
                     }
+                }
+                FoldStep::ClauseEnter(subject_name, pattern) => {
+                    self.enter_clause(subject_name.as_ref(), &pattern);
+                }
+                FoldStep::ClauseExit(subject_name, pattern) => {
+                    self.exit_clause(subject_name.as_ref(), &pattern);
                 }
             }
         }
@@ -535,22 +556,30 @@ pub(crate) trait ExprFolder {
                 clauses,
             } if self.machine_folds_when() => {
                 let keep_literals = self.machine_keeps_pattern_literals();
+                let scope_clauses = self.machine_scopes_clauses();
                 let mut clause_meta = Vec::with_capacity(clauses.len());
-                let mut clause_children: Vec<PseudoExpr> = Vec::new();
+                let mut clause_steps: Vec<FoldStep> = Vec::new();
                 for clause in clauses {
+                    let scope = scope_clauses.then(|| (subject_name.clone(), clause.pattern.clone()));
                     // Same order as `fold_clause`: pattern literal, guard, body.
                     let pattern = match clause.pattern {
                         WhenPattern::Literal(lit) if !keep_literals => {
-                            clause_children.push(lit);
+                            clause_steps.push(FoldStep::Enter(lit));
                             None
                         }
                         other => Some(other),
                     };
+                    if let Some((name, pattern)) = &scope {
+                        clause_steps.push(FoldStep::ClauseEnter(name.clone(), pattern.clone()));
+                    }
                     let has_guard = clause.guard.is_some();
                     if let Some(guard) = clause.guard {
-                        clause_children.push(guard);
+                        clause_steps.push(FoldStep::Enter(guard));
                     }
-                    clause_children.push(clause.body);
+                    clause_steps.push(FoldStep::Enter(clause.body));
+                    if let Some((name, pattern)) = scope {
+                        clause_steps.push(FoldStep::ClauseExit(name, pattern));
+                    }
                     clause_meta.push((pattern, has_guard));
                 }
                 steps.push(FoldStep::Post(PostKind::When {
@@ -559,9 +588,7 @@ pub(crate) trait ExprFolder {
                 }));
                 // Reversed so they pop in order; the subject goes last so it
                 // pops first, as `fold_when` folded it first.
-                for child in clause_children.into_iter().rev() {
-                    steps.push(FoldStep::Enter(child));
-                }
+                steps.extend(clause_steps.into_iter().rev());
                 steps.push(FoldStep::Enter(subject.into_inner()));
             }
             // Leaves, and any `when` not handed over — see `fold_legacy_arm`.
@@ -757,6 +784,15 @@ pub(crate) trait ExprFolder {
     /// never folding a literal pattern's expression — says so here instead,
     /// and then needs no recursive `when` path at all.
     fn machine_keeps_pattern_literals(&self) -> bool {
+        false
+    }
+
+    /// With [`Self::machine_folds_when`]: call [`Self::enter_clause`] and
+    /// [`Self::exit_clause`] around each clause's guard and body, so a pass
+    /// that tracks the binders a clause brings into scope can do it without
+    /// overriding [`Self::fold_when`] — and without its call frame per
+    /// nested `when`.
+    fn machine_scopes_clauses(&self) -> bool {
         false
     }
 

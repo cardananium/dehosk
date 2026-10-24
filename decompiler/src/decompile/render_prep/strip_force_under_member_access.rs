@@ -22,7 +22,7 @@
 use crate::pseudo::ast::PBox;
 use std::collections::HashSet;
 
-use crate::pseudo::ast::{Binder, PseudoExpr, WhenClause};
+use crate::pseudo::ast::{Binder, PseudoExpr, WhenPattern};
 use crate::pseudo::field_selector::FieldSelector;
 use crate::pseudo::fold::ExprFolder;
 use crate::pseudo::var_id::VarId;
@@ -80,29 +80,23 @@ impl ExprFolder for Rewriter {
         name.to_string()
     }
 
-    fn fold_when(
-        &mut self,
-        subject: PseudoExpr,
-        subject_name: Option<Binder>,
-        clauses: Vec<WhenClause>,
-    ) -> PseudoExpr {
-        let subject = self.fold(subject);
-        if let Some(sub_name) = &subject_name {
-            self.in_scope.insert(sub_name.id);
-        }
-        let clauses = clauses.into_iter().map(|c| self.fold_clause(c)).collect();
-        self.post_when(subject, subject_name, clauses)
+    // Folded flat, the clause binders brought into scope by the machine's
+    // clause hook, so a deep `when` costs no stack. Patterns stay unfolded.
+    fn machine_folds_when(&self) -> bool {
+        true
+    }
+    fn machine_keeps_pattern_literals(&self) -> bool {
+        true
+    }
+    fn machine_scopes_clauses(&self) -> bool {
+        true
     }
 
-    fn fold_clause(&mut self, clause: WhenClause) -> WhenClause {
-        self.in_scope.extend(clause.pattern.bound_ids());
-        let guard = clause.guard.map(|g| self.fold(g));
-        let body = self.fold(clause.body);
-        WhenClause {
-            pattern: clause.pattern,
-            guard,
-            body,
+    fn enter_clause(&mut self, subject_name: Option<&Binder>, pattern: &WhenPattern) {
+        if let Some(sub_name) = subject_name {
+            self.in_scope.insert(sub_name.id);
         }
+        self.in_scope.extend(pattern.bound_ids());
     }
 }
 

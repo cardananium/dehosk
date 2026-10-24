@@ -87,24 +87,44 @@ fn walk(expr: PseudoExpr) -> PseudoExpr {
             }
         }
 
-        fn fold_pattern(&mut self, pattern: WhenPattern) -> WhenPattern {
-            match pattern {
-                WhenPattern::Constructor {
-                    type_hint,
-                    tag,
-                    fields,
-                    shape,
-                } => WhenPattern::Constructor {
-                    type_hint,
-                    tag,
-                    fields,
-                    shape: maybe_downgrade(shape),
-                },
-                // Matches the trait's default: a literal pattern's
-                // expression still needs folding, everything else passes
-                // through unchanged.
-                WhenPattern::Literal(expr) => WhenPattern::Literal(self.fold(expr)),
-                other => other,
+        // Folded flat — a deep `when` costs no stack — with literal
+        // patterns folded by the machine as the trait's default did, and
+        // the constructor patterns downgraded once the clauses are
+        // rebuilt (a pure rewrite, so its timing changes nothing).
+        fn machine_folds_when(&self) -> bool {
+            true
+        }
+
+        fn post_when(
+            &mut self,
+            subject: PseudoExpr,
+            subject_name: Option<crate::pseudo::ast::Binder>,
+            clauses: Vec<crate::pseudo::ast::WhenClause>,
+        ) -> PseudoExpr {
+            let clauses = clauses
+                .into_iter()
+                .map(|mut clause| {
+                    clause.pattern = match clause.pattern {
+                        WhenPattern::Constructor {
+                            type_hint,
+                            tag,
+                            fields,
+                            shape,
+                        } => WhenPattern::Constructor {
+                            type_hint,
+                            tag,
+                            fields,
+                            shape: maybe_downgrade(shape),
+                        },
+                        other => other,
+                    };
+                    clause
+                })
+                .collect();
+            PseudoExpr::When {
+                subject: crate::pseudo::ast::PBox::new(subject),
+                subject_name,
+                clauses,
             }
         }
     }

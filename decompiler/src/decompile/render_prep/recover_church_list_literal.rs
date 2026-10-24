@@ -21,7 +21,7 @@
 use crate::pseudo::ast::PBox;
 use std::collections::HashSet;
 
-use crate::pseudo::ast::{Binder, PseudoExpr, WhenClause};
+use crate::pseudo::ast::{Binder, PseudoExpr};
 use crate::pseudo::fold::{ExprFolder, FoldAction};
 use crate::pseudo::var_id::VarId;
 
@@ -164,9 +164,7 @@ struct ChainRewriter<'a> {
 
 impl ExprFolder for ChainRewriter<'_> {
     fn pre_expr(&mut self, expr: &PseudoExpr) -> FoldAction {
-        if let Some((elements, tail)) = try_match_chain(expr, self.cons_ids)
-            && elements.len() >= 2
-        {
+        if let Some((elements, tail)) = try_match_chain(expr, self.cons_ids) {
             let elements = elements.into_iter().map(|e| self.fold(e)).collect();
             let tail = tail.map(|t| PBox::new(self.fold(t.into_inner())));
             return FoldAction::Replace(PseudoExpr::List { elements, tail });
@@ -175,15 +173,14 @@ impl ExprFolder for ChainRewriter<'_> {
     }
 
     // Do not fold a `when` clause's pattern. Only `Literal` patterns carry a
-    // sub-expression, and church-cons chains cannot occur there.
-    fn fold_clause(&mut self, clause: WhenClause) -> WhenClause {
-        let guard = clause.guard.map(|g| self.fold(g));
-        let body = self.fold(clause.body);
-        WhenClause {
-            pattern: clause.pattern,
-            guard,
-            body,
-        }
+    // sub-expression, and church-cons chains cannot occur there. Folded flat
+    // otherwise — guard, then body, as before — so a deep `when` costs no
+    // stack.
+    fn machine_folds_when(&self) -> bool {
+        true
+    }
+    fn machine_keeps_pattern_literals(&self) -> bool {
+        true
     }
 }
 
@@ -191,8 +188,8 @@ fn rewrite_chains(expr: PseudoExpr, cons_ids: &HashSet<VarId>) -> PseudoExpr {
     ChainRewriter { cons_ids }.fold(expr)
 }
 
-/// Try to interpret `expr` as a Church-Cons chain, returning
-/// `Some((elements, terminal))`; `terminal` is `None` when the chain
+/// Try to interpret `expr` as a Church-Cons chain of at least two
+/// elements, returning `Some((elements, terminal))`; `terminal` is `None` when the chain
 /// ends in a nil-shaped value (see `is_nil_terminator`) and the raw
 /// tail expression otherwise.
 ///
@@ -235,7 +232,10 @@ fn try_match_chain(
         elements.push(args[0].clone());
         current = &args[1];
     }
-    if elements.is_empty() {
+    // Fewer than two elements is no list literal; returning before the
+    // terminal is cloned keeps a long run of near-misses from copying the
+    // rest of the tree at every node.
+    if elements.len() < 2 {
         return None;
     }
     let terminal: Option<PBox> = if is_nil_terminator(current) {

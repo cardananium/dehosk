@@ -28,22 +28,14 @@ use crate::pseudo::fold::ExprFolder;
 struct Collapser;
 
 impl ExprFolder for Collapser {
-    fn fold_when(
-        &mut self,
-        subject: PseudoExpr,
-        subject_name: Option<Binder>,
-        clauses: Vec<WhenClause>,
-    ) -> PseudoExpr {
-        let subject = self.fold(subject);
-        let clauses: Vec<WhenClause> = clauses
-            .into_iter()
-            .map(|c| WhenClause {
-                pattern: c.pattern,
-                guard: c.guard.map(|g| self.fold(g)),
-                body: self.fold(c.body),
-            })
-            .collect();
-        self.post_when(subject, subject_name, clauses)
+    // Folded flat — subject, then each clause's guard and body, patterns
+    // left as they are, exactly as the old `when` hook folded it — so a
+    // deep `when` costs no stack.
+    fn machine_folds_when(&self) -> bool {
+        true
+    }
+    fn machine_keeps_pattern_literals(&self) -> bool {
+        true
     }
 
     fn post_when(

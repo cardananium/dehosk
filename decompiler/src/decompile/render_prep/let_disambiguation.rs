@@ -27,16 +27,40 @@ pub(super) fn disambiguate_shadowed_lets(expr: &PseudoExpr) -> PseudoExpr {
 struct PatternScopeFolder {
     /// Binder names currently in scope (lambda/recfn/let/pattern/
     /// subject), innermost last. A name may appear more than once when
-    /// genuinely shadowed; `contains` only needs membership.
+    /// genuinely shadowed.
     scope: Vec<String>,
+    /// How many times each name is in `scope`: membership in constant time,
+    /// where a scan of `scope` costs its depth — and scopes nest as deep as
+    /// the script likes.
+    in_scope: HashMap<String, usize>,
     /// Per-base-name suffix counter, using the let disambiguator's
     /// `_<N>` scheme for visual consistency.
     counts: HashMap<String, usize>,
+    /// Open clauses, innermost last: `scope`'s length before the clause,
+    /// and its pattern binders' new names. Uses of a renamed binder take the
+    /// new name as the walk meets them.
+    clauses: Vec<(usize, HashMap<VarId, String>)>,
+    /// The renames of clauses already walked, waiting for their `when` to be
+    /// rebuilt; its clauses are the last entries, in order.
+    finished: Vec<HashMap<VarId, String>>,
 }
 
 impl PatternScopeFolder {
     fn in_scope(&self, name: &str) -> bool {
-        self.scope.iter().any(|n| n == name)
+        self.in_scope.get(name).is_some_and(|n| *n > 0)
+    }
+
+    fn push_scope(&mut self, name: String) {
+        *self.in_scope.entry(name.clone()).or_insert(0) += 1;
+        self.scope.push(name);
+    }
+
+    fn truncate_scope(&mut self, len: usize) {
+        for name in self.scope.drain(len..) {
+            if let Some(n) = self.in_scope.get_mut(&name) {
+                *n -= 1;
+            }
+        }
     }
 
     /// Allocate a fresh `name_<N>` not currently in scope.
@@ -54,25 +78,41 @@ impl PatternScopeFolder {
 }
 
 impl ExprFolder for PatternScopeFolder {
+    // Folded flat, literal patterns left as they are and each clause's scope
+    // opened and closed by the machine, so a deep `when` costs no stack.
+    fn machine_folds_when(&self) -> bool {
+        true
+    }
+    fn machine_keeps_pattern_literals(&self) -> bool {
+        true
+    }
+    fn machine_scopes_clauses(&self) -> bool {
+        true
+    }
+
     fn enter_lambda(&mut self, params: &[Binder]) -> Vec<Binder> {
-        self.scope.extend(params.iter().map(|p| p.to_string()));
+        for p in params {
+            self.push_scope(p.to_string());
+        }
         params.to_vec()
     }
 
     fn exit_lambda(&mut self, params: &[Binder]) {
         let kept = self.scope.len() - params.len();
-        self.scope.truncate(kept);
+        self.truncate_scope(kept);
     }
 
     fn enter_recfn(&mut self, name: &Binder, params: &[Binder]) -> (Binder, Vec<Binder>) {
-        self.scope.push(name.to_string());
-        self.scope.extend(params.iter().map(|p| p.to_string()));
+        self.push_scope(name.to_string());
+        for p in params {
+            self.push_scope(p.to_string());
+        }
         (name.clone(), params.to_vec())
     }
 
     fn exit_recfn(&mut self, _name: &Binder, params: &[Binder]) {
         let kept = self.scope.len() - params.len() - 1;
-        self.scope.truncate(kept);
+        self.truncate_scope(kept);
     }
 
     // The value is evaluated in the enclosing scope; the binder is visible
@@ -80,57 +120,79 @@ impl ExprFolder for PatternScopeFolder {
     // before the body is, so pushing here (rather than in `pre_expr`) lands
     // exactly there.
     fn enter_let(&mut self, name: &str, _id: &Option<VarId>, _value: &PseudoExpr) -> String {
-        self.scope.push(name.to_string());
+        self.push_scope(name.to_string());
         name.to_string()
     }
 
     fn exit_let(&mut self, _name: &str) {
-        self.scope.pop();
+        let kept = self.scope.len() - 1;
+        self.truncate_scope(kept);
     }
 
-    fn fold_when(
+    // The subject binder is in scope in every clause; a pattern binder that
+    // shadows a name already in scope gets a fresh `name_<N>`.
+    fn enter_clause(&mut self, subject_name: Option<&Binder>, pattern: &WhenPattern) {
+        let base = self.scope.len();
+        if let Some(binder) = subject_name {
+            self.push_scope(binder.to_string());
+        }
+        let mut renames: HashMap<VarId, String> = HashMap::new();
+        for binder in pattern_binder_list(pattern) {
+            let name = binder.to_string();
+            if name == "_" {
+                continue; // wildcards never collide
+            }
+            if self.in_scope(&name) {
+                let fresh = self.fresh(&name);
+                renames.insert(binder.var_id(), fresh.clone());
+                self.push_scope(fresh);
+            } else {
+                self.push_scope(name);
+            }
+        }
+        self.clauses.push((base, renames));
+    }
+
+    fn exit_clause(&mut self, _subject_name: Option<&Binder>, _pattern: &WhenPattern) {
+        let (base, renames) = self.clauses.pop().expect("an open clause");
+        self.truncate_scope(base);
+        self.finished.push(renames);
+    }
+
+    fn post_var(&mut self, name: String, id: Option<VarId>) -> PseudoExpr {
+        let renamed = id.and_then(|id| {
+            self.clauses
+                .iter()
+                .rev()
+                .find_map(|(_, renames)| renames.get(&id).cloned())
+        });
+        PseudoExpr::Var {
+            name: renamed.unwrap_or(name),
+            id,
+        }
+    }
+
+    fn post_when(
         &mut self,
         subject: PseudoExpr,
         subject_name: Option<Binder>,
         clauses: Vec<WhenClause>,
     ) -> PseudoExpr {
-        let subject = self.fold(subject);
-        let subject_base = self.scope.len();
-        if let Some(binder) = &subject_name {
-            self.scope.push(binder.to_string());
-        }
+        let renames = self.finished.split_off(self.finished.len() - clauses.len());
         let clauses = clauses
             .into_iter()
-            .map(|clause| {
-                let clause_base = self.scope.len();
-                let mut renames: HashMap<VarId, String> = HashMap::new();
-                for binder in pattern_binder_list(&clause.pattern) {
-                    let name = binder.to_string();
-                    if name == "_" {
-                        continue; // wildcards never collide
-                    }
-                    if self.in_scope(&name) {
-                        let fresh = self.fresh(&name);
-                        renames.insert(binder.var_id(), fresh.clone());
-                        self.scope.push(fresh);
-                    } else {
-                        self.scope.push(name);
-                    }
-                }
-                let pattern =
-                    super::rename_hygiene::rename_pattern_binders(clause.pattern, &renames);
-                let guard = clause.guard.map(|g| self.fold(rewire_uses(g, &renames)));
-                let body = self.fold(rewire_uses(clause.body, &renames));
-                self.scope.truncate(clause_base);
-                WhenClause {
-                    pattern,
-                    guard,
-                    body,
-                }
+            .zip(renames)
+            .map(|(clause, renames)| WhenClause {
+                pattern: super::rename_hygiene::rename_pattern_binders(clause.pattern, &renames),
+                guard: clause.guard,
+                body: clause.body,
             })
             .collect();
-        self.scope.truncate(subject_base);
-        self.post_when(subject, subject_name, clauses)
+        PseudoExpr::When {
+            subject: PBox::new(subject),
+            subject_name,
+            clauses,
+        }
     }
 }
 
@@ -146,7 +208,10 @@ impl ExprFolder for PatternScopeFolder {
 pub(crate) fn disambiguate_shadowed_pattern_binders(expr: PseudoExpr) -> PseudoExpr {
     let mut folder = PatternScopeFolder {
         scope: Vec::new(),
+        in_scope: HashMap::new(),
         counts: HashMap::new(),
+        clauses: Vec::new(),
+        finished: Vec::new(),
     };
     folder.fold(expr)
 }
@@ -164,14 +229,6 @@ fn pattern_binder_list(pattern: &WhenPattern) -> Vec<Binder> {
         WhenPattern::Var(b) => vec![b.clone()],
         WhenPattern::Wildcard | WhenPattern::Literal(_) => Vec::new(),
     }
-}
-
-fn rewire_uses(expr: PseudoExpr, renames: &HashMap<VarId, String>) -> PseudoExpr {
-    let mut current = expr;
-    for (id, new_name) in renames {
-        current = rename_var_use_by_id_in_expr(&current, *id, new_name);
-    }
-    current
 }
 
 pub(super) fn pattern_binds_name(pattern: &WhenPattern, target: &str) -> bool {

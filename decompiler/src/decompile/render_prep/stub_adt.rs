@@ -1421,21 +1421,35 @@ fn rewrite_type_hints(
             }
         }
 
-        fn fold_pattern(&mut self, pattern: WhenPattern) -> WhenPattern {
-            match pattern {
-                WhenPattern::Constructor {
-                    type_hint,
-                    tag,
-                    fields,
-                    shape,
-                } => WhenPattern::Constructor {
-                    type_hint: type_hint.map(|h| self.redirect.get(&h).cloned().unwrap_or(h)),
-                    tag,
-                    fields,
-                    shape,
-                },
-                WhenPattern::Literal(expr) => WhenPattern::Literal(self.fold(expr)),
-                other => other,
+        // Folded flat — a deep `when` costs no stack — with the
+        // constructor patterns redirected once the clauses are rebuilt.
+        // The redirect is a pure lookup, so doing it after the clause
+        // bodies rather than before changes nothing.
+        fn machine_folds_when(&self) -> bool {
+            true
+        }
+
+        fn post_when(
+            &mut self,
+            subject: PseudoExpr,
+            subject_name: Option<crate::pseudo::ast::Binder>,
+            clauses: Vec<crate::pseudo::ast::WhenClause>,
+        ) -> PseudoExpr {
+            let clauses = clauses
+                .into_iter()
+                .map(|mut clause| {
+                    if let WhenPattern::Constructor { type_hint, .. } = &mut clause.pattern {
+                        *type_hint = type_hint
+                            .take()
+                            .map(|h| self.redirect.get(&h).cloned().unwrap_or(h));
+                    }
+                    clause
+                })
+                .collect();
+            PseudoExpr::When {
+                subject: PBox::new(subject),
+                subject_name,
+                clauses,
             }
         }
     }

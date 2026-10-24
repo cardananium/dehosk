@@ -229,6 +229,8 @@ pub(super) fn repair_underscore_lambda_params_with_dangling_uses(expr: PseudoExp
         target: String,
         new_id: VarId,
         bound: Vec<String>,
+        /// `bound`'s length at each open clause.
+        clause_bases: Vec<usize>,
     }
 
     impl RewriteFreeTempRefs {
@@ -279,48 +281,46 @@ pub(super) fn repair_underscore_lambda_params_with_dangling_uses(expr: PseudoExp
             self.bound.pop();
         }
 
-        fn fold_when(
-            &mut self,
-            subject: PseudoExpr,
-            subject_name: Option<Binder>,
-            clauses: Vec<WhenClause>,
-        ) -> PseudoExpr {
-            let subject = self.fold(subject);
-            let clauses = clauses
-                .into_iter()
-                .map(|clause| {
-                    let base = self.bound.len();
-                    if let Some(ref s) = subject_name {
-                        self.bound.push(s.to_string());
+        // Folded flat, the clause scopes opened and closed by the machine,
+        // so a deep `when` costs no stack. Literal patterns stay unfolded, as
+        // they always did here.
+        fn machine_folds_when(&self) -> bool {
+            true
+        }
+        fn machine_keeps_pattern_literals(&self) -> bool {
+            true
+        }
+        fn machine_scopes_clauses(&self) -> bool {
+            true
+        }
+
+        fn enter_clause(&mut self, subject_name: Option<&Binder>, pattern: &WhenPattern) {
+            self.clause_bases.push(self.bound.len());
+            if let Some(s) = subject_name {
+                self.bound.push(s.to_string());
+            }
+            match pattern {
+                WhenPattern::Constructor { fields, .. } | WhenPattern::Tuple(fields) => {
+                    self.bound.extend(fields.iter().map(|b| b.to_string()));
+                }
+                WhenPattern::List { elements, tail } => {
+                    self.bound.extend(elements.iter().map(|b| b.to_string()));
+                    if let Some(tail) = tail {
+                        self.bound.push(tail.to_string());
                     }
-                    match &clause.pattern {
-                        WhenPattern::Constructor { fields, .. } | WhenPattern::Tuple(fields) => {
-                            self.bound.extend(fields.iter().map(|b| b.to_string()));
-                        }
-                        WhenPattern::List { elements, tail } => {
-                            self.bound.extend(elements.iter().map(|b| b.to_string()));
-                            if let Some(tail) = tail {
-                                self.bound.push(tail.to_string());
-                            }
-                        }
-                        WhenPattern::Pair(a, b) => {
-                            self.bound.push(a.to_string());
-                            self.bound.push(b.to_string());
-                        }
-                        WhenPattern::Var(binder) => self.bound.push(binder.to_string()),
-                        WhenPattern::Wildcard | WhenPattern::Literal(_) => {}
-                    }
-                    let guard = clause.guard.map(|guard| self.fold(guard));
-                    let body = self.fold(clause.body);
-                    self.bound.truncate(base);
-                    WhenClause {
-                        pattern: clause.pattern,
-                        guard,
-                        body,
-                    }
-                })
-                .collect();
-            self.post_when(subject, subject_name, clauses)
+                }
+                WhenPattern::Pair(a, b) => {
+                    self.bound.push(a.to_string());
+                    self.bound.push(b.to_string());
+                }
+                WhenPattern::Var(binder) => self.bound.push(binder.to_string()),
+                WhenPattern::Wildcard | WhenPattern::Literal(_) => {}
+            }
+        }
+
+        fn exit_clause(&mut self, _subject_name: Option<&Binder>, _pattern: &WhenPattern) {
+            let base = self.clause_bases.pop().expect("an open clause");
+            self.bound.truncate(base);
         }
     }
 
@@ -329,6 +329,7 @@ pub(super) fn repair_underscore_lambda_params_with_dangling_uses(expr: PseudoExp
             target: name.to_string(),
             new_id,
             bound: Vec::new(),
+            clause_bases: Vec::new(),
         }
         .fold(expr)
     }
@@ -336,11 +337,14 @@ pub(super) fn repair_underscore_lambda_params_with_dangling_uses(expr: PseudoExp
     struct RepairFold;
 
     impl ExprFolder for RepairFold {
-        fn fold_clause(&mut self, clause: WhenClause) -> WhenClause {
-            let mut clause = clause;
-            clause.body = self.fold(clause.body);
-            clause.guard = clause.guard.map(|g| self.fold(g));
-            clause
+        // Folded flat, literal patterns left unfolded as they always were.
+        // The pass keeps no state, so the machine folding a guard before its
+        // body — the old hook did the body first — changes nothing.
+        fn machine_folds_when(&self) -> bool {
+            true
+        }
+        fn machine_keeps_pattern_literals(&self) -> bool {
+            true
         }
 
         fn post_lambda(&mut self, params: Vec<Binder>, body: PseudoExpr) -> PseudoExpr {
