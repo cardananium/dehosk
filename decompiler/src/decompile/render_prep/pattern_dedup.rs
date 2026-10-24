@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use crate::pseudo::ast::{Binder, PseudoExpr, WhenPattern};
+use crate::pseudo::ast::{Binder, PBox, PseudoExpr, WhenClause, WhenPattern};
 use crate::pseudo::var_id::VarId;
 
-use super::rename_var_use_by_id_in_expr;
+use super::scope_recurse::{PlainPost, plain_children, rebuild_plain, take};
 
 #[cfg(test)]
 pub(crate) fn debug_deduplicate_constr_pattern_binders(expr: PseudoExpr) -> PseudoExpr {
@@ -23,40 +23,189 @@ pub(crate) fn debug_deduplicate_constr_pattern_binders(expr: PseudoExpr) -> Pseu
 // would apply at parse time.
 
 pub(super) fn deduplicate_constr_pattern_binders(expr: PseudoExpr) -> PseudoExpr {
-    use crate::pseudo::fold::ExprFolder;
-
-    struct Dedup;
-
-    impl ExprFolder for Dedup {
-        fn fold_when(
-            &mut self,
-            subject: PseudoExpr,
+    /// One pending step of the walk: a job stack, because `when`s nest as
+    /// deep as the script likes and on `wasm32` the call stack cannot grow
+    /// to match.
+    enum Step {
+        Enter(PseudoExpr),
+        Let {
+            name: String,
+            id: Option<VarId>,
+        },
+        Lambda {
+            params: Vec<Binder>,
+        },
+        RecFn {
+            name: Binder,
+            params: Vec<Binder>,
+        },
+        /// The subject, then each clause's body and guard, are on `done`.
+        When {
             subject_name: Option<Binder>,
-            clauses: Vec<crate::pseudo::ast::WhenClause>,
-        ) -> PseudoExpr {
-            let subject = self.fold(subject);
-            let clauses = clauses
-                .into_iter()
-                .map(|mut clause| {
-                    let (pattern, renamed_binders) = dedup_pattern_fields(clause.pattern);
-                    clause.pattern = pattern;
-                    clause.body = self.fold(clause.body);
-                    clause.guard = clause.guard.map(|g| self.fold(g));
-                    for (id, new_name) in renamed_binders {
-                        clause.body = rename_var_use_by_id_in_expr(&clause.body, id, &new_name);
-                        clause.guard = clause
-                            .guard
-                            .map(|guard| rename_var_use_by_id_in_expr(&guard, id, &new_name));
-                    }
-                    clause
-                })
-                .collect();
-            self.post_when(subject, subject_name, clauses)
-        }
+            clause_meta: Vec<(WhenPattern, bool)>,
+        },
+        /// A clause renamed binders of its pattern: their uses in its body
+        /// and guard take the new names, from this step to the matching
+        /// `CloseClause`.
+        OpenClause {
+            renames: Vec<(VarId, String)>,
+        },
+        CloseClause {
+            renames: usize,
+        },
+        Plain(PlainPost),
     }
 
-    let mut folder = Dedup;
-    folder.fold(expr)
+    // Renamed pattern binders whose clauses are still being walked. A use
+    // takes the name its OUTERMOST rename gives it — the order the renames
+    // used to be applied in, inner clauses first and their parents after.
+    let mut renamed: Vec<(VarId, String)> = Vec::new();
+    let rename_of = |renamed: &[(VarId, String)], id: VarId| {
+        renamed
+            .iter()
+            .find_map(|(vid, name)| (*vid == id).then(|| name.clone()))
+    };
+
+    let mut steps: Vec<Step> = vec![Step::Enter(expr)];
+    let mut done: Vec<PseudoExpr> = Vec::new();
+    while let Some(step) = steps.pop() {
+        match step {
+            Step::Enter(expr) => match expr {
+                PseudoExpr::Var { name, id } => {
+                    let name = id
+                        .and_then(|id| rename_of(&renamed, id))
+                        .unwrap_or(name);
+                    done.push(PseudoExpr::Var { name, id });
+                }
+                PseudoExpr::Let {
+                    name,
+                    id,
+                    value,
+                    body,
+                } => {
+                    steps.push(Step::Let { name, id });
+                    steps.push(Step::Enter(body.into_inner()));
+                    steps.push(Step::Enter(value.into_inner()));
+                }
+                PseudoExpr::Lambda { params, body } => {
+                    steps.push(Step::Lambda { params });
+                    steps.push(Step::Enter(body.into_inner()));
+                }
+                PseudoExpr::RecFn { name, params, body } => {
+                    steps.push(Step::RecFn { name, params });
+                    steps.push(Step::Enter(body.into_inner()));
+                }
+                PseudoExpr::When {
+                    subject,
+                    subject_name,
+                    clauses,
+                } => {
+                    let subject_name = subject_name.map(|binder| match rename_of(&renamed, binder.id) {
+                        Some(new_name) => binder.renamed(new_name),
+                        None => binder,
+                    });
+                    // Each clause pops as: open its renames, its body, its
+                    // guard, close its renames — so pushed in reverse.
+                    let mut clause_meta = Vec::with_capacity(clauses.len());
+                    let mut clause_steps: Vec<Vec<Step>> = Vec::with_capacity(clauses.len());
+                    for clause in clauses {
+                        let (pattern, renamed_binders) = dedup_pattern_fields(clause.pattern);
+                        clause_meta.push((pattern, clause.guard.is_some()));
+                        let mut pending = vec![Step::CloseClause {
+                            renames: renamed_binders.len(),
+                        }];
+                        if let Some(guard) = clause.guard {
+                            pending.push(Step::Enter(guard));
+                        }
+                        pending.push(Step::Enter(clause.body));
+                        pending.push(Step::OpenClause {
+                            renames: renamed_binders,
+                        });
+                        clause_steps.push(pending);
+                    }
+                    steps.push(Step::When {
+                        subject_name,
+                        clause_meta,
+                    });
+                    for pending in clause_steps.into_iter().rev() {
+                        steps.extend(pending);
+                    }
+                    steps.push(Step::Enter(subject.into_inner()));
+                }
+                other => match plain_children(other) {
+                    Ok((kind, children)) => {
+                        steps.push(Step::Plain(kind));
+                        for child in children.into_iter().rev() {
+                            steps.push(Step::Enter(child));
+                        }
+                    }
+                    Err(leaf) => done.push(leaf),
+                },
+            },
+            Step::Let { name, id } => {
+                let body = done.pop().expect("let body");
+                let value = done.pop().expect("let value");
+                done.push(PseudoExpr::Let {
+                    name,
+                    id,
+                    value: PBox::new(value),
+                    body: PBox::new(body),
+                });
+            }
+            Step::Lambda { params } => {
+                let body = done.pop().expect("lambda body");
+                done.push(PseudoExpr::Lambda {
+                    params,
+                    body: PBox::new(body),
+                });
+            }
+            Step::RecFn { name, params } => {
+                let body = done.pop().expect("recfn body");
+                done.push(PseudoExpr::RecFn {
+                    name,
+                    params,
+                    body: PBox::new(body),
+                });
+            }
+            Step::When {
+                subject_name,
+                clause_meta,
+            } => {
+                let total = 1 + clause_meta
+                    .iter()
+                    .map(|(_, has_guard)| usize::from(*has_guard) + 1)
+                    .sum::<usize>();
+                let mut parts = take(&mut done, total).into_iter();
+                let subject = parts.next().expect("when subject");
+                let clauses = clause_meta
+                    .into_iter()
+                    .map(|(pattern, has_guard)| {
+                        let body = parts.next().expect("when clause body");
+                        let guard = has_guard.then(|| parts.next().expect("when guard"));
+                        WhenClause {
+                            pattern,
+                            guard,
+                            body,
+                        }
+                    })
+                    .collect();
+                done.push(PseudoExpr::When {
+                    subject: PBox::new(subject),
+                    subject_name,
+                    clauses,
+                });
+            }
+            Step::OpenClause { renames } => renamed.extend(renames),
+            Step::CloseClause { renames } => {
+                renamed.truncate(renamed.len() - renames);
+            }
+            Step::Plain(kind) => {
+                let rebuilt = rebuild_plain(kind, &mut done);
+                done.push(rebuilt);
+            }
+        }
+    }
+    done.pop().expect("one result")
 }
 
 fn dedup_pattern_fields(pattern: WhenPattern) -> (WhenPattern, Vec<(VarId, String)>) {
