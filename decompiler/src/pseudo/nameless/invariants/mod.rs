@@ -8,7 +8,8 @@
 //! references an in-scope binder nor sits in the entry-lambda
 //! parameter set (the only legitimate "free" vars).
 
-use std::collections::HashSet;
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 
 use super::super::var_id::VarId;
 #[cfg(test)]
@@ -45,8 +46,10 @@ pub(crate) fn validate_nameless_invariants(
 
     let mut state = ValidationState {
         free: Vec::new(),
-        scope_chain: vec![entry_params.clone()],
+        scope_chain: Vec::new(),
+        bound: HashMap::new(),
     };
+    state.push_scope(entry_params.iter().copied());
     state.walk(expr);
     NamelessValidation {
         free_vars: state.free,
@@ -279,20 +282,40 @@ fn record_render_name(id: VarId, table: &VarTable, out: &mut HashSet<String>) {
 
 struct ValidationState {
     free: Vec<VarId>,
+    /// The binders of every open scope, innermost last.
     scope_chain: Vec<HashSet<VarId>>,
+    /// How many open scopes bind each id: the union of `scope_chain`, kept
+    /// so a lookup does not scan the chain. The chain is as deep as the
+    /// script nests binders, so a scan per reference would make the walk
+    /// quadratic in a script-controlled depth.
+    bound: HashMap<VarId, usize>,
 }
 
 impl ValidationState {
     fn is_bound(&self, id: VarId) -> bool {
-        self.scope_chain.iter().any(|s| s.contains(&id))
+        self.bound.contains_key(&id)
     }
 
     fn push_scope(&mut self, ids: impl IntoIterator<Item = VarId>) {
-        self.scope_chain.push(ids.into_iter().collect());
+        let scope: HashSet<VarId> = ids.into_iter().collect();
+        for id in &scope {
+            *self.bound.entry(*id).or_insert(0) += 1;
+        }
+        self.scope_chain.push(scope);
     }
 
     fn pop_scope(&mut self) {
-        self.scope_chain.pop();
+        let Some(scope) = self.scope_chain.pop() else {
+            return;
+        };
+        for id in scope {
+            if let Entry::Occupied(mut open) = self.bound.entry(id) {
+                *open.get_mut() -= 1;
+                if *open.get() == 0 {
+                    open.remove();
+                }
+            }
+        }
     }
 }
 

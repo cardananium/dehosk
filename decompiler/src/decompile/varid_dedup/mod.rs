@@ -215,7 +215,15 @@ fn join_children(shell: PseudoExpr, kids: Vec<PseudoExpr>) -> PseudoExpr {
 
 struct VarIdDeduplicator {
     seen_binding_ids: HashSet<VarId>,
-    id_rewrites: Vec<HashMap<VarId, VarId>>,
+    /// The innermost open scope's rewrite of every id — what scanning a
+    /// stack of per-scope maps from the top would find. Kept flat so a
+    /// reference costs one lookup: the scope stack is as deep as the script
+    /// nests binders, and a scan per reference would make the walk
+    /// quadratic in a script-controlled depth.
+    id_rewrites: HashMap<VarId, VarId>,
+    /// Per open scope, the `id_rewrites` entries it overwrote, so closing
+    /// it restores them.
+    scope_undo: Vec<Vec<(VarId, Option<VarId>)>>,
     next_fresh_var_id: u32,
     /// Every binder rename `(original, rewritten)`, so
     /// [`deduplicate_var_ids_with_annotations`] can migrate
@@ -227,7 +235,8 @@ impl VarIdDeduplicator {
     fn new(expr: &PseudoExpr) -> Self {
         Self {
             seen_binding_ids: HashSet::new(),
-            id_rewrites: vec![HashMap::new()],
+            id_rewrites: HashMap::new(),
+            scope_undo: vec![Vec::new()],
             next_fresh_var_id: max_explicit_var_id(expr).saturating_add(1),
             rename_history: Vec::new(),
         }
@@ -245,13 +254,22 @@ impl VarIdDeduplicator {
     }
 
     fn push_scope(&mut self) {
-        self.id_rewrites.push(HashMap::new());
+        self.scope_undo.push(Vec::new());
     }
 
     fn pop_scope(&mut self) {
-        self.id_rewrites
+        let undo = self
+            .scope_undo
             .pop()
             .expect("varid dedup id rewrite stack should not underflow");
+        // Newest first, so an id the scope rewrote twice gets its
+        // outer value back.
+        for (original, shadowed) in undo.into_iter().rev() {
+            match shadowed {
+                Some(outer) => self.id_rewrites.insert(original, outer),
+                None => self.id_rewrites.remove(&original),
+            };
+        }
     }
 
     fn fresh_var_id(&mut self) -> VarId {
@@ -272,18 +290,15 @@ impl VarIdDeduplicator {
     }
 
     fn record_id_rewrite(&mut self, original: VarId, rewritten: VarId) {
-        self.id_rewrites
+        let shadowed = self.id_rewrites.insert(original, rewritten);
+        self.scope_undo
             .last_mut()
             .expect("varid dedup id rewrite scope should always exist")
-            .insert(original, rewritten);
+            .push((original, shadowed));
     }
 
     fn rewrite_reference_id(&self, original: VarId) -> VarId {
-        self.id_rewrites
-            .iter()
-            .rev()
-            .find_map(|scope| scope.get(&original).copied())
-            .unwrap_or(original)
+        self.id_rewrites.get(&original).copied().unwrap_or(original)
     }
 
     fn rewrite_binder_for_scope(&mut self, binder: &Binder) -> Binder {
@@ -336,7 +351,7 @@ impl VarIdDeduplicator {
 
     /// The top-down rewrite.
     ///
-    /// The scope is the deduper's own `id_rewrites` stack; `push_scope` /
+    /// The scope is the deduper's own `id_rewrites` map; `push_scope` /
     /// `pop_scope` are steps that open and close a binder, and every
     /// `reserve_binding_id` keeps its position in the walk — it mints ids in
     /// call order, so a reordered traversal would renumber the whole program.
