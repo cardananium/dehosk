@@ -37,7 +37,8 @@ use crate::pseudo::var_id::VarId;
 use super::scope_recurse::rewrite_bottom_up;
 
 pub(super) fn extract_repeated_subexpr(expr: PseudoExpr) -> PseudoExpr {
-    let expr = extract_repeated_subexpr_rec(expr);
+    let mut walk = Walk::default();
+    let expr = rewrite_bottom_up(expr, |expr| try_rewrite(expr, &mut walk));
     // `try_rewrite` only wraps bodies it meets during the walk, so a
     // validator whose entry lambda was peeled leaves its top-level `Let`
     // chain unprocessed. Treat the ROOT as an extraction body when it is
@@ -50,26 +51,61 @@ pub(super) fn extract_repeated_subexpr(expr: PseudoExpr) -> PseudoExpr {
         // at an effect-bearing eager sibling so nothing is hoisted above
         // an emission. The abort path is gated independently by
         // `first_occurrence_dominates`.
-        other => wrap_with_extracted_lets(other, /* abort_only */ true),
+        other => wrap_with_extracted_lets(other, /* abort_only */ true, &mut walk),
     }
 }
 
-fn extract_repeated_subexpr_rec(expr: PseudoExpr) -> PseudoExpr {
-    rewrite_bottom_up(expr, try_rewrite)
+/// What one extraction walk carries from body to body.
+///
+/// Bodies nest — every lambda body, branch and clause body is one, and so is
+/// a `let`'s body — and each looks at everything below it, so a chain of
+/// them as deep as the script likes would cost time quadratic in that depth.
+struct Walk {
+    /// Work left, counted in nodes looked at. Real scripts use a small
+    /// fraction (a 15 KB mainnet validator takes about a million); past
+    /// it the remaining bodies are left as they are — a missed extraction,
+    /// never an unsound one — so no script can make the pass take minutes.
+    budget: usize,
+    /// `let`s whose body was already found to hold no candidate. The walk is
+    /// bottom-up and a body that held none was not rewritten, so an
+    /// enclosing body need not look through it again.
+    clean_let_bodies: std::collections::HashSet<VarId>,
+    /// Every `let` id met so far, and those met more than once.
+    seen_lets: std::collections::HashSet<VarId>,
+    shared_ids: std::collections::HashSet<VarId>,
 }
 
-fn try_rewrite(expr: PseudoExpr) -> PseudoExpr {
+impl Default for Walk {
+    fn default() -> Self {
+        Walk {
+            budget: 16_000_000,
+            clean_let_bodies: Default::default(),
+            seen_lets: Default::default(),
+            shared_ids: Default::default(),
+        }
+    }
+}
+
+impl Walk {
+    /// Spend `n` nodes of work; false once the budget is gone.
+    fn spend(&mut self, n: usize) -> bool {
+        self.budget = self.budget.saturating_sub(n);
+        self.budget > 0
+    }
+}
+
+fn try_rewrite(expr: PseudoExpr, walk: &mut Walk) -> PseudoExpr {
     // Shapes with a single "body" that a `Let` can wrap.
     match expr {
         PseudoExpr::Lambda { params, body } => {
-            let body = wrap_with_extracted_lets(body.into_inner(), /* abort_only */ false);
+            let body = wrap_with_extracted_lets(body.into_inner(), /* abort_only */ false, walk);
             PseudoExpr::Lambda {
                 params,
                 body: PBox::new(body),
             }
         }
         PseudoExpr::RecFn { name, params, body } => {
-            let body = wrap_with_extracted_lets(body.into_inner(), /* abort_only */ false);
+            let body = wrap_with_extracted_lets(body.into_inner(), /* abort_only */ false, walk);
             PseudoExpr::RecFn {
                 name,
                 params,
@@ -95,7 +131,7 @@ fn try_rewrite(expr: PseudoExpr) -> PseudoExpr {
                 .map(|c| WhenClause {
                     pattern: c.pattern,
                     guard: c.guard,
-                    body: wrap_with_extracted_lets(c.body, /* abort_only */ false),
+                    body: wrap_with_extracted_lets(c.body, /* abort_only */ false, walk),
                 })
                 .collect(),
         },
@@ -108,10 +144,12 @@ fn try_rewrite(expr: PseudoExpr) -> PseudoExpr {
             then_branch: PBox::new(wrap_with_extracted_lets(
                 then_branch.into_inner(),
                 /* abort_only */ false,
+                walk,
             )),
             else_branch: PBox::new(wrap_with_extracted_lets(
                 else_branch.into_inner(),
                 /* abort_only */ false,
+                walk,
             )),
         },
         // A Let BODY is an extraction root too — needed when a duplicate's
@@ -127,10 +165,25 @@ fn try_rewrite(expr: PseudoExpr) -> PseudoExpr {
             value,
             body,
         } => {
+            // Two `let`s sharing an id cannot vouch for each other's body.
+            if let Some(vid) = id
+                && !walk.seen_lets.insert(vid)
+            {
+                walk.clean_let_bodies.remove(&vid);
+                walk.shared_ids.insert(vid);
+            }
             let body = if let Some(vid) = id
                 && references_at_least_twice(&body, vid)
             {
-                wrap_with_extracted_lets(body.into_inner(), /* abort_only */ false)
+                let body = body.into_inner();
+                if may_hold_candidate(&body, walk) {
+                    extract_from(body, /* abort_only */ false, walk)
+                } else {
+                    if !walk.shared_ids.contains(&vid) {
+                        walk.clean_let_bodies.insert(vid);
+                    }
+                    body
+                }
             } else {
                 body.into_inner()
             };
@@ -169,13 +222,18 @@ fn references_at_least_twice(expr: &PseudoExpr, vid: VarId) -> bool {
 /// `let w = <duplicate>` for each, rewriting every occurrence to the
 /// new binder. Candidates whose free vars would be unbound at the
 /// body's scope are skipped.
-fn wrap_with_extracted_lets(body: PseudoExpr, abort_only: bool) -> PseudoExpr {
+fn wrap_with_extracted_lets(body: PseudoExpr, abort_only: bool, walk: &mut Walk) -> PseudoExpr {
     // Every nested lambda body, `if` branch and clause body is a root of its
     // own, so a chain of them would pay one whole-body analysis per level.
     // Most cannot hold a candidate at all, and their eager spine says so.
-    if !may_hold_candidate(&body) {
+    if !may_hold_candidate(&body, walk) {
         return body;
     }
+    extract_from(body, abort_only, walk)
+}
+
+/// [`wrap_with_extracted_lets`] for a body [`may_hold_candidate`] passed.
+fn extract_from(body: PseudoExpr, abort_only: bool, walk: &mut Walk) -> PseudoExpr {
 
     // A candidate can only be hoisted to the top of `body` if every
     // var it references is already visible there. Params in scope
@@ -185,6 +243,9 @@ fn wrap_with_extracted_lets(body: PseudoExpr, abort_only: bool) -> PseudoExpr {
     let body_free = collect_free_vars(&body);
 
     let facts = Facts::of(&body);
+    if !walk.spend(facts.of.len()) {
+        return body;
+    }
     let shared = SharedSignatures::of(&body, &facts);
 
     // Signatures in always-evaluated position relative to `body`. Only
@@ -266,6 +327,7 @@ fn wrap_with_extracted_lets(body: PseudoExpr, abort_only: bool) -> PseudoExpr {
         // Re-verify the signature still has ≥2 occurrences in
         // `current` (a previous round may have rewritten some away).
         let occurrences = Occurrences::of(&current, &sig, target);
+        walk.spend(occurrences.looked_at);
         if occurrences.counted < 2 {
             continue;
         }
@@ -515,21 +577,61 @@ fn hash_own_shape(expr: &PseudoExpr, hasher: &mut impl Hasher) {
 /// and, being at least five nodes, it has children. This walks a superset of
 /// the always-evaluated positions (it does not stop after an aborting or
 /// effectful sibling).
-fn may_hold_candidate(body: &PseudoExpr) -> bool {
+fn may_hold_candidate(body: &PseudoExpr, walk: &mut Walk) -> bool {
     let mut pending: Vec<&PseudoExpr> = Vec::new();
-    push_eval_position_children(body, &mut pending);
+    push_eval_position_children(body, &mut pending, walk);
+    let mut looked_at = 0;
+    let mut found = false;
     while let Some(current) = pending.pop() {
-        if extractable_kind(current) && !scope_children(current).is_empty() {
+        looked_at += 1;
+        if extractable_kind(current) && has_at_least_nodes(current, 5) {
+            found = true;
+            break;
+        }
+        push_eval_position_children(current, &mut pending, walk);
+    }
+    // Out of budget, nothing more is extracted.
+    walk.spend(looked_at) && found
+}
+
+/// Whether `expr` has at least `n` nodes as [`count_nodes`] counts them,
+/// looking at no more than `n` of them.
+fn has_at_least_nodes(expr: &PseudoExpr, n: usize) -> bool {
+    let mut seen = 0;
+    let mut pending: Vec<&PseudoExpr> = vec![expr];
+    while let Some(current) = pending.pop() {
+        seen += 1;
+        if seen >= n {
             return true;
         }
-        push_eval_position_children(current, &mut pending);
+        pending.extend(scope_children(current));
     }
     false
 }
 
 /// The children [`collect_eval_position_sigs`] descends into, before it
-/// stops at an aborting or effectful sibling.
-fn push_eval_position_children<'a>(expr: &'a PseudoExpr, out: &mut Vec<&'a PseudoExpr>) {
+/// stops at an aborting or effectful sibling — except below the body of a
+/// `let` already found clean, where only the body's own root is left to
+/// look at.
+fn push_eval_position_children<'a>(
+    expr: &'a PseudoExpr,
+    out: &mut Vec<&'a PseudoExpr>,
+    walk: &Walk,
+) {
+    if let PseudoExpr::Let {
+        id: Some(id),
+        value,
+        body,
+        ..
+    } = expr
+        && walk.clean_let_bodies.contains(id)
+    {
+        out.push(value);
+        if extractable_kind(body) && has_at_least_nodes(body, 5) {
+            out.push(body);
+        }
+        return;
+    }
     match expr {
         PseudoExpr::If { condition, .. } => out.push(condition),
         PseudoExpr::When { subject, .. } => out.push(subject),
@@ -658,6 +760,8 @@ fn collect_eval_position_sigs(
 struct Occurrences {
     counted: usize,
     nodes: std::collections::HashSet<*const PseudoExpr>,
+    /// Nodes the search folded facts for.
+    looked_at: usize,
 }
 
 impl Occurrences {
@@ -667,6 +771,7 @@ impl Occurrences {
         use crate::pseudo::ast::WhenPattern;
 
         let facts = Facts::of(expr);
+        let looked_at = facts.of.len();
         let mut counted = 0;
         let mut nodes = std::collections::HashSet::new();
         // (node, reached without passing through a pattern-literal payload)
@@ -707,7 +812,11 @@ impl Occurrences {
                 pending.extend(kids.iter().map(|kid| (*kid, scoped)));
             }
         }
-        Occurrences { counted, nodes }
+        Occurrences {
+            counted,
+            nodes,
+            looked_at,
+        }
     }
 }
 
