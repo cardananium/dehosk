@@ -10,8 +10,8 @@ fn identity_folder_preserves_let() {
     let id = VarId::fresh_binding();
     let expr = NamelessExpr::Let {
         binder: id,
-        value: Box::new(NamelessExpr::Int(num_bigint::BigInt::from(42))),
-        body: Box::new(NamelessExpr::Var(id)),
+        value: NBox::new(NamelessExpr::Int(num_bigint::BigInt::from(42))),
+        body: NBox::new(NamelessExpr::Var(id)),
     };
     let mut f = Identity;
     let result = f.fold(expr.clone());
@@ -29,9 +29,9 @@ impl NamelessFolder for DelayStripper {
 
 #[test]
 fn override_post_delay_strips_delays() {
-    let expr = NamelessExpr::Delay(Box::new(NamelessExpr::Delay(Box::new(NamelessExpr::Int(
-        num_bigint::BigInt::from(7),
-    )))));
+    let expr = NamelessExpr::Delay(NBox::new(NamelessExpr::Delay(NBox::new(
+        NamelessExpr::Int(num_bigint::BigInt::from(7)),
+    ))));
     let result = DelayStripper.fold(expr);
     assert!(matches!(result, NamelessExpr::Int(_)));
 }
@@ -61,10 +61,10 @@ fn lifecycle_hooks_fire_in_correct_order() {
     // λx. (let y = x in y)
     let expr = NamelessExpr::Lambda {
         params: vec![lam_param],
-        body: Box::new(NamelessExpr::Let {
+        body: NBox::new(NamelessExpr::Let {
             binder: let_id,
-            value: Box::new(NamelessExpr::Var(lam_param)),
-            body: Box::new(NamelessExpr::Var(let_id)),
+            value: NBox::new(NamelessExpr::Var(lam_param)),
+            body: NBox::new(NamelessExpr::Var(let_id)),
         }),
     };
     let mut tracker = ScopeStackTracker { events: vec![] };
@@ -104,11 +104,14 @@ impl NamelessVisitor for VarCounter {
 fn visitor_counts_var_uses() {
     let id = VarId::fresh_binding();
     // Tuple([Var(id), Var(id), Int(0)])
-    let expr = NamelessExpr::Tuple(vec![
-        NamelessExpr::Var(id),
-        NamelessExpr::Var(id),
-        NamelessExpr::Int(num_bigint::BigInt::from(0)),
-    ]);
+    let expr = NamelessExpr::Tuple(
+        vec![
+            NamelessExpr::Var(id),
+            NamelessExpr::Var(id),
+            NamelessExpr::Int(num_bigint::BigInt::from(0)),
+        ]
+        .into(),
+    );
     let mut counter = VarCounter { count: 0 };
     counter.walk(&expr);
     assert_eq!(counter.count, 2);
@@ -153,13 +156,16 @@ fn visit_action_skip_does_not_recurse_into_lambda_body() {
     let id = VarId::fresh_binding();
     // (Var(id), λ_. Var(id)) — the Var inside the lambda body
     // should NOT be counted because the lambda subtree is skipped.
-    let expr = NamelessExpr::Tuple(vec![
-        NamelessExpr::Var(id),
-        NamelessExpr::Lambda {
-            params: vec![VarId::fresh_binding()],
-            body: Box::new(NamelessExpr::Var(id)),
-        },
-    ]);
+    let expr = NamelessExpr::Tuple(
+        vec![
+            NamelessExpr::Var(id),
+            NamelessExpr::Lambda {
+                params: vec![VarId::fresh_binding()],
+                body: NBox::new(NamelessExpr::Var(id)),
+            },
+        ]
+        .into(),
+    );
     let mut counter = VarCounterSkippingLambdas { count: 0 };
     counter.walk(&expr);
     assert_eq!(counter.count, 1);
@@ -172,10 +178,10 @@ fn visitor_lifecycle_hooks_match_folder_ordering() {
     let let_id = VarId::fresh_binding();
     let expr = NamelessExpr::Lambda {
         params: vec![lam_param],
-        body: Box::new(NamelessExpr::Let {
+        body: NBox::new(NamelessExpr::Let {
             binder: let_id,
-            value: Box::new(NamelessExpr::Var(lam_param)),
-            body: Box::new(NamelessExpr::Var(let_id)),
+            value: NBox::new(NamelessExpr::Var(lam_param)),
+            body: NBox::new(NamelessExpr::Var(let_id)),
         }),
     };
     let mut recorder = ScopeRecorder { events: vec![] };
@@ -194,10 +200,13 @@ fn visitor_lifecycle_hooks_match_folder_ordering() {
 #[test]
 fn pre_expr_replace_short_circuits_recursion() {
     // Tuple([Int(1), Int(2)]) → Tuple([Unit, Unit])
-    let expr = NamelessExpr::Tuple(vec![
-        NamelessExpr::Int(num_bigint::BigInt::from(1)),
-        NamelessExpr::Int(num_bigint::BigInt::from(2)),
-    ]);
+    let expr = NamelessExpr::Tuple(
+        vec![
+            NamelessExpr::Int(num_bigint::BigInt::from(1)),
+            NamelessExpr::Int(num_bigint::BigInt::from(2)),
+        ]
+        .into(),
+    );
     let result = PreReplaceUnit.fold(expr);
     let NamelessExpr::Tuple(items) = result else {
         panic!("expected Tuple");

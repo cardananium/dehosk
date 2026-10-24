@@ -18,7 +18,7 @@ use super::super::field_selector::FieldSelector;
 use super::super::type_hint::TypeHintId;
 use super::super::var_id::VarId;
 use super::{
-    NamelessClause, NamelessExpr, NamelessPattern, VarKind, VarMetadata, VarOrigin, VarTable,
+    NBox, NamelessClause, NamelessExpr, NamelessPattern, VarKind, VarMetadata, VarOrigin, VarTable,
 };
 use crate::builtins::BuiltinId;
 use crate::pseudo::ast::PBox;
@@ -364,7 +364,7 @@ fn lower(expr: &PseudoExpr, table: &mut VarTable) -> NamelessExpr {
                         let body = results.pop().expect("lambda body");
                         NamelessExpr::Lambda {
                             params: params.iter().map(|p| p.id).collect(),
-                            body: Box::new(body),
+                            body: NBox::new(body),
                         }
                     }
                     Build::RecFn { name, params } => {
@@ -372,15 +372,15 @@ fn lower(expr: &PseudoExpr, table: &mut VarTable) -> NamelessExpr {
                         NamelessExpr::RecFn {
                             name: name.id,
                             params: params.iter().map(|p| p.id).collect(),
-                            body: Box::new(body),
+                            body: NBox::new(body),
                         }
                     }
                     Build::Apply { nargs } => {
                         let args = take_n(&mut results, nargs);
                         let function = results.pop().expect("apply function");
                         NamelessExpr::Apply {
-                            function: Box::new(function),
-                            args,
+                            function: NBox::new(function),
+                            args: args.into(),
                         }
                     }
                     Build::Let { id } => {
@@ -388,8 +388,8 @@ fn lower(expr: &PseudoExpr, table: &mut VarTable) -> NamelessExpr {
                         let value = results.pop().expect("let value");
                         NamelessExpr::Let {
                             binder: id,
-                            value: Box::new(value),
-                            body: Box::new(body),
+                            value: NBox::new(value),
+                            body: NBox::new(body),
                         }
                     }
                     Build::If => {
@@ -397,9 +397,9 @@ fn lower(expr: &PseudoExpr, table: &mut VarTable) -> NamelessExpr {
                         let then_branch = results.pop().expect("if then");
                         let condition = results.pop().expect("if condition");
                         NamelessExpr::If {
-                            condition: Box::new(condition),
-                            then_branch: Box::new(then_branch),
-                            else_branch: Box::new(else_branch),
+                            condition: NBox::new(condition),
+                            then_branch: NBox::new(then_branch),
+                            else_branch: NBox::new(else_branch),
                         }
                     }
                     Build::When {
@@ -410,9 +410,9 @@ fn lower(expr: &PseudoExpr, table: &mut VarTable) -> NamelessExpr {
                         let clauses = clause_results.split_off(at);
                         let subject = results.pop().expect("when subject");
                         NamelessExpr::When {
-                            subject: Box::new(subject),
+                            subject: NBox::new(subject),
                             subject_name,
-                            clauses,
+                            clauses: clauses.into(),
                         }
                     }
                     Build::List {
@@ -420,18 +420,21 @@ fn lower(expr: &PseudoExpr, table: &mut VarTable) -> NamelessExpr {
                         has_tail,
                     } => {
                         let tail = if has_tail {
-                            Some(Box::new(results.pop().expect("list tail")))
+                            Some(NBox::new(results.pop().expect("list tail")))
                         } else {
                             None
                         };
                         let elements = take_n(&mut results, nelements);
-                        NamelessExpr::List { elements, tail }
+                        NamelessExpr::List {
+                            elements: elements.into(),
+                            tail,
+                        }
                     }
-                    Build::Tuple(n) => NamelessExpr::Tuple(take_n(&mut results, n)),
+                    Build::Tuple(n) => NamelessExpr::Tuple(take_n(&mut results, n).into()),
                     Build::Pair => {
                         let b = results.pop().expect("pair second");
                         let a = results.pop().expect("pair first");
-                        NamelessExpr::Pair(Box::new(a), Box::new(b))
+                        NamelessExpr::Pair(NBox::new(a), NBox::new(b))
                     }
                     Build::Constr {
                         type_hint,
@@ -443,21 +446,21 @@ fn lower(expr: &PseudoExpr, table: &mut VarTable) -> NamelessExpr {
                         NamelessExpr::Constr {
                             type_hint,
                             tag,
-                            fields,
+                            fields: fields.into(),
                             shape,
                         }
                     }
                     Build::FieldAccess { selector } => {
                         let record = results.pop().expect("field access record");
                         NamelessExpr::FieldAccess {
-                            record: Box::new(record),
+                            record: NBox::new(record),
                             selector,
                         }
                     }
                     Build::IndexAccess { index } => {
                         let collection = results.pop().expect("index access collection");
                         NamelessExpr::IndexAccess {
-                            collection: Box::new(collection),
+                            collection: NBox::new(collection),
                             index,
                         }
                     }
@@ -466,35 +469,38 @@ fn lower(expr: &PseudoExpr, table: &mut VarTable) -> NamelessExpr {
                         let left = results.pop().expect("binop left");
                         NamelessExpr::BinOp {
                             op,
-                            left: Box::new(left),
-                            right: Box::new(right),
+                            left: NBox::new(left),
+                            right: NBox::new(right),
                         }
                     }
                     Build::UnOp { op } => {
                         let operand = results.pop().expect("unop operand");
                         NamelessExpr::UnOp {
                             op,
-                            operand: Box::new(operand),
+                            operand: NBox::new(operand),
                         }
                     }
                     Build::BuiltinCall { name, nargs } => {
                         let args = take_n(&mut results, nargs);
-                        NamelessExpr::BuiltinCall { name, args }
+                        NamelessExpr::BuiltinCall {
+                            name,
+                            args: args.into(),
+                        }
                     }
                     Build::Delay => {
                         let inner = results.pop().expect("delay inner");
-                        NamelessExpr::Delay(Box::new(inner))
+                        NamelessExpr::Delay(NBox::new(inner))
                     }
                     Build::Force => {
                         let inner = results.pop().expect("force inner");
-                        NamelessExpr::Force(Box::new(inner))
+                        NamelessExpr::Force(NBox::new(inner))
                     }
                     Build::Trace => {
                         let value = results.pop().expect("trace value");
                         let message = results.pop().expect("trace message");
                         NamelessExpr::Trace {
-                            message: Box::new(message),
-                            value: Box::new(value),
+                            message: NBox::new(message),
+                            value: NBox::new(value),
                         }
                     }
                 };

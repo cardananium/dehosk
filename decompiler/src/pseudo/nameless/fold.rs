@@ -5,7 +5,7 @@
 //! variants it cares about; the `fold` driver recurses into
 //! children before invoking the hook.
 
-use super::{NamelessClause, NamelessExpr, NamelessPattern};
+use super::{NBox, NamelessClause, NamelessExpr, NamelessPattern};
 use crate::pseudo::ast::{BinaryOp, UnaryOp};
 use crate::pseudo::field_selector::FieldSelector;
 use crate::pseudo::var_id::VarId;
@@ -108,27 +108,27 @@ pub(crate) trait NamelessFolder {
     fn post_lambda(&mut self, params: Vec<VarId>, body: NamelessExpr) -> NamelessExpr {
         NamelessExpr::Lambda {
             params,
-            body: Box::new(body),
+            body: NBox::new(body),
         }
     }
     fn post_recfn(&mut self, name: VarId, params: Vec<VarId>, body: NamelessExpr) -> NamelessExpr {
         NamelessExpr::RecFn {
             name,
             params,
-            body: Box::new(body),
+            body: NBox::new(body),
         }
     }
     fn post_apply(&mut self, function: NamelessExpr, args: Vec<NamelessExpr>) -> NamelessExpr {
         NamelessExpr::Apply {
-            function: Box::new(function),
-            args,
+            function: NBox::new(function),
+            args: args.into(),
         }
     }
     fn post_let(&mut self, binder: VarId, value: NamelessExpr, body: NamelessExpr) -> NamelessExpr {
         NamelessExpr::Let {
             binder,
-            value: Box::new(value),
-            body: Box::new(body),
+            value: NBox::new(value),
+            body: NBox::new(body),
         }
     }
     fn post_if(
@@ -138,9 +138,9 @@ pub(crate) trait NamelessFolder {
         else_branch: NamelessExpr,
     ) -> NamelessExpr {
         NamelessExpr::If {
-            condition: Box::new(condition),
-            then_branch: Box::new(then_branch),
-            else_branch: Box::new(else_branch),
+            condition: NBox::new(condition),
+            then_branch: NBox::new(then_branch),
+            else_branch: NBox::new(else_branch),
         }
     }
     fn post_when(
@@ -150,9 +150,9 @@ pub(crate) trait NamelessFolder {
         clauses: Vec<NamelessClause>,
     ) -> NamelessExpr {
         NamelessExpr::When {
-            subject: Box::new(subject),
+            subject: NBox::new(subject),
             subject_name,
-            clauses,
+            clauses: clauses.into(),
         }
     }
     fn post_list(
@@ -161,15 +161,15 @@ pub(crate) trait NamelessFolder {
         tail: Option<NamelessExpr>,
     ) -> NamelessExpr {
         NamelessExpr::List {
-            elements,
-            tail: tail.map(Box::new),
+            elements: elements.into(),
+            tail: tail.map(NBox::new),
         }
     }
     fn post_tuple(&mut self, items: Vec<NamelessExpr>) -> NamelessExpr {
-        NamelessExpr::Tuple(items)
+        NamelessExpr::Tuple(items.into())
     }
     fn post_pair(&mut self, first: NamelessExpr, second: NamelessExpr) -> NamelessExpr {
-        NamelessExpr::Pair(Box::new(first), Box::new(second))
+        NamelessExpr::Pair(NBox::new(first), NBox::new(second))
     }
     fn post_constr(
         &mut self,
@@ -181,19 +181,19 @@ pub(crate) trait NamelessFolder {
         NamelessExpr::Constr {
             type_hint,
             tag,
-            fields,
+            fields: fields.into(),
             shape,
         }
     }
     fn post_field_access(&mut self, record: NamelessExpr, selector: FieldSelector) -> NamelessExpr {
         NamelessExpr::FieldAccess {
-            record: Box::new(record),
+            record: NBox::new(record),
             selector,
         }
     }
     fn post_index_access(&mut self, collection: NamelessExpr, index: usize) -> NamelessExpr {
         NamelessExpr::IndexAccess {
-            collection: Box::new(collection),
+            collection: NBox::new(collection),
             index,
         }
     }
@@ -205,14 +205,14 @@ pub(crate) trait NamelessFolder {
     ) -> NamelessExpr {
         NamelessExpr::BinOp {
             op,
-            left: Box::new(left),
-            right: Box::new(right),
+            left: NBox::new(left),
+            right: NBox::new(right),
         }
     }
     fn post_unop(&mut self, op: UnaryOp, operand: NamelessExpr) -> NamelessExpr {
         NamelessExpr::UnOp {
             op,
-            operand: Box::new(operand),
+            operand: NBox::new(operand),
         }
     }
     fn post_builtin_call(
@@ -220,21 +220,24 @@ pub(crate) trait NamelessFolder {
         name: crate::BuiltinId,
         args: Vec<NamelessExpr>,
     ) -> NamelessExpr {
-        NamelessExpr::BuiltinCall { name, args }
+        NamelessExpr::BuiltinCall {
+            name,
+            args: args.into(),
+        }
     }
     fn post_error(&mut self, message: Option<String>) -> NamelessExpr {
         NamelessExpr::Error { message }
     }
     fn post_delay(&mut self, inner: NamelessExpr) -> NamelessExpr {
-        NamelessExpr::Delay(Box::new(inner))
+        NamelessExpr::Delay(NBox::new(inner))
     }
     fn post_force(&mut self, inner: NamelessExpr) -> NamelessExpr {
-        NamelessExpr::Force(Box::new(inner))
+        NamelessExpr::Force(NBox::new(inner))
     }
     fn post_trace(&mut self, message: NamelessExpr, value: NamelessExpr) -> NamelessExpr {
         NamelessExpr::Trace {
-            message: Box::new(message),
-            value: Box::new(value),
+            message: NBox::new(message),
+            value: NBox::new(value),
         }
     }
     fn post_raw(&mut self, uplc: String, reason: String) -> NamelessExpr {
@@ -271,18 +274,18 @@ pub(crate) trait NamelessFolder {
             NamelessExpr::Var(id) => self.post_var(id),
             NamelessExpr::Lambda { params, body } => {
                 self.enter_lambda(&params);
-                let body = self.fold(*body);
+                let body = self.fold(body.into_inner());
                 self.exit_lambda(&params);
                 self.post_lambda(params, body)
             }
             NamelessExpr::RecFn { name, params, body } => {
                 self.enter_recfn(name, &params);
-                let body = self.fold(*body);
+                let body = self.fold(body.into_inner());
                 self.exit_recfn(name, &params);
                 self.post_recfn(name, params, body)
             }
             NamelessExpr::Apply { function, args } => {
-                let function = self.fold(*function);
+                let function = self.fold(function.into_inner());
                 let args = args.into_iter().map(|a| self.fold(a)).collect();
                 self.post_apply(function, args)
             }
@@ -291,9 +294,9 @@ pub(crate) trait NamelessFolder {
                 value,
                 body,
             } => {
-                let value = self.fold(*value);
+                let value = self.fold(value.into_inner());
                 self.enter_let(binder, &value);
-                let body = self.fold(*body);
+                let body = self.fold(body.into_inner());
                 self.exit_let(binder);
                 self.post_let(binder, value, body)
             }
@@ -302,9 +305,9 @@ pub(crate) trait NamelessFolder {
                 then_branch,
                 else_branch,
             } => {
-                let condition = self.fold(*condition);
-                let then_branch = self.fold(*then_branch);
-                let else_branch = self.fold(*else_branch);
+                let condition = self.fold(condition.into_inner());
+                let then_branch = self.fold(then_branch.into_inner());
+                let else_branch = self.fold(else_branch.into_inner());
                 self.post_if(condition, then_branch, else_branch)
             }
             NamelessExpr::When {
@@ -312,7 +315,7 @@ pub(crate) trait NamelessFolder {
                 subject_name,
                 clauses,
             } => {
-                let subject = self.fold(*subject);
+                let subject = self.fold(subject.into_inner());
                 self.enter_when(&subject, subject_name);
                 let clauses = clauses.into_iter().map(|c| self.fold_clause(c)).collect();
                 self.exit_when(subject_name);
@@ -320,7 +323,7 @@ pub(crate) trait NamelessFolder {
             }
             NamelessExpr::List { elements, tail } => {
                 let elements = elements.into_iter().map(|e| self.fold(e)).collect();
-                let tail = tail.map(|t| self.fold(*t));
+                let tail = tail.map(|t| self.fold(t.into_inner()));
                 self.post_list(elements, tail)
             }
             NamelessExpr::Tuple(items) => {
@@ -328,8 +331,8 @@ pub(crate) trait NamelessFolder {
                 self.post_tuple(items)
             }
             NamelessExpr::Pair(first, second) => {
-                let first = self.fold(*first);
-                let second = self.fold(*second);
+                let first = self.fold(first.into_inner());
+                let second = self.fold(second.into_inner());
                 self.post_pair(first, second)
             }
             NamelessExpr::Constr {
@@ -342,20 +345,20 @@ pub(crate) trait NamelessFolder {
                 self.post_constr(type_hint, tag, fields, shape)
             }
             NamelessExpr::FieldAccess { record, selector } => {
-                let record = self.fold(*record);
+                let record = self.fold(record.into_inner());
                 self.post_field_access(record, selector)
             }
             NamelessExpr::IndexAccess { collection, index } => {
-                let collection = self.fold(*collection);
+                let collection = self.fold(collection.into_inner());
                 self.post_index_access(collection, index)
             }
             NamelessExpr::BinOp { op, left, right } => {
-                let left = self.fold(*left);
-                let right = self.fold(*right);
+                let left = self.fold(left.into_inner());
+                let right = self.fold(right.into_inner());
                 self.post_binop(op, left, right)
             }
             NamelessExpr::UnOp { op, operand } => {
-                let operand = self.fold(*operand);
+                let operand = self.fold(operand.into_inner());
                 self.post_unop(op, operand)
             }
             NamelessExpr::BuiltinCall { name, args } => {
@@ -364,16 +367,16 @@ pub(crate) trait NamelessFolder {
             }
             NamelessExpr::Error { message } => self.post_error(message),
             NamelessExpr::Delay(inner) => {
-                let inner = self.fold(*inner);
+                let inner = self.fold(inner.into_inner());
                 self.post_delay(inner)
             }
             NamelessExpr::Force(inner) => {
-                let inner = self.fold(*inner);
+                let inner = self.fold(inner.into_inner());
                 self.post_force(inner)
             }
             NamelessExpr::Trace { message, value } => {
-                let message = self.fold(*message);
-                let value = self.fold(*value);
+                let message = self.fold(message.into_inner());
+                let value = self.fold(value.into_inner());
                 self.post_trace(message, value)
             }
             NamelessExpr::Raw { uplc, reason } => self.post_raw(uplc, reason),

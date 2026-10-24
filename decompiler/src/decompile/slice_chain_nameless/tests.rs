@@ -23,13 +23,13 @@ fn record_slice(table: &mut VarTable, alias: VarId, parent: VarId, depth: usize)
 fn wrap_in_scope(body: NamelessExpr, ambient: Vec<VarId>) -> NamelessExpr {
     NamelessExpr::Lambda {
         params: ambient,
-        body: Box::new(body),
+        body: NBox::new(body),
     }
 }
 
 fn unwrap_in_scope(expr: NamelessExpr) -> NamelessExpr {
     match expr {
-        NamelessExpr::Lambda { body, .. } => *body,
+        NamelessExpr::Lambda { body, .. } => body.into_inner(),
         other => other,
     }
 }
@@ -48,7 +48,7 @@ fn folds_slice_alias_index_access_to_parent_indexed() {
             binder: r,
             value: NamelessExpr::Var(fields).into(),
             body: NamelessExpr::IndexAccess {
-                collection: Box::new(NamelessExpr::Var(r)),
+                collection: NBox::new(NamelessExpr::Var(r)),
                 index: 0,
             }
             .into(),
@@ -60,7 +60,7 @@ fn folds_slice_alias_index_access_to_parent_indexed() {
     match folded {
         NamelessExpr::IndexAccess { collection, index } => {
             assert_eq!(index, 1);
-            match *collection {
+            match collection.into_inner() {
                 NamelessExpr::Var(actual) => assert_eq!(actual, fields),
                 other => panic!("expected Var(fields), got {other:?}"),
             }
@@ -82,7 +82,7 @@ fn folds_nested_slice_aliases_through_indexed_access() {
 
     let expr = wrap_in_scope(
         NamelessExpr::IndexAccess {
-            collection: Box::new(NamelessExpr::Var(t)),
+            collection: NBox::new(NamelessExpr::Var(t)),
             index: 0,
         },
         vec![fields],
@@ -91,7 +91,7 @@ fn folds_nested_slice_aliases_through_indexed_access() {
     match folded {
         NamelessExpr::IndexAccess { collection, index } => {
             assert_eq!(index, 2);
-            match *collection {
+            match collection.into_inner() {
                 NamelessExpr::Var(actual) => assert_eq!(actual, fields),
                 other => panic!("expected Var(fields), got {other:?}"),
             }
@@ -126,7 +126,7 @@ fn cyclic_slice_alias_index_access_keeps_collection_var() {
 
     let folded = inline_slice_chain_nameless(
         NamelessExpr::IndexAccess {
-            collection: Box::new(NamelessExpr::Var(r)),
+            collection: NBox::new(NamelessExpr::Var(r)),
             index: 0,
         },
         &table,
@@ -232,7 +232,7 @@ fn slice_alias_index_access_not_folded_when_parent_out_of_scope() {
     record_slice(&mut table, r, fields, 2);
 
     let expr = NamelessExpr::IndexAccess {
-        collection: Box::new(NamelessExpr::Var(r)),
+        collection: NBox::new(NamelessExpr::Var(r)),
         index: 1,
     };
     let folded = inline_slice_chain_nameless(expr, &table);
@@ -242,7 +242,7 @@ fn slice_alias_index_access_not_folded_when_parent_out_of_scope() {
     match folded {
         NamelessExpr::IndexAccess { collection, index } => {
             assert_eq!(index, 1, "index must not be adjusted when fold is skipped");
-            match *collection {
+            match collection.into_inner() {
                 NamelessExpr::Var(actual) => assert_eq!(
                     actual, r,
                     "collection must remain Var(r); out-of-scope parent must not be inlined"
@@ -289,17 +289,17 @@ fn slice_alias_var_substituted_through_nested_lambdas() {
 
     let expr = NamelessExpr::Lambda {
         params: vec![fields],
-        body: Box::new(NamelessExpr::Lambda {
+        body: NBox::new(NamelessExpr::Lambda {
             params: vec![inner_param],
-            body: Box::new(NamelessExpr::Var(r)),
+            body: NBox::new(NamelessExpr::Var(r)),
         }),
     };
     let folded = inline_slice_chain_nameless(expr, &table);
 
     // Drill into the inner lambda's body.
     let inner_body = match folded {
-        NamelessExpr::Lambda { body, .. } => match *body {
-            NamelessExpr::Lambda { body, .. } => *body,
+        NamelessExpr::Lambda { body, .. } => match body.into_inner() {
+            NamelessExpr::Lambda { body, .. } => body.into_inner(),
             other => panic!("expected inner Lambda, got {other:?}"),
         },
         other => panic!("expected outer Lambda, got {other:?}"),
@@ -324,11 +324,11 @@ fn preserves_unused_effectful_slice_alias_let() {
     let expr = NamelessExpr::Let {
         binder: r,
         value: NamelessExpr::Apply {
-            function: Box::new(NamelessExpr::BuiltinCall {
+            function: NBox::new(NamelessExpr::BuiltinCall {
                 name: "List.tail".to_string().into(),
-                args: vec![],
+                args: vec![].into(),
             }),
-            args: vec![NamelessExpr::Var(fields)],
+            args: vec![NamelessExpr::Var(fields)].into(),
         }
         .into(),
         body: NamelessExpr::Unit.into(),

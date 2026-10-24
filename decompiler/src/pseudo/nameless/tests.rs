@@ -60,8 +60,8 @@ fn nameless_let_carries_var_id_binder() {
     let binder = VarId::fresh_compat_placeholder();
     let let_expr = NamelessExpr::Let {
         binder,
-        value: Box::new(NamelessExpr::Int(BigInt::from(42))),
-        body: Box::new(NamelessExpr::Var(binder)),
+        value: NBox::new(NamelessExpr::Int(BigInt::from(42))),
+        body: NBox::new(NamelessExpr::Var(binder)),
     };
     match let_expr {
         NamelessExpr::Let {

@@ -1,5 +1,5 @@
 use super::*;
-use crate::pseudo::nameless::{NamelessExpr, VarMetadata};
+use crate::pseudo::nameless::{NBox, NamelessExpr, VarMetadata};
 use num_bigint::BigInt;
 
 fn id() -> VarId {
@@ -18,7 +18,7 @@ fn lambda_param_binds_body_var() {
     let p = id();
     let expr = NamelessExpr::Lambda {
         params: vec![p],
-        body: Box::new(NamelessExpr::Var(p)),
+        body: NBox::new(NamelessExpr::Var(p)),
     };
     let result = validate_nameless_invariants(&expr, &HashSet::new());
     assert!(
@@ -53,8 +53,8 @@ fn let_binding_scopes_body() {
     let x = id();
     let expr = NamelessExpr::Let {
         binder: x,
-        value: Box::new(NamelessExpr::Int(BigInt::from(1))),
-        body: Box::new(NamelessExpr::Var(x)),
+        value: NBox::new(NamelessExpr::Int(BigInt::from(1))),
+        body: NBox::new(NamelessExpr::Var(x)),
     };
     let result = validate_nameless_invariants(&expr, &HashSet::new());
     assert!(result.is_ok());
@@ -66,8 +66,8 @@ fn let_binding_does_not_scope_value() {
     let x = id();
     let expr = NamelessExpr::Let {
         binder: x,
-        value: Box::new(NamelessExpr::Var(x)),
-        body: Box::new(NamelessExpr::Int(BigInt::from(0))),
+        value: NBox::new(NamelessExpr::Var(x)),
+        body: NBox::new(NamelessExpr::Int(BigInt::from(0))),
     };
     let result = validate_nameless_invariants(&expr, &HashSet::new());
     assert!(!result.is_ok());
@@ -84,13 +84,14 @@ fn when_constructor_pattern_binds_clause_body() {
         shape: crate::pseudo::constructor::ConstructorShape::unknown_data(0, 1),
     };
     let when = NamelessExpr::When {
-        subject: Box::new(NamelessExpr::Unit),
+        subject: NBox::new(NamelessExpr::Unit),
         subject_name: None,
         clauses: vec![NamelessClause {
             pattern,
             guard: None,
             body: NamelessExpr::Var(payload),
-        }],
+        }]
+        .into(),
     };
     let result = validate_nameless_invariants(&when, &HashSet::new());
     assert!(result.is_ok(), "free={:?}", result.free_vars);
@@ -102,7 +103,7 @@ fn when_clause_scope_does_not_leak_to_sibling() {
     // `x` is free since it's bound only in the Constr arm.
     let x = id();
     let when = NamelessExpr::When {
-        subject: Box::new(NamelessExpr::Unit),
+        subject: NBox::new(NamelessExpr::Unit),
         subject_name: None,
         clauses: vec![
             NamelessClause {
@@ -120,7 +121,8 @@ fn when_clause_scope_does_not_leak_to_sibling() {
                 guard: None,
                 body: NamelessExpr::Var(x),
             },
-        ],
+        ]
+        .into(),
     };
     let result = validate_nameless_invariants(&when, &HashSet::new());
     assert!(!result.is_ok());
@@ -132,7 +134,7 @@ fn list_pattern_head_and_tail_bind_clause_body() {
     let h = id();
     let t = id();
     let when = NamelessExpr::When {
-        subject: Box::new(NamelessExpr::Unit),
+        subject: NBox::new(NamelessExpr::Unit),
         subject_name: None,
         clauses: vec![NamelessClause {
             pattern: NamelessPattern::List {
@@ -141,10 +143,11 @@ fn list_pattern_head_and_tail_bind_clause_body() {
             },
             guard: None,
             body: NamelessExpr::Apply {
-                function: Box::new(NamelessExpr::Var(h)),
-                args: vec![NamelessExpr::Var(t)],
+                function: NBox::new(NamelessExpr::Var(h)),
+                args: vec![NamelessExpr::Var(t)].into(),
             },
-        }],
+        }]
+        .into(),
     };
     let result = validate_nameless_invariants(&when, &HashSet::new());
     assert!(result.is_ok(), "free={:?}", result.free_vars);
@@ -162,8 +165,8 @@ fn render_name_sets_prefer_display_name_hint_over_source_hint() {
 
     let expr = NamelessExpr::Let {
         binder,
-        value: Box::new(NamelessExpr::Unit),
-        body: Box::new(NamelessExpr::Var(orphan)),
+        value: NBox::new(NamelessExpr::Unit),
+        body: NBox::new(NamelessExpr::Var(orphan)),
     };
 
     let binder_names = nameless_render_binder_name_set(&expr, &table);
@@ -199,7 +202,7 @@ fn render_binder_name_set_includes_when_pattern_binders() {
     }
 
     let when = NamelessExpr::When {
-        subject: Box::new(NamelessExpr::Unit),
+        subject: NBox::new(NamelessExpr::Unit),
         subject_name: Some(subject),
         clauses: vec![
             NamelessClause {
@@ -225,7 +228,8 @@ fn render_binder_name_set_includes_when_pattern_binders() {
                 guard: None,
                 body: NamelessExpr::Unit,
             },
-        ],
+        ]
+        .into(),
     };
 
     let binder_names = nameless_render_binder_name_set(&when, &table);
@@ -257,9 +261,9 @@ fn rec_fn_self_reference_resolves() {
     let expr = NamelessExpr::RecFn {
         name: f,
         params: vec![p],
-        body: Box::new(NamelessExpr::Apply {
-            function: Box::new(NamelessExpr::Var(f)),
-            args: vec![NamelessExpr::Var(p)],
+        body: NBox::new(NamelessExpr::Apply {
+            function: NBox::new(NamelessExpr::Var(f)),
+            args: vec![NamelessExpr::Var(p)].into(),
         }),
     };
     let result = validate_nameless_invariants(&expr, &HashSet::new());

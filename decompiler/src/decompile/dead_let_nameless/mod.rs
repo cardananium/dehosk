@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 
-use crate::pseudo::nameless::{NamelessClause, NamelessExpr};
+use crate::pseudo::nameless::{NBox, NamelessClause, NamelessExpr};
 use crate::pseudo::var_id::VarId;
 
 /// Drop Let bindings whose `binder` is unused in the body and
@@ -289,18 +289,18 @@ fn fold(expr: NamelessExpr, counts: &HashMap<VarId, usize>) -> NamelessExpr {
             Step::Enter(expr) => match expr {
                 NamelessExpr::Lambda { params, body } => {
                     steps.push(Step::Post(Post::Lambda { params }));
-                    steps.push(Step::Enter(*body));
+                    steps.push(Step::Enter(body.into_inner()));
                 }
                 NamelessExpr::RecFn { name, params, body } => {
                     steps.push(Step::Post(Post::RecFn { name, params }));
-                    steps.push(Step::Enter(*body));
+                    steps.push(Step::Enter(body.into_inner()));
                 }
                 NamelessExpr::Apply { function, args } => {
                     steps.push(Step::Post(Post::Apply { argc: args.len() }));
                     for a in args.into_iter().rev() {
                         steps.push(Step::Enter(a));
                     }
-                    steps.push(Step::Enter(*function));
+                    steps.push(Step::Enter(function.into_inner()));
                 }
                 NamelessExpr::Let {
                     binder,
@@ -310,8 +310,8 @@ fn fold(expr: NamelessExpr, counts: &HashMap<VarId, usize>) -> NamelessExpr {
                     // The value must be folded before the body — see the
                     // function-level comment.
                     steps.push(Step::Post(Post::Let { binder }));
-                    steps.push(Step::Enter(*body));
-                    steps.push(Step::Enter(*value));
+                    steps.push(Step::Enter(body.into_inner()));
+                    steps.push(Step::Enter(value.into_inner()));
                 }
                 NamelessExpr::If {
                     condition,
@@ -319,9 +319,9 @@ fn fold(expr: NamelessExpr, counts: &HashMap<VarId, usize>) -> NamelessExpr {
                     else_branch,
                 } => {
                     steps.push(Step::Post(Post::If));
-                    steps.push(Step::Enter(*else_branch));
-                    steps.push(Step::Enter(*then_branch));
-                    steps.push(Step::Enter(*condition));
+                    steps.push(Step::Enter(else_branch.into_inner()));
+                    steps.push(Step::Enter(then_branch.into_inner()));
+                    steps.push(Step::Enter(condition.into_inner()));
                 }
                 NamelessExpr::When {
                     subject,
@@ -342,7 +342,7 @@ fn fold(expr: NamelessExpr, counts: &HashMap<VarId, usize>) -> NamelessExpr {
                             steps.push(Step::Enter(g));
                         }
                     }
-                    steps.push(Step::Enter(*subject));
+                    steps.push(Step::Enter(subject.into_inner()));
                 }
                 NamelessExpr::List { elements, tail } => {
                     steps.push(Step::Post(Post::List {
@@ -350,7 +350,7 @@ fn fold(expr: NamelessExpr, counts: &HashMap<VarId, usize>) -> NamelessExpr {
                         has_tail: tail.is_some(),
                     }));
                     if let Some(t) = tail {
-                        steps.push(Step::Enter(*t));
+                        steps.push(Step::Enter(t.into_inner()));
                     }
                     for e in elements.into_iter().rev() {
                         steps.push(Step::Enter(e));
@@ -364,8 +364,8 @@ fn fold(expr: NamelessExpr, counts: &HashMap<VarId, usize>) -> NamelessExpr {
                 }
                 NamelessExpr::Pair(a, b) => {
                     steps.push(Step::Post(Post::Pair));
-                    steps.push(Step::Enter(*b));
-                    steps.push(Step::Enter(*a));
+                    steps.push(Step::Enter(b.into_inner()));
+                    steps.push(Step::Enter(a.into_inner()));
                 }
                 NamelessExpr::Constr {
                     type_hint,
@@ -385,20 +385,20 @@ fn fold(expr: NamelessExpr, counts: &HashMap<VarId, usize>) -> NamelessExpr {
                 }
                 NamelessExpr::FieldAccess { record, selector } => {
                     steps.push(Step::Post(Post::FieldAccess { selector }));
-                    steps.push(Step::Enter(*record));
+                    steps.push(Step::Enter(record.into_inner()));
                 }
                 NamelessExpr::IndexAccess { collection, index } => {
                     steps.push(Step::Post(Post::IndexAccess { index }));
-                    steps.push(Step::Enter(*collection));
+                    steps.push(Step::Enter(collection.into_inner()));
                 }
                 NamelessExpr::BinOp { op, left, right } => {
                     steps.push(Step::Post(Post::BinOp { op }));
-                    steps.push(Step::Enter(*right));
-                    steps.push(Step::Enter(*left));
+                    steps.push(Step::Enter(right.into_inner()));
+                    steps.push(Step::Enter(left.into_inner()));
                 }
                 NamelessExpr::UnOp { op, operand } => {
                     steps.push(Step::Post(Post::UnOp { op }));
-                    steps.push(Step::Enter(*operand));
+                    steps.push(Step::Enter(operand.into_inner()));
                 }
                 NamelessExpr::BuiltinCall { name, args } => {
                     steps.push(Step::Post(Post::BuiltinCall {
@@ -411,16 +411,16 @@ fn fold(expr: NamelessExpr, counts: &HashMap<VarId, usize>) -> NamelessExpr {
                 }
                 NamelessExpr::Delay(inner) => {
                     steps.push(Step::Post(Post::Delay));
-                    steps.push(Step::Enter(*inner));
+                    steps.push(Step::Enter(inner.into_inner()));
                 }
                 NamelessExpr::Force(inner) => {
                     steps.push(Step::Post(Post::Force));
-                    steps.push(Step::Enter(*inner));
+                    steps.push(Step::Enter(inner.into_inner()));
                 }
                 NamelessExpr::Trace { message, value } => {
                     steps.push(Step::Post(Post::Trace));
-                    steps.push(Step::Enter(*value));
-                    steps.push(Step::Enter(*message));
+                    steps.push(Step::Enter(value.into_inner()));
+                    steps.push(Step::Enter(message.into_inner()));
                 }
                 other => done.push(other),
             },
@@ -430,7 +430,7 @@ fn fold(expr: NamelessExpr, counts: &HashMap<VarId, usize>) -> NamelessExpr {
                         let body = done.pop().expect("lambda body");
                         NamelessExpr::Lambda {
                             params,
-                            body: Box::new(body),
+                            body: NBox::new(body),
                         }
                     }
                     Post::RecFn { name, params } => {
@@ -438,15 +438,15 @@ fn fold(expr: NamelessExpr, counts: &HashMap<VarId, usize>) -> NamelessExpr {
                         NamelessExpr::RecFn {
                             name,
                             params,
-                            body: Box::new(body),
+                            body: NBox::new(body),
                         }
                     }
                     Post::Apply { argc } => {
                         let args = take(&mut done, argc);
                         let function = done.pop().expect("apply function");
                         NamelessExpr::Apply {
-                            function: Box::new(function),
-                            args,
+                            function: NBox::new(function),
+                            args: args.into(),
                         }
                     }
                     Post::Let { binder } => {
@@ -458,8 +458,8 @@ fn fold(expr: NamelessExpr, counts: &HashMap<VarId, usize>) -> NamelessExpr {
                         } else {
                             NamelessExpr::Let {
                                 binder,
-                                value: Box::new(value),
-                                body: Box::new(body),
+                                value: NBox::new(value),
+                                body: NBox::new(body),
                             }
                         }
                     }
@@ -468,9 +468,9 @@ fn fold(expr: NamelessExpr, counts: &HashMap<VarId, usize>) -> NamelessExpr {
                         let then_branch = done.pop().expect("if then");
                         let condition = done.pop().expect("if condition");
                         NamelessExpr::If {
-                            condition: Box::new(condition),
-                            then_branch: Box::new(then_branch),
-                            else_branch: Box::new(else_branch),
+                            condition: NBox::new(condition),
+                            then_branch: NBox::new(then_branch),
+                            else_branch: NBox::new(else_branch),
                         }
                     }
                     Post::When {
@@ -498,24 +498,24 @@ fn fold(expr: NamelessExpr, counts: &HashMap<VarId, usize>) -> NamelessExpr {
                         }
                         let subject = done.pop().expect("when subject");
                         NamelessExpr::When {
-                            subject: Box::new(subject),
+                            subject: NBox::new(subject),
                             subject_name,
-                            clauses,
+                            clauses: clauses.into(),
                         }
                     }
                     Post::List { count, has_tail } => {
                         let tail = if has_tail { done.pop() } else { None };
                         let elements = take(&mut done, count);
                         NamelessExpr::List {
-                            elements,
-                            tail: tail.map(Box::new),
+                            elements: elements.into(),
+                            tail: tail.map(NBox::new),
                         }
                     }
-                    Post::Tuple { count } => NamelessExpr::Tuple(take(&mut done, count)),
+                    Post::Tuple { count } => NamelessExpr::Tuple(take(&mut done, count).into()),
                     Post::Pair => {
                         let second = done.pop().expect("pair second");
                         let first = done.pop().expect("pair first");
-                        NamelessExpr::Pair(Box::new(first), Box::new(second))
+                        NamelessExpr::Pair(NBox::new(first), NBox::new(second))
                     }
                     Post::Constr {
                         type_hint,
@@ -527,21 +527,21 @@ fn fold(expr: NamelessExpr, counts: &HashMap<VarId, usize>) -> NamelessExpr {
                         NamelessExpr::Constr {
                             type_hint,
                             tag,
-                            fields,
+                            fields: fields.into(),
                             shape,
                         }
                     }
                     Post::FieldAccess { selector } => {
                         let record = done.pop().expect("field access record");
                         NamelessExpr::FieldAccess {
-                            record: Box::new(record),
+                            record: NBox::new(record),
                             selector,
                         }
                     }
                     Post::IndexAccess { index } => {
                         let collection = done.pop().expect("index access collection");
                         NamelessExpr::IndexAccess {
-                            collection: Box::new(collection),
+                            collection: NBox::new(collection),
                             index,
                         }
                     }
@@ -550,35 +550,38 @@ fn fold(expr: NamelessExpr, counts: &HashMap<VarId, usize>) -> NamelessExpr {
                         let left = done.pop().expect("binop left");
                         NamelessExpr::BinOp {
                             op,
-                            left: Box::new(left),
-                            right: Box::new(right),
+                            left: NBox::new(left),
+                            right: NBox::new(right),
                         }
                     }
                     Post::UnOp { op } => {
                         let operand = done.pop().expect("unop operand");
                         NamelessExpr::UnOp {
                             op,
-                            operand: Box::new(operand),
+                            operand: NBox::new(operand),
                         }
                     }
                     Post::BuiltinCall { name, argc } => {
                         let args = take(&mut done, argc);
-                        NamelessExpr::BuiltinCall { name, args }
+                        NamelessExpr::BuiltinCall {
+                            name,
+                            args: args.into(),
+                        }
                     }
                     Post::Delay => {
                         let inner = done.pop().expect("delay inner");
-                        NamelessExpr::Delay(Box::new(inner))
+                        NamelessExpr::Delay(NBox::new(inner))
                     }
                     Post::Force => {
                         let inner = done.pop().expect("force inner");
-                        NamelessExpr::Force(Box::new(inner))
+                        NamelessExpr::Force(NBox::new(inner))
                     }
                     Post::Trace => {
                         let value = done.pop().expect("trace value");
                         let message = done.pop().expect("trace message");
                         NamelessExpr::Trace {
-                            message: Box::new(message),
-                            value: Box::new(value),
+                            message: NBox::new(message),
+                            value: NBox::new(value),
                         }
                     }
                 };

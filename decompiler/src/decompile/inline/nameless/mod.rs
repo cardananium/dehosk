@@ -14,7 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::pseudo::nameless::{NamelessClause, NamelessExpr, NamelessPattern, VarTable};
+use crate::pseudo::nameless::{NBox, NamelessClause, NamelessExpr, NamelessPattern, VarTable};
 use crate::pseudo::var_id::VarId;
 
 /// Inline single-use let bindings on a [`NamelessExpr`], with no
@@ -216,18 +216,18 @@ impl<'t> Inliner<'t> {
                     ),
                     NamelessExpr::Lambda { params, body } => {
                         tasks.push(Task::Exit(Frame::Lambda { params }));
-                        tasks.push(Task::Enter(*body));
+                        tasks.push(Task::Enter(body.into_inner()));
                     }
                     NamelessExpr::RecFn { name, params, body } => {
                         tasks.push(Task::Exit(Frame::RecFn { name, params }));
-                        tasks.push(Task::Enter(*body));
+                        tasks.push(Task::Enter(body.into_inner()));
                     }
                     NamelessExpr::Apply { function, args } => {
                         tasks.push(Task::Exit(Frame::Apply { n_args: args.len() }));
                         for a in args.into_iter().rev() {
                             tasks.push(Task::Enter(a));
                         }
-                        tasks.push(Task::Enter(*function));
+                        tasks.push(Task::Enter(function.into_inner()));
                     }
                     NamelessExpr::Let {
                         binder,
@@ -261,16 +261,16 @@ impl<'t> Inliner<'t> {
                             // after `b` step).
                             tasks.push(Task::Exit(Frame::LetDecide {
                                 binder,
-                                body: *body,
+                                body: body.into_inner(),
                             }));
-                            tasks.push(Task::Enter(*value));
+                            tasks.push(Task::Enter(value.into_inner()));
                         } else {
                             // Either count == 0 (a dead let is left for the
                             // dead_let pass to drop) or the value isn't
                             // simple.
                             tasks.push(Task::Exit(Frame::LetBuild { binder }));
-                            tasks.push(Task::Enter(*body));
-                            tasks.push(Task::Enter(*value));
+                            tasks.push(Task::Enter(body.into_inner()));
+                            tasks.push(Task::Enter(value.into_inner()));
                         }
                     }
                     NamelessExpr::If {
@@ -279,9 +279,9 @@ impl<'t> Inliner<'t> {
                         else_branch,
                     } => {
                         tasks.push(Task::Exit(Frame::If));
-                        tasks.push(Task::Enter(*else_branch));
-                        tasks.push(Task::Enter(*then_branch));
-                        tasks.push(Task::Enter(*condition));
+                        tasks.push(Task::Enter(else_branch.into_inner()));
+                        tasks.push(Task::Enter(then_branch.into_inner()));
+                        tasks.push(Task::Enter(condition.into_inner()));
                     }
                     NamelessExpr::When {
                         subject,
@@ -302,7 +302,7 @@ impl<'t> Inliner<'t> {
                                 tasks.push(Task::Enter(g));
                             }
                         }
-                        tasks.push(Task::Enter(*subject));
+                        tasks.push(Task::Enter(subject.into_inner()));
                     }
                     NamelessExpr::List { elements, tail } => {
                         let has_tail = tail.is_some();
@@ -311,7 +311,7 @@ impl<'t> Inliner<'t> {
                             has_tail,
                         }));
                         if let Some(t) = tail {
-                            tasks.push(Task::Enter(*t));
+                            tasks.push(Task::Enter(t.into_inner()));
                         }
                         for e in elements.into_iter().rev() {
                             tasks.push(Task::Enter(e));
@@ -325,8 +325,8 @@ impl<'t> Inliner<'t> {
                     }
                     NamelessExpr::Pair(a, b) => {
                         tasks.push(Task::Exit(Frame::Pair));
-                        tasks.push(Task::Enter(*b));
-                        tasks.push(Task::Enter(*a));
+                        tasks.push(Task::Enter(b.into_inner()));
+                        tasks.push(Task::Enter(a.into_inner()));
                     }
                     NamelessExpr::Constr {
                         type_hint,
@@ -346,20 +346,20 @@ impl<'t> Inliner<'t> {
                     }
                     NamelessExpr::FieldAccess { record, selector } => {
                         tasks.push(Task::Exit(Frame::FieldAccess { selector }));
-                        tasks.push(Task::Enter(*record));
+                        tasks.push(Task::Enter(record.into_inner()));
                     }
                     NamelessExpr::IndexAccess { collection, index } => {
                         tasks.push(Task::Exit(Frame::IndexAccess { index }));
-                        tasks.push(Task::Enter(*collection));
+                        tasks.push(Task::Enter(collection.into_inner()));
                     }
                     NamelessExpr::BinOp { op, left, right } => {
                         tasks.push(Task::Exit(Frame::BinOp { op }));
-                        tasks.push(Task::Enter(*right));
-                        tasks.push(Task::Enter(*left));
+                        tasks.push(Task::Enter(right.into_inner()));
+                        tasks.push(Task::Enter(left.into_inner()));
                     }
                     NamelessExpr::UnOp { op, operand } => {
                         tasks.push(Task::Exit(Frame::UnOp { op }));
-                        tasks.push(Task::Enter(*operand));
+                        tasks.push(Task::Enter(operand.into_inner()));
                     }
                     NamelessExpr::BuiltinCall { name, args } => {
                         tasks.push(Task::Exit(Frame::BuiltinCall {
@@ -372,16 +372,16 @@ impl<'t> Inliner<'t> {
                     }
                     NamelessExpr::Delay(inner) => {
                         tasks.push(Task::Exit(Frame::Delay));
-                        tasks.push(Task::Enter(*inner));
+                        tasks.push(Task::Enter(inner.into_inner()));
                     }
                     NamelessExpr::Force(inner) => {
                         tasks.push(Task::Exit(Frame::Force));
-                        tasks.push(Task::Enter(*inner));
+                        tasks.push(Task::Enter(inner.into_inner()));
                     }
                     NamelessExpr::Trace { message, value } => {
                         tasks.push(Task::Exit(Frame::Trace));
-                        tasks.push(Task::Enter(*value));
-                        tasks.push(Task::Enter(*message));
+                        tasks.push(Task::Enter(value.into_inner()));
+                        tasks.push(Task::Enter(message.into_inner()));
                     }
                 },
                 Task::Exit(frame) => match frame {
@@ -389,7 +389,7 @@ impl<'t> Inliner<'t> {
                         let body = results.pop().expect("lambda body");
                         results.push(NamelessExpr::Lambda {
                             params,
-                            body: Box::new(body),
+                            body: NBox::new(body),
                         });
                     }
                     Frame::RecFn { name, params } => {
@@ -397,14 +397,14 @@ impl<'t> Inliner<'t> {
                         results.push(NamelessExpr::RecFn {
                             name,
                             params,
-                            body: Box::new(body),
+                            body: NBox::new(body),
                         });
                     }
                     Frame::Apply { n_args } => {
                         let mut items = take(&mut results, 1 + n_args).into_iter();
                         let function = items.next().expect("apply function");
                         results.push(NamelessExpr::Apply {
-                            function: Box::new(function),
+                            function: NBox::new(function),
                             args: items.collect(),
                         });
                     }
@@ -414,9 +414,9 @@ impl<'t> Inliner<'t> {
                         let then_branch = items.next().expect("if then");
                         let else_branch = items.next().expect("if else");
                         results.push(NamelessExpr::If {
-                            condition: Box::new(condition),
-                            then_branch: Box::new(then_branch),
-                            else_branch: Box::new(else_branch),
+                            condition: NBox::new(condition),
+                            then_branch: NBox::new(then_branch),
+                            else_branch: NBox::new(else_branch),
                         });
                     }
                     Frame::When {
@@ -444,9 +444,9 @@ impl<'t> Inliner<'t> {
                             });
                         }
                         results.push(NamelessExpr::When {
-                            subject: Box::new(subject),
+                            subject: NBox::new(subject),
                             subject_name,
-                            clauses,
+                            clauses: clauses.into(),
                         });
                     }
                     Frame::List {
@@ -456,18 +456,21 @@ impl<'t> Inliner<'t> {
                         let mut items =
                             take(&mut results, n_elements + has_tail as usize).into_iter();
                         let elements: Vec<_> = (&mut items).take(n_elements).collect();
-                        let tail = items.next().map(Box::new);
-                        results.push(NamelessExpr::List { elements, tail });
+                        let tail = items.next().map(NBox::new);
+                        results.push(NamelessExpr::List {
+                            elements: elements.into(),
+                            tail,
+                        });
                     }
                     Frame::Tuple { n } => {
                         let items = take(&mut results, n);
-                        results.push(NamelessExpr::Tuple(items));
+                        results.push(NamelessExpr::Tuple(items.into()));
                     }
                     Frame::Pair => {
                         let mut items = take(&mut results, 2).into_iter();
                         let a = items.next().expect("pair first");
                         let b = items.next().expect("pair second");
-                        results.push(NamelessExpr::Pair(Box::new(a), Box::new(b)));
+                        results.push(NamelessExpr::Pair(NBox::new(a), NBox::new(b)));
                     }
                     Frame::Constr {
                         type_hint,
@@ -479,21 +482,21 @@ impl<'t> Inliner<'t> {
                         results.push(NamelessExpr::Constr {
                             type_hint,
                             tag,
-                            fields,
+                            fields: fields.into(),
                             shape,
                         });
                     }
                     Frame::FieldAccess { selector } => {
                         let record = results.pop().expect("field access record");
                         results.push(NamelessExpr::FieldAccess {
-                            record: Box::new(record),
+                            record: NBox::new(record),
                             selector,
                         });
                     }
                     Frame::IndexAccess { index } => {
                         let collection = results.pop().expect("index access collection");
                         results.push(NamelessExpr::IndexAccess {
-                            collection: Box::new(collection),
+                            collection: NBox::new(collection),
                             index,
                         });
                     }
@@ -503,36 +506,39 @@ impl<'t> Inliner<'t> {
                         let right = items.next().expect("binop right");
                         results.push(NamelessExpr::BinOp {
                             op,
-                            left: Box::new(left),
-                            right: Box::new(right),
+                            left: NBox::new(left),
+                            right: NBox::new(right),
                         });
                     }
                     Frame::UnOp { op } => {
                         let operand = results.pop().expect("unop operand");
                         results.push(NamelessExpr::UnOp {
                             op,
-                            operand: Box::new(operand),
+                            operand: NBox::new(operand),
                         });
                     }
                     Frame::BuiltinCall { name, n_args } => {
                         let args = take(&mut results, n_args);
-                        results.push(NamelessExpr::BuiltinCall { name, args });
+                        results.push(NamelessExpr::BuiltinCall {
+                            name,
+                            args: args.into(),
+                        });
                     }
                     Frame::Delay => {
                         let inner = results.pop().expect("delay inner");
-                        results.push(NamelessExpr::Delay(Box::new(inner)));
+                        results.push(NamelessExpr::Delay(NBox::new(inner)));
                     }
                     Frame::Force => {
                         let inner = results.pop().expect("force inner");
-                        results.push(NamelessExpr::Force(Box::new(inner)));
+                        results.push(NamelessExpr::Force(NBox::new(inner)));
                     }
                     Frame::Trace => {
                         let mut items = take(&mut results, 2).into_iter();
                         let message = items.next().expect("trace message");
                         let value = items.next().expect("trace value");
                         results.push(NamelessExpr::Trace {
-                            message: Box::new(message),
-                            value: Box::new(value),
+                            message: NBox::new(message),
+                            value: NBox::new(value),
                         });
                     }
                     Frame::LetDecide { binder, body } => {
@@ -567,8 +573,8 @@ impl<'t> Inliner<'t> {
                         let body = results.pop().expect("let body (rejected inline)");
                         results.push(NamelessExpr::Let {
                             binder,
-                            value: Box::new(folded_value),
-                            body: Box::new(body),
+                            value: NBox::new(folded_value),
+                            body: NBox::new(body),
                         });
                     }
                     Frame::LetBuild { binder } => {
@@ -577,8 +583,8 @@ impl<'t> Inliner<'t> {
                         let body = items.next().expect("let body");
                         results.push(NamelessExpr::Let {
                             binder,
-                            value: Box::new(value),
-                            body: Box::new(body),
+                            value: NBox::new(value),
+                            body: NBox::new(body),
                         });
                     }
                 },

@@ -1,7 +1,7 @@
 use crate::pseudo::ast::PseudoExpr;
-use crate::pseudo::nameless::NamelessExpr;
 use crate::pseudo::nameless::convert::{nameless_to_pseudo, pseudo_to_nameless};
 use crate::pseudo::nameless::fold::NamelessFolder;
+use crate::pseudo::nameless::{NBox, NamelessExpr};
 
 /// Strip cosmetic `Delay` wrappers: `Delay(Lambda)`, `Delay(RecFn)`,
 /// `Delay(Let)`, `Delay(When)` and `Delay(If)` lose the wrapper;
@@ -22,7 +22,7 @@ pub(crate) fn strip_cosmetic_delays_nameless(expr: NamelessExpr) -> NamelessExpr
                 NamelessExpr::Lambda { .. } | NamelessExpr::RecFn { .. } => inner,
                 NamelessExpr::Let { .. } => inner,
                 NamelessExpr::When { .. } | NamelessExpr::If { .. } => inner,
-                _ => NamelessExpr::Delay(Box::new(inner)),
+                _ => NamelessExpr::Delay(NBox::new(inner)),
             }
         }
     }

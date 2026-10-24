@@ -2,7 +2,7 @@ use crate::builtins::BuiltinId;
 use crate::pseudo::ast::PseudoExpr;
 use crate::pseudo::nameless::convert::{nameless_to_pseudo, pseudo_to_nameless};
 use crate::pseudo::nameless::fold::NamelessFolder;
-use crate::pseudo::nameless::{NamelessExpr, NamelessPattern};
+use crate::pseudo::nameless::{NBox, NamelessExpr, NamelessPattern};
 use crate::pseudo::var_id::VarId;
 
 /// Normalize builtin list constructors into first-class list literals:
@@ -190,8 +190,8 @@ pub(crate) fn normalize_list_cons_literals_nameless(expr: NamelessExpr) -> Namel
                 return Some(NamelessExpr::List { elements, tail });
             }
             Some(NamelessExpr::List {
-                elements: vec![head],
-                tail: Some(Box::new(tail_expr)),
+                elements: vec![head].into(),
+                tail: Some(NBox::new(tail_expr)),
             })
         }
     }
@@ -274,7 +274,10 @@ pub(crate) fn normalize_list_cons_literals_nameless(expr: NamelessExpr) -> Namel
                     .build_list_from_cons_args(args)
                     .expect("two-argument List.cons conversion should produce a list");
             }
-            NamelessExpr::BuiltinCall { name, args }
+            NamelessExpr::BuiltinCall {
+                name,
+                args: args.into(),
+            }
         }
 
         fn post_apply(&mut self, function: NamelessExpr, args: Vec<NamelessExpr>) -> NamelessExpr {
@@ -305,8 +308,8 @@ pub(crate) fn normalize_list_cons_literals_nameless(expr: NamelessExpr) -> Namel
                 }
             }
             NamelessExpr::Apply {
-                function: Box::new(function),
-                args,
+                function: NBox::new(function),
+                args: args.into(),
             }
         }
 
@@ -323,8 +326,8 @@ pub(crate) fn normalize_list_cons_literals_nameless(expr: NamelessExpr) -> Namel
             }
             NamelessExpr::Let {
                 binder,
-                value: Box::new(value),
-                body: Box::new(body),
+                value: NBox::new(value),
+                body: NBox::new(body),
             }
         }
 
@@ -341,8 +344,8 @@ pub(crate) fn normalize_list_cons_literals_nameless(expr: NamelessExpr) -> Namel
                 other => other,
             };
             NamelessExpr::List {
-                elements,
-                tail: tail.map(Box::new),
+                elements: elements.into(),
+                tail: tail.map(NBox::new),
             }
         }
     }

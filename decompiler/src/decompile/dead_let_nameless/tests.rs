@@ -11,8 +11,8 @@ fn drops_unused_pure_let() {
     let unused = id();
     let expr = NamelessExpr::Let {
         binder: unused,
-        value: Box::new(NamelessExpr::Int(BigInt::from(42))),
-        body: Box::new(NamelessExpr::Int(BigInt::from(7))),
+        value: NBox::new(NamelessExpr::Int(BigInt::from(42))),
+        body: NBox::new(NamelessExpr::Int(BigInt::from(7))),
     };
     let result = eliminate_dead_lets_nameless(expr);
     assert!(matches!(result, NamelessExpr::Int(ref n) if *n == 7.into()));
@@ -23,8 +23,8 @@ fn keeps_used_let() {
     let used = id();
     let expr = NamelessExpr::Let {
         binder: used,
-        value: Box::new(NamelessExpr::Int(BigInt::from(42))),
-        body: Box::new(NamelessExpr::Var(used)),
+        value: NBox::new(NamelessExpr::Int(BigInt::from(42))),
+        body: NBox::new(NamelessExpr::Var(used)),
     };
     let result = eliminate_dead_lets_nameless(expr);
     assert!(matches!(result, NamelessExpr::Let { .. }));
@@ -38,11 +38,11 @@ fn keeps_let_with_apply_value_even_unused() {
     let x = id();
     let expr = NamelessExpr::Let {
         binder: unused,
-        value: Box::new(NamelessExpr::Apply {
-            function: Box::new(NamelessExpr::Var(f)),
-            args: vec![NamelessExpr::Var(x)],
+        value: NBox::new(NamelessExpr::Apply {
+            function: NBox::new(NamelessExpr::Var(f)),
+            args: vec![NamelessExpr::Var(x)].into(),
         }),
-        body: Box::new(NamelessExpr::Int(BigInt::from(7))),
+        body: NBox::new(NamelessExpr::Int(BigInt::from(7))),
     };
     let result = eliminate_dead_lets_nameless(expr);
     assert!(matches!(result, NamelessExpr::Let { .. }));
@@ -53,10 +53,10 @@ fn keeps_let_with_explicit_error_value() {
     let unused = id();
     let expr = NamelessExpr::Let {
         binder: unused,
-        value: Box::new(NamelessExpr::Error {
+        value: NBox::new(NamelessExpr::Error {
             message: Some("boom".to_string()),
         }),
-        body: Box::new(NamelessExpr::Int(BigInt::from(7))),
+        body: NBox::new(NamelessExpr::Int(BigInt::from(7))),
     };
     let result = eliminate_dead_lets_nameless(expr);
     assert!(matches!(result, NamelessExpr::Let { .. }));
@@ -71,8 +71,8 @@ fn keeps_let_with_explicit_error_inside_when_value() {
     let subject = id();
     let expr = NamelessExpr::Let {
         binder: unused,
-        value: Box::new(NamelessExpr::When {
-            subject: Box::new(NamelessExpr::Var(subject)),
+        value: NBox::new(NamelessExpr::When {
+            subject: NBox::new(NamelessExpr::Var(subject)),
             subject_name: None,
             clauses: vec![NamelessClause {
                 pattern: NamelessPattern::Constructor {
@@ -85,9 +85,10 @@ fn keeps_let_with_explicit_error_inside_when_value() {
                 body: NamelessExpr::Error {
                     message: Some("boom".to_string()),
                 },
-            }],
+            }]
+            .into(),
         }),
-        body: Box::new(NamelessExpr::Int(BigInt::from(7))),
+        body: NBox::new(NamelessExpr::Int(BigInt::from(7))),
     };
     let result = eliminate_dead_lets_nameless(expr);
     assert!(matches!(result, NamelessExpr::Let { .. }));
@@ -101,14 +102,14 @@ fn drops_chain_of_unused_pure_lets() {
     let c = id();
     let expr = NamelessExpr::Let {
         binder: a,
-        value: Box::new(NamelessExpr::Int(BigInt::from(1))),
-        body: Box::new(NamelessExpr::Let {
+        value: NBox::new(NamelessExpr::Int(BigInt::from(1))),
+        body: NBox::new(NamelessExpr::Let {
             binder: b,
-            value: Box::new(NamelessExpr::Int(BigInt::from(2))),
-            body: Box::new(NamelessExpr::Let {
+            value: NBox::new(NamelessExpr::Int(BigInt::from(2))),
+            body: NBox::new(NamelessExpr::Let {
                 binder: c,
-                value: Box::new(NamelessExpr::Int(BigInt::from(3))),
-                body: Box::new(NamelessExpr::Int(BigInt::from(99))),
+                value: NBox::new(NamelessExpr::Int(BigInt::from(3))),
+                body: NBox::new(NamelessExpr::Int(BigInt::from(99))),
             }),
         }),
     };
@@ -124,11 +125,11 @@ fn keeps_outer_let_when_body_uses_inner() {
     let inner = id();
     let expr = NamelessExpr::Let {
         binder: outer,
-        value: Box::new(NamelessExpr::Int(BigInt::from(1))),
-        body: Box::new(NamelessExpr::Let {
+        value: NBox::new(NamelessExpr::Int(BigInt::from(1))),
+        body: NBox::new(NamelessExpr::Let {
             binder: inner,
-            value: Box::new(NamelessExpr::Var(outer)),
-            body: Box::new(NamelessExpr::Var(inner)),
+            value: NBox::new(NamelessExpr::Var(outer)),
+            body: NBox::new(NamelessExpr::Var(inner)),
         }),
     };
     let result = eliminate_dead_lets_nameless(expr);
@@ -151,8 +152,8 @@ fn nameless_dce_does_not_need_textual_fallback() {
     let body = NamelessExpr::Int(BigInt::from(0));
     let expr = NamelessExpr::Let {
         binder: unused,
-        value: Box::new(NamelessExpr::Int(BigInt::from(1))),
-        body: Box::new(body),
+        value: NBox::new(NamelessExpr::Int(BigInt::from(1))),
+        body: NBox::new(body),
     };
     let result = eliminate_dead_lets_nameless(expr);
     assert!(matches!(result, NamelessExpr::Int(_)));
@@ -165,16 +166,16 @@ fn nameless_dce_does_not_need_textual_fallback() {
 
 fn pair_with(value_a: NamelessExpr) -> NamelessExpr {
     NamelessExpr::Pair(
-        Box::new(value_a),
-        Box::new(NamelessExpr::Int(BigInt::from(0))),
+        NBox::new(value_a),
+        NBox::new(NamelessExpr::Int(BigInt::from(0))),
     )
 }
 
 fn dead_let(value: NamelessExpr) -> NamelessExpr {
     NamelessExpr::Let {
         binder: id(),
-        value: Box::new(value),
-        body: Box::new(NamelessExpr::Int(BigInt::from(7))),
+        value: NBox::new(value),
+        body: NBox::new(NamelessExpr::Int(BigInt::from(7))),
     }
 }
 
@@ -185,8 +186,8 @@ fn keeps_let_with_nested_nonbuiltin_apply() {
     let f = id();
     let x = id();
     let value = pair_with(NamelessExpr::Apply {
-        function: Box::new(NamelessExpr::Var(f)),
-        args: vec![NamelessExpr::Var(x)],
+        function: NBox::new(NamelessExpr::Var(f)),
+        args: vec![NamelessExpr::Var(x)].into(),
     });
     assert!(matches!(
         eliminate_dead_lets_nameless(dead_let(value)),
@@ -201,9 +202,10 @@ fn drops_let_with_nested_pure_builtin() {
     let value = pair_with(NamelessExpr::BuiltinCall {
         name: crate::BuiltinId::ListHead,
         args: vec![NamelessExpr::List {
-            elements: vec![],
+            elements: vec![].into(),
             tail: None,
-        }],
+        }]
+        .into(),
     });
     assert!(matches!(
         eliminate_dead_lets_nameless(dead_let(value)),
@@ -216,7 +218,7 @@ fn keeps_let_with_nested_force_var() {
     // let _ = Pair(force(opaque_thunk), 0) in 7 — forcing an opaque thunk
     // executes unknown suspended code that can fail; retain.
     let thunk = id();
-    let value = pair_with(NamelessExpr::Force(Box::new(NamelessExpr::Var(thunk))));
+    let value = pair_with(NamelessExpr::Force(NBox::new(NamelessExpr::Var(thunk))));
     assert!(matches!(
         eliminate_dead_lets_nameless(dead_let(value)),
         NamelessExpr::Let { .. }
@@ -227,8 +229,8 @@ fn keeps_let_with_nested_force_var() {
 fn keeps_let_with_nested_force_delay_error() {
     // let _ = Pair(force(delay(error)), 0) in 7 — forcing opens the delay and
     // runs the error; retain.
-    let value = pair_with(NamelessExpr::Force(Box::new(NamelessExpr::Delay(
-        Box::new(NamelessExpr::Error { message: None }),
+    let value = pair_with(NamelessExpr::Force(NBox::new(NamelessExpr::Delay(
+        NBox::new(NamelessExpr::Error { message: None }),
     ))));
     assert!(matches!(
         eliminate_dead_lets_nameless(dead_let(value)),
@@ -240,9 +242,9 @@ fn keeps_let_with_nested_force_delay_error() {
 fn drops_let_with_nested_force_builtin() {
     // let _ = Pair(force(headList), 0) in 7 — forcing a builtin is the arity
     // mechanism (total); with no failing operand the let is dropped (control).
-    let value = pair_with(NamelessExpr::Force(Box::new(NamelessExpr::BuiltinCall {
+    let value = pair_with(NamelessExpr::Force(NBox::new(NamelessExpr::BuiltinCall {
         name: crate::BuiltinId::ListHead,
-        args: vec![],
+        args: vec![].into(),
     })));
     assert!(matches!(
         eliminate_dead_lets_nameless(dead_let(value)),

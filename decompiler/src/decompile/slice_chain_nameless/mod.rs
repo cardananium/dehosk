@@ -12,7 +12,7 @@
 //! mint-site annotations or `kind_inference`.
 
 use super::dead_let_nameless::has_observable_effect;
-use crate::pseudo::nameless::{NamelessClause, NamelessExpr, VarKind, VarTable};
+use crate::pseudo::nameless::{NBox, NamelessClause, NamelessExpr, VarKind, VarTable};
 use crate::pseudo::var_id::VarId;
 use std::collections::HashSet;
 
@@ -28,11 +28,11 @@ fn make_list_tail_chain(base: NamelessExpr, depth: usize) -> NamelessExpr {
     let mut result = base;
     for _ in 0..depth {
         result = NamelessExpr::Apply {
-            function: Box::new(NamelessExpr::BuiltinCall {
+            function: NBox::new(NamelessExpr::BuiltinCall {
                 name: "List.tail".to_string().into(),
-                args: vec![],
+                args: vec![].into(),
             }),
-            args: vec![result],
+            args: vec![result].into(),
         };
     }
     result
@@ -103,13 +103,13 @@ fn fold_with_mode(
                 && in_scope.contains(&parent)
             {
                 return NamelessExpr::IndexAccess {
-                    collection: Box::new(NamelessExpr::Var(parent)),
+                    collection: NBox::new(NamelessExpr::Var(parent)),
                     index: depth + index,
                 };
             }
             NamelessExpr::IndexAccess {
-                collection: Box::new(fold_with_mode(
-                    *collection,
+                collection: NBox::new(fold_with_mode(
+                    collection.into_inner(),
                     table,
                     rewrite_aliases,
                     in_scope,
@@ -119,7 +119,12 @@ fn fold_with_mode(
         }
         NamelessExpr::Lambda { params, body } => {
             let newly_added = with_scope_binders(in_scope, &params);
-            let body = Box::new(fold_with_mode(*body, table, rewrite_aliases, in_scope));
+            let body = NBox::new(fold_with_mode(
+                body.into_inner(),
+                table,
+                rewrite_aliases,
+                in_scope,
+            ));
             release_scope_binders(in_scope, &newly_added);
             NamelessExpr::Lambda { params, body }
         }
@@ -128,12 +133,22 @@ fn fold_with_mode(
             if in_scope.insert(name) {
                 newly_added.push(name);
             }
-            let body = Box::new(fold_with_mode(*body, table, rewrite_aliases, in_scope));
+            let body = NBox::new(fold_with_mode(
+                body.into_inner(),
+                table,
+                rewrite_aliases,
+                in_scope,
+            ));
             release_scope_binders(in_scope, &newly_added);
             NamelessExpr::RecFn { name, params, body }
         }
         NamelessExpr::Apply { function, args } => NamelessExpr::Apply {
-            function: Box::new(fold_with_mode(*function, table, rewrite_aliases, in_scope)),
+            function: NBox::new(fold_with_mode(
+                function.into_inner(),
+                table,
+                rewrite_aliases,
+                in_scope,
+            )),
             args: args
                 .into_iter()
                 .map(|a| fold_with_mode(a, table, rewrite_aliases, in_scope))
@@ -149,7 +164,7 @@ fn fold_with_mode(
             let preserve_observable_value =
                 is_slice_alias && !body_uses_binder && has_observable_effect(&value);
             let binder_was_new = in_scope.insert(binder);
-            let body = fold_with_mode(*body, table, rewrite_aliases, in_scope);
+            let body = fold_with_mode(body.into_inner(), table, rewrite_aliases, in_scope);
             if binder_was_new {
                 in_scope.remove(&binder);
             }
@@ -162,15 +177,15 @@ fn fold_with_mode(
                 return body;
             }
             let value = fold_with_mode(
-                *value,
+                value.into_inner(),
                 table,
                 rewrite_aliases && !preserve_observable_value,
                 in_scope,
             );
             NamelessExpr::Let {
                 binder,
-                value: Box::new(value),
-                body: Box::new(body),
+                value: NBox::new(value),
+                body: NBox::new(body),
             }
         }
         NamelessExpr::If {
@@ -178,15 +193,20 @@ fn fold_with_mode(
             then_branch,
             else_branch,
         } => NamelessExpr::If {
-            condition: Box::new(fold_with_mode(*condition, table, rewrite_aliases, in_scope)),
-            then_branch: Box::new(fold_with_mode(
-                *then_branch,
+            condition: NBox::new(fold_with_mode(
+                condition.into_inner(),
                 table,
                 rewrite_aliases,
                 in_scope,
             )),
-            else_branch: Box::new(fold_with_mode(
-                *else_branch,
+            then_branch: NBox::new(fold_with_mode(
+                then_branch.into_inner(),
+                table,
+                rewrite_aliases,
+                in_scope,
+            )),
+            else_branch: NBox::new(fold_with_mode(
+                else_branch.into_inner(),
                 table,
                 rewrite_aliases,
                 in_scope,
@@ -197,7 +217,12 @@ fn fold_with_mode(
             subject_name,
             clauses,
         } => {
-            let subject = Box::new(fold_with_mode(*subject, table, rewrite_aliases, in_scope));
+            let subject = NBox::new(fold_with_mode(
+                subject.into_inner(),
+                table,
+                rewrite_aliases,
+                in_scope,
+            ));
             let subject_name_added = subject_name.filter(|sn| in_scope.insert(*sn)).map(|_| ());
             let clauses: Vec<_> = clauses
                 .into_iter()
@@ -211,7 +236,7 @@ fn fold_with_mode(
             NamelessExpr::When {
                 subject,
                 subject_name,
-                clauses,
+                clauses: clauses.into(),
             }
         }
         NamelessExpr::List { elements, tail } => NamelessExpr::List {
@@ -219,7 +244,14 @@ fn fold_with_mode(
                 .into_iter()
                 .map(|e| fold_with_mode(e, table, rewrite_aliases, in_scope))
                 .collect(),
-            tail: tail.map(|t| Box::new(fold_with_mode(*t, table, rewrite_aliases, in_scope))),
+            tail: tail.map(|t| {
+                NBox::new(fold_with_mode(
+                    t.into_inner(),
+                    table,
+                    rewrite_aliases,
+                    in_scope,
+                ))
+            }),
         },
         NamelessExpr::Tuple(items) => NamelessExpr::Tuple(
             items
@@ -228,8 +260,18 @@ fn fold_with_mode(
                 .collect(),
         ),
         NamelessExpr::Pair(a, b) => NamelessExpr::Pair(
-            Box::new(fold_with_mode(*a, table, rewrite_aliases, in_scope)),
-            Box::new(fold_with_mode(*b, table, rewrite_aliases, in_scope)),
+            NBox::new(fold_with_mode(
+                a.into_inner(),
+                table,
+                rewrite_aliases,
+                in_scope,
+            )),
+            NBox::new(fold_with_mode(
+                b.into_inner(),
+                table,
+                rewrite_aliases,
+                in_scope,
+            )),
         ),
         NamelessExpr::Constr {
             type_hint,
@@ -246,17 +288,37 @@ fn fold_with_mode(
             shape,
         },
         NamelessExpr::FieldAccess { record, selector } => NamelessExpr::FieldAccess {
-            record: Box::new(fold_with_mode(*record, table, rewrite_aliases, in_scope)),
+            record: NBox::new(fold_with_mode(
+                record.into_inner(),
+                table,
+                rewrite_aliases,
+                in_scope,
+            )),
             selector,
         },
         NamelessExpr::BinOp { op, left, right } => NamelessExpr::BinOp {
             op,
-            left: Box::new(fold_with_mode(*left, table, rewrite_aliases, in_scope)),
-            right: Box::new(fold_with_mode(*right, table, rewrite_aliases, in_scope)),
+            left: NBox::new(fold_with_mode(
+                left.into_inner(),
+                table,
+                rewrite_aliases,
+                in_scope,
+            )),
+            right: NBox::new(fold_with_mode(
+                right.into_inner(),
+                table,
+                rewrite_aliases,
+                in_scope,
+            )),
         },
         NamelessExpr::UnOp { op, operand } => NamelessExpr::UnOp {
             op,
-            operand: Box::new(fold_with_mode(*operand, table, rewrite_aliases, in_scope)),
+            operand: NBox::new(fold_with_mode(
+                operand.into_inner(),
+                table,
+                rewrite_aliases,
+                in_scope,
+            )),
         },
         NamelessExpr::BuiltinCall { name, args } => NamelessExpr::BuiltinCall {
             name,
@@ -265,21 +327,31 @@ fn fold_with_mode(
                 .map(|a| fold_with_mode(a, table, rewrite_aliases, in_scope))
                 .collect(),
         },
-        NamelessExpr::Delay(inner) => NamelessExpr::Delay(Box::new(fold_with_mode(
-            *inner,
+        NamelessExpr::Delay(inner) => NamelessExpr::Delay(NBox::new(fold_with_mode(
+            inner.into_inner(),
             table,
             rewrite_aliases,
             in_scope,
         ))),
-        NamelessExpr::Force(inner) => NamelessExpr::Force(Box::new(fold_with_mode(
-            *inner,
+        NamelessExpr::Force(inner) => NamelessExpr::Force(NBox::new(fold_with_mode(
+            inner.into_inner(),
             table,
             rewrite_aliases,
             in_scope,
         ))),
         NamelessExpr::Trace { message, value } => NamelessExpr::Trace {
-            message: Box::new(fold_with_mode(*message, table, rewrite_aliases, in_scope)),
-            value: Box::new(fold_with_mode(*value, table, rewrite_aliases, in_scope)),
+            message: NBox::new(fold_with_mode(
+                message.into_inner(),
+                table,
+                rewrite_aliases,
+                in_scope,
+            )),
+            value: NBox::new(fold_with_mode(
+                value.into_inner(),
+                table,
+                rewrite_aliases,
+                in_scope,
+            )),
         },
         other => other,
     }

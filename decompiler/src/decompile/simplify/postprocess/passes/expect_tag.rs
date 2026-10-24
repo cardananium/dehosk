@@ -2,7 +2,7 @@ use crate::pseudo::ast::{BinaryOp, PseudoExpr};
 use crate::pseudo::constructor::ConstructorShape;
 use crate::pseudo::nameless::convert::{nameless_to_pseudo, pseudo_to_nameless};
 use crate::pseudo::nameless::fold::NamelessFolder;
-use crate::pseudo::nameless::{NamelessClause, NamelessExpr, NamelessPattern, VarTable};
+use crate::pseudo::nameless::{NBox, NamelessClause, NamelessExpr, NamelessPattern, VarTable};
 use crate::pseudo::var_id::VarId;
 
 /// Convert constructor-tag assertions — `expect!(x.tag == N, value)`
@@ -136,7 +136,7 @@ pub(crate) fn convert_expect_tag_to_constr_when_nameless(
             value: NamelessExpr,
         ) -> NamelessExpr {
             NamelessExpr::When {
-                subject: Box::new(subject),
+                subject: NBox::new(subject),
                 subject_name: None,
                 clauses: vec![
                     NamelessClause {
@@ -154,7 +154,8 @@ pub(crate) fn convert_expect_tag_to_constr_when_nameless(
                         guard: None,
                         body: NamelessExpr::Error { message: None },
                     },
-                ],
+                ]
+                .into(),
             }
         }
     }
@@ -163,8 +164,8 @@ pub(crate) fn convert_expect_tag_to_constr_when_nameless(
         fn post_apply(&mut self, function: NamelessExpr, args: Vec<NamelessExpr>) -> NamelessExpr {
             if !self.is_named(&function, "expect!") || args.is_empty() {
                 return NamelessExpr::Apply {
-                    function: Box::new(function),
-                    args,
+                    function: NBox::new(function),
+                    args: args.into(),
                 };
             }
 
@@ -213,8 +214,8 @@ pub(crate) fn convert_expect_tag_to_constr_when_nameless(
             }
 
             NamelessExpr::Apply {
-                function: Box::new(function),
-                args,
+                function: NBox::new(function),
+                args: args.into(),
             }
         }
     }
