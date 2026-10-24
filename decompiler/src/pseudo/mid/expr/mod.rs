@@ -18,10 +18,10 @@ pub(crate) type MVec = OwnedVec<MidExpr>;
 
 /// Mid-level expression preserving UPLC semantics with analysis annotations.
 ///
-/// The children sit in [`MBox`] / [`MVec`], whose destructors are heap walks:
-/// nesting depth is script-controlled, so releasing a tree must not take a
-/// call frame per level.
-#[derive(Debug, Clone)]
+/// `Clone` is a heap walk — see the `impl` below — and the children sit in
+/// [`MBox`] / [`MVec`], whose destructors are heap walks too: nesting depth is
+/// script-controlled, so neither may take a call frame per level.
+#[derive(Debug)]
 pub(crate) enum MidExpr {
     /// Literal constant value.
     Lit { id: MidExprId, value: MidLiteral },
@@ -404,6 +404,126 @@ impl MidExpr {
         );
     }
 
+    /// Rebuild this node around already-cloned children, given in
+    /// [`Self::children`]'s order. Fields that hold no `MidExpr` are copied.
+    fn clone_with_children(&self, children: impl Iterator<Item = MidExpr>) -> MidExpr {
+        let mut children = children;
+        let mut next = || children.next().expect("clone_with_children: missing child");
+        match self {
+            MidExpr::Lit { id, value } => MidExpr::Lit {
+                id: *id,
+                value: value.clone(),
+            },
+            MidExpr::Var { id, var } => MidExpr::Var { id: *id, var: *var },
+            MidExpr::Thunk { id, cosmetic, .. } => MidExpr::Thunk {
+                id: *id,
+                body: MBox::new(next()),
+                cosmetic: *cosmetic,
+            },
+            MidExpr::Force { id, resolved, .. } => {
+                let body = MBox::new(next());
+                MidExpr::Force {
+                    id: *id,
+                    body,
+                    resolved: resolved.as_ref().map(|_| MBox::new(next())),
+                }
+            }
+            MidExpr::Closure {
+                id,
+                params,
+                recursive,
+                ..
+            } => MidExpr::Closure {
+                id: *id,
+                params: params.clone(),
+                body: MBox::new(next()),
+                recursive: *recursive,
+            },
+            MidExpr::Apply { id, args, .. } => {
+                let function = MBox::new(next());
+                MidExpr::Apply {
+                    id: *id,
+                    function,
+                    args: (0..args.len()).map(|_| next()).collect(),
+                }
+            }
+            MidExpr::Let {
+                id, var, use_count, ..
+            } => {
+                let value = MBox::new(next());
+                MidExpr::Let {
+                    id: *id,
+                    var: *var,
+                    value,
+                    body: MBox::new(next()),
+                    use_count: *use_count,
+                }
+            }
+            MidExpr::Builtin {
+                id,
+                fun,
+                forces,
+                args,
+                folded,
+            } => MidExpr::Builtin {
+                id: *id,
+                fun: *fun,
+                forces: *forces,
+                args: (0..args.len()).map(|_| next()).collect(),
+                folded: folded.clone(),
+            },
+            MidExpr::Constr { id, tag, fields } => MidExpr::Constr {
+                id: *id,
+                tag: *tag,
+                fields: (0..fields.len()).map(|_| next()).collect(),
+            },
+            MidExpr::Case {
+                id,
+                branches,
+                encoding,
+                ..
+            } => {
+                let scrutinee = MBox::new(next());
+                MidExpr::Case {
+                    id: *id,
+                    scrutinee,
+                    branches: branches
+                        .iter()
+                        .map(|branch| MidBranch {
+                            tag: branch.tag,
+                            binders: branch.binders.clone(),
+                            body: next(),
+                        })
+                        .collect(),
+                    encoding: *encoding,
+                }
+            }
+            MidExpr::If { id, .. } => {
+                let condition = MBox::new(next());
+                let then_branch = MBox::new(next());
+                MidExpr::If {
+                    id: *id,
+                    condition,
+                    then_branch,
+                    else_branch: MBox::new(next()),
+                }
+            }
+            MidExpr::Error { id } => MidExpr::Error { id: *id },
+            MidExpr::Trace { id, .. } => {
+                let message = MBox::new(next());
+                MidExpr::Trace {
+                    id: *id,
+                    message,
+                    body: MBox::new(next()),
+                }
+            }
+            MidExpr::Data { id, data } => MidExpr::Data {
+                id: *id,
+                data: data.clone(),
+            },
+        }
+    }
+
     /// Iterative: this is called on whole programs, whose depth a script
     /// controls.
     pub(crate) fn node_count(&self) -> usize {
@@ -414,6 +534,40 @@ impl MidExpr {
             pending.extend(current.children());
         }
         n
+    }
+}
+
+/// Deep clone on a heap stack.
+///
+/// Nesting depth is script-controlled, and on `wasm32` the engine's call
+/// stack cannot be grown to match. Do not replace this with `#[derive(Clone)]`.
+impl Clone for MidExpr {
+    fn clone(&self) -> Self {
+        enum Step<'a> {
+            /// Clone this node's children first.
+            Visit(&'a MidExpr),
+            /// Rebuild this node from the `usize` children on `done`.
+            Build(&'a MidExpr, usize),
+        }
+
+        let mut steps = vec![Step::Visit(self)];
+        let mut done: Vec<MidExpr> = Vec::new();
+        while let Some(step) = steps.pop() {
+            match step {
+                Step::Visit(node) => {
+                    let children = node.children();
+                    steps.push(Step::Build(node, children.len()));
+                    // Reversed so they pop — and so land on `done` — in order.
+                    steps.extend(children.into_iter().rev().map(Step::Visit));
+                }
+                Step::Build(node, count) => {
+                    let start = done.len() - count;
+                    let rebuilt = node.clone_with_children(done.drain(start..));
+                    done.push(rebuilt);
+                }
+            }
+        }
+        done.pop().expect("clone leaves exactly one result")
     }
 }
 
