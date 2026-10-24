@@ -19,6 +19,18 @@ pub(crate) enum FoldAction {
     Replace(PseudoExpr),
 }
 
+/// What [`ExprFolder::enter_owned`] makes of a node it was handed by value,
+/// and what [`ExprFolder::resume`] makes of the results it waited for.
+pub(crate) enum Entered {
+    /// Walk the node's children, then reassemble it through its `post_*` hook.
+    Walk(PseudoExpr),
+    /// The finished result, as [`FoldAction::Replace`].
+    Done(PseudoExpr),
+    /// Fold these subtrees, in order, then pass their results to
+    /// [`ExprFolder::resume`].
+    Await(Vec<PseudoExpr>),
+}
+
 /// One pending step of [`ExprFolder::fold_inner`].
 pub(crate) enum FoldStep {
     /// Fold this subtree.
@@ -34,6 +46,8 @@ pub(crate) enum FoldStep {
     /// The clause's body is done: close its scope
     /// ([`ExprFolder::exit_clause`]).
     ClauseExit(Option<Binder>, WhenPattern),
+    /// The last `n` results answer an [`Entered::Await`]: hand them back.
+    Resume(usize),
 }
 
 /// The node a [`FoldStep::Post`] reassembles, carrying the parts that are not
@@ -133,6 +147,29 @@ pub(crate) trait ExprFolder {
         _body: &PseudoExpr,
     ) -> FoldAction {
         FoldAction::Walk
+    }
+
+    /// [`Self::pre_expr`] for an implementation that wants the node by
+    /// value — to take it apart without cloning it, or to fold some of its
+    /// parts itself through [`Entered::Await`] and finish in
+    /// [`Self::resume`], which keeps that work on the machine's step stack
+    /// rather than in a nested [`Self::fold`].
+    ///
+    /// The default defers to [`Self::pre_expr`].
+    fn enter_owned(&mut self, expr: PseudoExpr) -> Entered {
+        match self.pre_expr(&expr) {
+            FoldAction::Walk => Entered::Walk(expr),
+            FoldAction::Replace(e) => Entered::Done(e),
+        }
+    }
+
+    /// The subtrees an [`Entered::Await`] asked for are folded: continue.
+    ///
+    /// Awaits nest, and the machine resumes them innermost first, so an
+    /// implementation can keep what it needs to continue on a stack of its
+    /// own, pushed where it awaits and popped here.
+    fn resume(&mut self, _folded: Vec<PseudoExpr>) -> Entered {
+        unreachable!("resume without a pending Await")
     }
 
     /// Called after the node has been reconstructed through its `post_*`
@@ -390,17 +427,19 @@ pub(crate) trait ExprFolder {
     /// A kind is handled either here or by its arm in
     /// [`Self::fold_legacy_arm`] — never both, so the two cannot drift.
     fn fold_inner(&mut self, expr: PseudoExpr) -> PseudoExpr {
-        let mut steps: Vec<FoldStep> = vec![FoldStep::Enter(expr)];
+        self.run_steps(vec![FoldStep::Enter(expr)])
+    }
+
+    /// Drive the machine until `steps` is drained; the one value left on
+    /// the result stack is the fold's result.
+    fn run_steps(&mut self, mut steps: Vec<FoldStep>) -> PseudoExpr {
         let mut done: Vec<PseudoExpr> = Vec::new();
 
         while let Some(step) = steps.pop() {
             match step {
                 FoldStep::Enter(expr) => {
-                    if let FoldAction::Replace(e) = self.pre_expr(&expr) {
-                        done.push(e);
-                        continue;
-                    }
-                    self.enter_node(expr, &mut steps, &mut done);
+                    let entered = self.enter_owned(expr);
+                    self.dispatch(entered, &mut steps, &mut done);
                 }
                 FoldStep::Post(kind) => {
                     if let Some(rebuilt) = self.rebuild(kind, &mut done, &mut steps) {
@@ -418,11 +457,35 @@ pub(crate) trait ExprFolder {
                 FoldStep::ClauseExit(subject_name, pattern) => {
                     self.exit_clause(subject_name.as_ref(), &pattern);
                 }
+                FoldStep::Resume(count) => {
+                    let at = done.len() - count;
+                    let folded = done.split_off(at);
+                    let entered = self.resume(folded);
+                    self.dispatch(entered, &mut steps, &mut done);
+                }
             }
         }
 
         debug_assert_eq!(done.len(), 1, "the fold machine must leave one result");
         done.pop().expect("fold result")
+    }
+
+    /// Carry out what [`Self::enter_owned`] or [`Self::resume`] decided.
+    fn dispatch(
+        &mut self,
+        entered: Entered,
+        steps: &mut Vec<FoldStep>,
+        done: &mut Vec<PseudoExpr>,
+    ) {
+        match entered {
+            Entered::Walk(expr) => self.enter_node(expr, steps, done),
+            Entered::Done(expr) => done.push(expr),
+            Entered::Await(exprs) => {
+                steps.push(FoldStep::Resume(exprs.len()));
+                // Reversed so they pop, and land on `done`, in order.
+                steps.extend(exprs.into_iter().rev().map(FoldStep::Enter));
+            }
+        }
     }
 
     /// Queue a node's children, or emit it outright when it has none.
