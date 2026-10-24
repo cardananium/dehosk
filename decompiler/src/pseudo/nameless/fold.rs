@@ -2,10 +2,10 @@
 //!
 //! Mirrors `pseudo::fold::ExprFolder` but for the nameless IR.
 //! Identity-default `post_*` hooks let a pass override only the
-//! variants it cares about; the `fold` driver recurses into
+//! variants it cares about; the `fold` driver folds a node's
 //! children before invoking the hook.
 
-use super::{NBox, NamelessClause, NamelessExpr, NamelessPattern};
+use super::{NBox, NClauses, NamelessClause, NamelessExpr, NamelessPattern};
 use crate::pseudo::ast::{BinaryOp, UnaryOp};
 use crate::pseudo::field_selector::FieldSelector;
 use crate::pseudo::var_id::VarId;
@@ -255,146 +255,437 @@ pub(crate) trait NamelessFolder {
 
     // Driver --------
 
+    /// Fold `expr` bottom-up: `pre_expr`, the node's enter hook, its
+    /// children in source order, its exit hook, its `post_*` hook, then
+    /// `post_expr` — the order a recursive descent fires them in.
+    ///
+    /// The descent runs on a heap stack ([`fold_machine`]): nesting depth is
+    /// script-controlled, and on `wasm32` the engine's call stack cannot be
+    /// grown to match. No implementation may override `fold` — that would
+    /// put the whole subtree back on the call stack. Intercept with
+    /// `pre_expr` or the hooks instead.
     fn fold(&mut self, expr: NamelessExpr) -> NamelessExpr {
-        match self.pre_expr(&expr) {
-            NamelessFoldAction::Replace(replacement) => return replacement,
-            NamelessFoldAction::Walk => {}
-        }
-        let folded = self.fold_inner(expr);
-        self.post_expr(folded)
+        fold_machine(self, expr)
+    }
+}
+
+/// One pending step of [`fold_machine`].
+enum FoldStep {
+    /// Fold this subtree.
+    Visit(NamelessExpr),
+    /// A `let` value is folded and on top of `done`: open the binding, then
+    /// fold the body under it.
+    LetBody { binder: VarId, body: NamelessExpr },
+    /// A `when` subject is folded and on top of `done`: open the `when`,
+    /// then fold the clauses in order.
+    WhenClauses {
+        subject_name: Option<VarId>,
+        clauses: NClauses,
+    },
+    /// Open a clause, then fold its guard and body.
+    Clause(NamelessClause),
+    /// A clause's guard and body are on `done`: close and reassemble it.
+    ClauseDone {
+        pattern: NamelessPattern,
+        has_guard: bool,
+    },
+    /// All of a node's children are on `done`: reassemble it.
+    Build(FoldBuild),
+}
+
+/// The node a [`FoldStep::Build`] reassembles, carrying the parts that are
+/// not children.
+enum FoldBuild {
+    Lambda {
+        params: Vec<VarId>,
+    },
+    RecFn {
+        name: VarId,
+        params: Vec<VarId>,
+    },
+    Apply {
+        argc: usize,
+    },
+    Let {
+        binder: VarId,
+    },
+    If,
+    When {
+        subject_name: Option<VarId>,
+        clause_count: usize,
+    },
+    List {
+        count: usize,
+        has_tail: bool,
+    },
+    Tuple {
+        count: usize,
+    },
+    Pair,
+    Constr {
+        type_hint: Option<crate::pseudo::type_hint::TypeHintId>,
+        tag: usize,
+        count: usize,
+        shape: crate::pseudo::constructor::ConstructorShape,
+    },
+    FieldAccess {
+        selector: FieldSelector,
+    },
+    IndexAccess {
+        index: usize,
+    },
+    BinOp {
+        op: BinaryOp,
+    },
+    UnOp {
+        op: UnaryOp,
+    },
+    BuiltinCall {
+        name: crate::BuiltinId,
+        argc: usize,
+    },
+    Delay,
+    Force,
+    Trace,
+}
+
+/// [`NamelessFolder::fold`]'s machine: an explicit step stack in place of the
+/// call stack, since the tree depth is script-controlled.
+///
+/// Children are pushed in reverse so they pop — and so land on `done` — in
+/// source order. Clauses collect on their own stack, LIFO like `done`: a
+/// clause's subtree (and any `when` nested in it) completes before the next
+/// clause step runs.
+fn fold_machine<F: NamelessFolder + ?Sized>(folder: &mut F, expr: NamelessExpr) -> NamelessExpr {
+    fn take(done: &mut Vec<NamelessExpr>, n: usize) -> Vec<NamelessExpr> {
+        let at = done.len() - n;
+        done.split_off(at)
     }
 
-    fn fold_inner(&mut self, expr: NamelessExpr) -> NamelessExpr {
-        match expr {
-            NamelessExpr::Int(n) => self.post_int(n),
-            NamelessExpr::ByteArray(bytes) => self.post_byte_array(bytes),
-            NamelessExpr::String(s) => self.post_string(s),
-            NamelessExpr::Bool(b) => self.post_bool(b),
-            NamelessExpr::Unit => self.post_unit(),
-            NamelessExpr::Var(id) => self.post_var(id),
-            NamelessExpr::Lambda { params, body } => {
-                self.enter_lambda(&params);
-                let body = self.fold(body.into_inner());
-                self.exit_lambda(&params);
-                self.post_lambda(params, body)
+    let mut steps: Vec<FoldStep> = vec![FoldStep::Visit(expr)];
+    let mut done: Vec<NamelessExpr> = Vec::new();
+    let mut clauses_done: Vec<NamelessClause> = Vec::new();
+
+    while let Some(step) = steps.pop() {
+        match step {
+            FoldStep::Visit(expr) => {
+                if let NamelessFoldAction::Replace(replacement) = folder.pre_expr(&expr) {
+                    done.push(replacement);
+                    continue;
+                }
+                let leaf = match expr {
+                    NamelessExpr::Int(n) => folder.post_int(n),
+                    NamelessExpr::ByteArray(bytes) => folder.post_byte_array(bytes),
+                    NamelessExpr::String(s) => folder.post_string(s),
+                    NamelessExpr::Bool(b) => folder.post_bool(b),
+                    NamelessExpr::Unit => folder.post_unit(),
+                    NamelessExpr::Var(id) => folder.post_var(id),
+                    NamelessExpr::Error { message } => folder.post_error(message),
+                    NamelessExpr::Raw { uplc, reason } => folder.post_raw(uplc, reason),
+                    NamelessExpr::Data(data) => folder.post_data(data),
+                    NamelessExpr::HelperSymbol(intrinsic) => folder.post_helper_symbol(intrinsic),
+                    NamelessExpr::Lambda { params, body } => {
+                        folder.enter_lambda(&params);
+                        steps.push(FoldStep::Build(FoldBuild::Lambda { params }));
+                        steps.push(FoldStep::Visit(body.into_inner()));
+                        continue;
+                    }
+                    NamelessExpr::RecFn { name, params, body } => {
+                        folder.enter_recfn(name, &params);
+                        steps.push(FoldStep::Build(FoldBuild::RecFn { name, params }));
+                        steps.push(FoldStep::Visit(body.into_inner()));
+                        continue;
+                    }
+                    NamelessExpr::Apply { function, args } => {
+                        steps.push(FoldStep::Build(FoldBuild::Apply { argc: args.len() }));
+                        for a in args.into_iter().rev() {
+                            steps.push(FoldStep::Visit(a));
+                        }
+                        steps.push(FoldStep::Visit(function.into_inner()));
+                        continue;
+                    }
+                    NamelessExpr::Let {
+                        binder,
+                        value,
+                        body,
+                    } => {
+                        // The binding comes into scope BETWEEN the value and
+                        // the body, so opening it is a step of its own.
+                        steps.push(FoldStep::LetBody {
+                            binder,
+                            body: body.into_inner(),
+                        });
+                        steps.push(FoldStep::Visit(value.into_inner()));
+                        continue;
+                    }
+                    NamelessExpr::If {
+                        condition,
+                        then_branch,
+                        else_branch,
+                    } => {
+                        steps.push(FoldStep::Build(FoldBuild::If));
+                        steps.push(FoldStep::Visit(else_branch.into_inner()));
+                        steps.push(FoldStep::Visit(then_branch.into_inner()));
+                        steps.push(FoldStep::Visit(condition.into_inner()));
+                        continue;
+                    }
+                    NamelessExpr::When {
+                        subject,
+                        subject_name,
+                        clauses,
+                    } => {
+                        steps.push(FoldStep::WhenClauses {
+                            subject_name,
+                            clauses,
+                        });
+                        steps.push(FoldStep::Visit(subject.into_inner()));
+                        continue;
+                    }
+                    NamelessExpr::List { elements, tail } => {
+                        steps.push(FoldStep::Build(FoldBuild::List {
+                            count: elements.len(),
+                            has_tail: tail.is_some(),
+                        }));
+                        if let Some(t) = tail {
+                            steps.push(FoldStep::Visit(t.into_inner()));
+                        }
+                        for e in elements.into_iter().rev() {
+                            steps.push(FoldStep::Visit(e));
+                        }
+                        continue;
+                    }
+                    NamelessExpr::Tuple(items) => {
+                        steps.push(FoldStep::Build(FoldBuild::Tuple { count: items.len() }));
+                        for i in items.into_iter().rev() {
+                            steps.push(FoldStep::Visit(i));
+                        }
+                        continue;
+                    }
+                    NamelessExpr::Pair(first, second) => {
+                        steps.push(FoldStep::Build(FoldBuild::Pair));
+                        steps.push(FoldStep::Visit(second.into_inner()));
+                        steps.push(FoldStep::Visit(first.into_inner()));
+                        continue;
+                    }
+                    NamelessExpr::Constr {
+                        type_hint,
+                        tag,
+                        fields,
+                        shape,
+                    } => {
+                        steps.push(FoldStep::Build(FoldBuild::Constr {
+                            type_hint,
+                            tag,
+                            count: fields.len(),
+                            shape,
+                        }));
+                        for f in fields.into_iter().rev() {
+                            steps.push(FoldStep::Visit(f));
+                        }
+                        continue;
+                    }
+                    NamelessExpr::FieldAccess { record, selector } => {
+                        steps.push(FoldStep::Build(FoldBuild::FieldAccess { selector }));
+                        steps.push(FoldStep::Visit(record.into_inner()));
+                        continue;
+                    }
+                    NamelessExpr::IndexAccess { collection, index } => {
+                        steps.push(FoldStep::Build(FoldBuild::IndexAccess { index }));
+                        steps.push(FoldStep::Visit(collection.into_inner()));
+                        continue;
+                    }
+                    NamelessExpr::BinOp { op, left, right } => {
+                        steps.push(FoldStep::Build(FoldBuild::BinOp { op }));
+                        steps.push(FoldStep::Visit(right.into_inner()));
+                        steps.push(FoldStep::Visit(left.into_inner()));
+                        continue;
+                    }
+                    NamelessExpr::UnOp { op, operand } => {
+                        steps.push(FoldStep::Build(FoldBuild::UnOp { op }));
+                        steps.push(FoldStep::Visit(operand.into_inner()));
+                        continue;
+                    }
+                    NamelessExpr::BuiltinCall { name, args } => {
+                        steps.push(FoldStep::Build(FoldBuild::BuiltinCall {
+                            name,
+                            argc: args.len(),
+                        }));
+                        for a in args.into_iter().rev() {
+                            steps.push(FoldStep::Visit(a));
+                        }
+                        continue;
+                    }
+                    NamelessExpr::Delay(inner) => {
+                        steps.push(FoldStep::Build(FoldBuild::Delay));
+                        steps.push(FoldStep::Visit(inner.into_inner()));
+                        continue;
+                    }
+                    NamelessExpr::Force(inner) => {
+                        steps.push(FoldStep::Build(FoldBuild::Force));
+                        steps.push(FoldStep::Visit(inner.into_inner()));
+                        continue;
+                    }
+                    NamelessExpr::Trace { message, value } => {
+                        steps.push(FoldStep::Build(FoldBuild::Trace));
+                        steps.push(FoldStep::Visit(value.into_inner()));
+                        steps.push(FoldStep::Visit(message.into_inner()));
+                        continue;
+                    }
+                };
+                let finished = folder.post_expr(leaf);
+                done.push(finished);
             }
-            NamelessExpr::RecFn { name, params, body } => {
-                self.enter_recfn(name, &params);
-                let body = self.fold(body.into_inner());
-                self.exit_recfn(name, &params);
-                self.post_recfn(name, params, body)
+            FoldStep::LetBody { binder, body } => {
+                folder.enter_let(binder, done.last().expect("let value"));
+                steps.push(FoldStep::Build(FoldBuild::Let { binder }));
+                steps.push(FoldStep::Visit(body));
             }
-            NamelessExpr::Apply { function, args } => {
-                let function = self.fold(function.into_inner());
-                let args = args.into_iter().map(|a| self.fold(a)).collect();
-                self.post_apply(function, args)
-            }
-            NamelessExpr::Let {
-                binder,
-                value,
-                body,
-            } => {
-                let value = self.fold(value.into_inner());
-                self.enter_let(binder, &value);
-                let body = self.fold(body.into_inner());
-                self.exit_let(binder);
-                self.post_let(binder, value, body)
-            }
-            NamelessExpr::If {
-                condition,
-                then_branch,
-                else_branch,
-            } => {
-                let condition = self.fold(condition.into_inner());
-                let then_branch = self.fold(then_branch.into_inner());
-                let else_branch = self.fold(else_branch.into_inner());
-                self.post_if(condition, then_branch, else_branch)
-            }
-            NamelessExpr::When {
-                subject,
+            FoldStep::WhenClauses {
                 subject_name,
                 clauses,
             } => {
-                let subject = self.fold(subject.into_inner());
-                self.enter_when(&subject, subject_name);
-                let clauses = clauses.into_iter().map(|c| self.fold_clause(c)).collect();
-                self.exit_when(subject_name);
-                self.post_when(subject, subject_name, clauses)
+                folder.enter_when(done.last().expect("when subject"), subject_name);
+                steps.push(FoldStep::Build(FoldBuild::When {
+                    subject_name,
+                    clause_count: clauses.len(),
+                }));
+                for clause in clauses.into_iter().rev() {
+                    steps.push(FoldStep::Clause(clause));
+                }
             }
-            NamelessExpr::List { elements, tail } => {
-                let elements = elements.into_iter().map(|e| self.fold(e)).collect();
-                let tail = tail.map(|t| self.fold(t.into_inner()));
-                self.post_list(elements, tail)
+            FoldStep::Clause(clause) => {
+                folder.enter_clause(&clause.pattern);
+                let NamelessClause {
+                    pattern,
+                    guard,
+                    body,
+                } = clause;
+                steps.push(FoldStep::ClauseDone {
+                    pattern,
+                    has_guard: guard.is_some(),
+                });
+                steps.push(FoldStep::Visit(body));
+                if let Some(guard) = guard {
+                    steps.push(FoldStep::Visit(guard));
+                }
             }
-            NamelessExpr::Tuple(items) => {
-                let items = items.into_iter().map(|i| self.fold(i)).collect();
-                self.post_tuple(items)
+            FoldStep::ClauseDone { pattern, has_guard } => {
+                let body = done.pop().expect("clause body");
+                let guard = has_guard.then(|| done.pop().expect("clause guard"));
+                let clause = NamelessClause {
+                    pattern,
+                    guard,
+                    body,
+                };
+                folder.exit_clause(&clause.pattern);
+                clauses_done.push(clause);
             }
-            NamelessExpr::Pair(first, second) => {
-                let first = self.fold(first.into_inner());
-                let second = self.fold(second.into_inner());
-                self.post_pair(first, second)
+            FoldStep::Build(build) => {
+                let rebuilt = match build {
+                    FoldBuild::Lambda { params } => {
+                        let body = done.pop().expect("lambda body");
+                        folder.exit_lambda(&params);
+                        folder.post_lambda(params, body)
+                    }
+                    FoldBuild::RecFn { name, params } => {
+                        let body = done.pop().expect("recfn body");
+                        folder.exit_recfn(name, &params);
+                        folder.post_recfn(name, params, body)
+                    }
+                    FoldBuild::Apply { argc } => {
+                        let args = take(&mut done, argc);
+                        let function = done.pop().expect("apply function");
+                        folder.post_apply(function, args)
+                    }
+                    FoldBuild::Let { binder } => {
+                        let body = done.pop().expect("let body");
+                        let value = done.pop().expect("let value");
+                        folder.exit_let(binder);
+                        folder.post_let(binder, value, body)
+                    }
+                    FoldBuild::If => {
+                        let else_branch = done.pop().expect("if else");
+                        let then_branch = done.pop().expect("if then");
+                        let condition = done.pop().expect("if condition");
+                        folder.post_if(condition, then_branch, else_branch)
+                    }
+                    FoldBuild::When {
+                        subject_name,
+                        clause_count,
+                    } => {
+                        let at = clauses_done.len() - clause_count;
+                        let clauses = clauses_done.split_off(at);
+                        let subject = done.pop().expect("when subject");
+                        folder.exit_when(subject_name);
+                        folder.post_when(subject, subject_name, clauses)
+                    }
+                    FoldBuild::List { count, has_tail } => {
+                        let tail = has_tail.then(|| done.pop().expect("list tail"));
+                        let elements = take(&mut done, count);
+                        folder.post_list(elements, tail)
+                    }
+                    FoldBuild::Tuple { count } => {
+                        let items = take(&mut done, count);
+                        folder.post_tuple(items)
+                    }
+                    FoldBuild::Pair => {
+                        let second = done.pop().expect("pair second");
+                        let first = done.pop().expect("pair first");
+                        folder.post_pair(first, second)
+                    }
+                    FoldBuild::Constr {
+                        type_hint,
+                        tag,
+                        count,
+                        shape,
+                    } => {
+                        let fields = take(&mut done, count);
+                        folder.post_constr(type_hint, tag, fields, shape)
+                    }
+                    FoldBuild::FieldAccess { selector } => {
+                        let record = done.pop().expect("field access record");
+                        folder.post_field_access(record, selector)
+                    }
+                    FoldBuild::IndexAccess { index } => {
+                        let collection = done.pop().expect("index access collection");
+                        folder.post_index_access(collection, index)
+                    }
+                    FoldBuild::BinOp { op } => {
+                        let right = done.pop().expect("binop right");
+                        let left = done.pop().expect("binop left");
+                        folder.post_binop(op, left, right)
+                    }
+                    FoldBuild::UnOp { op } => {
+                        let operand = done.pop().expect("unop operand");
+                        folder.post_unop(op, operand)
+                    }
+                    FoldBuild::BuiltinCall { name, argc } => {
+                        let args = take(&mut done, argc);
+                        folder.post_builtin_call(name, args)
+                    }
+                    FoldBuild::Delay => {
+                        let inner = done.pop().expect("delay inner");
+                        folder.post_delay(inner)
+                    }
+                    FoldBuild::Force => {
+                        let inner = done.pop().expect("force inner");
+                        folder.post_force(inner)
+                    }
+                    FoldBuild::Trace => {
+                        let value = done.pop().expect("trace value");
+                        let message = done.pop().expect("trace message");
+                        folder.post_trace(message, value)
+                    }
+                };
+                let finished = folder.post_expr(rebuilt);
+                done.push(finished);
             }
-            NamelessExpr::Constr {
-                type_hint,
-                tag,
-                fields,
-                shape,
-            } => {
-                let fields = fields.into_iter().map(|f| self.fold(f)).collect();
-                self.post_constr(type_hint, tag, fields, shape)
-            }
-            NamelessExpr::FieldAccess { record, selector } => {
-                let record = self.fold(record.into_inner());
-                self.post_field_access(record, selector)
-            }
-            NamelessExpr::IndexAccess { collection, index } => {
-                let collection = self.fold(collection.into_inner());
-                self.post_index_access(collection, index)
-            }
-            NamelessExpr::BinOp { op, left, right } => {
-                let left = self.fold(left.into_inner());
-                let right = self.fold(right.into_inner());
-                self.post_binop(op, left, right)
-            }
-            NamelessExpr::UnOp { op, operand } => {
-                let operand = self.fold(operand.into_inner());
-                self.post_unop(op, operand)
-            }
-            NamelessExpr::BuiltinCall { name, args } => {
-                let args = args.into_iter().map(|a| self.fold(a)).collect();
-                self.post_builtin_call(name, args)
-            }
-            NamelessExpr::Error { message } => self.post_error(message),
-            NamelessExpr::Delay(inner) => {
-                let inner = self.fold(inner.into_inner());
-                self.post_delay(inner)
-            }
-            NamelessExpr::Force(inner) => {
-                let inner = self.fold(inner.into_inner());
-                self.post_force(inner)
-            }
-            NamelessExpr::Trace { message, value } => {
-                let message = self.fold(message.into_inner());
-                let value = self.fold(value.into_inner());
-                self.post_trace(message, value)
-            }
-            NamelessExpr::Raw { uplc, reason } => self.post_raw(uplc, reason),
-            NamelessExpr::Data(data) => self.post_data(data),
-            NamelessExpr::HelperSymbol(intrinsic) => self.post_helper_symbol(intrinsic),
         }
     }
 
-    fn fold_clause(&mut self, clause: NamelessClause) -> NamelessClause {
-        self.enter_clause(&clause.pattern);
-        let result = NamelessClause {
-            guard: clause.guard.map(|g| self.fold(g)),
-            body: self.fold(clause.body),
-            pattern: clause.pattern,
-        };
-        self.exit_clause(&result.pattern);
-        result
-    }
+    debug_assert_eq!(done.len(), 1, "the fold machine must leave one result");
+    debug_assert!(clauses_done.is_empty(), "all clauses must be consumed");
+    done.pop().expect("fold result")
 }
 
 /// Count `Var(target)` references reachable in `expr`, so passes
