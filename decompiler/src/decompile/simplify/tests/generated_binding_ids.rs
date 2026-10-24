@@ -322,7 +322,7 @@ fn test_apply_arg_literal_hoist_moves_selected_literal_and_records_kind() {
     let fn_id = VarId::new(9_870);
 
     let mut simplifier = Simplifier::with_safe_mode(false);
-    let simplified = match simplifier.simplify_apply_match(
+    let simplified = match simplifier.simplify_apply_match_settled(
         PseudoExpr::var_with_id("f", fn_id),
         vec![PseudoExpr::int(1), big_literal, PseudoExpr::int(2)],
     ) {
@@ -390,7 +390,7 @@ fn test_apply_arg_literal_hoist_moves_selected_literal_and_records_kind() {
 #[test]
 fn test_if_condition_hoist_preserves_generated_binding_id() {
     let mut simplifier = Simplifier::with_safe_mode(false);
-    let simplified = simplifier.simplify_if(
+    let simplified = simplifier.simplify_if_settled(
         PseudoExpr::If {
             condition: PBox::new(PseudoExpr::var("flag")),
             then_branch: PBox::new(PseudoExpr::BinOp {

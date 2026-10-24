@@ -171,7 +171,7 @@ fn simplify_if_data_field_probe_ignores_same_name_different_condition_id() {
     let other_id = VarId::from_raw(9933);
     let mut simplifier = Simplifier::with_safe_mode(false);
 
-    let rewritten = simplifier.simplify_if(
+    let rewritten = simplifier.simplify_if_settled(
         PseudoExpr::var_with_id("subject", condition_id),
         PseudoExpr::IndexAccess {
             collection: PBox::new(PseudoExpr::field_access_typed(
@@ -215,7 +215,7 @@ fn simplify_if_data_field_probe_accepts_matching_condition_id() {
     let condition_id = VarId::from_raw(9934);
     let mut simplifier = Simplifier::with_safe_mode(false);
 
-    let rewritten = simplifier.simplify_if(
+    let rewritten = simplifier.simplify_if_settled(
         PseudoExpr::var_with_id("subject", condition_id),
         PseudoExpr::IndexAccess {
             collection: PBox::new(PseudoExpr::field_access_typed(
@@ -260,7 +260,7 @@ fn simplify_if_does_not_fold_ordering_constr_into_boolean() {
     };
     let constr2 = PseudoExpr::constr(ConstructorShape::unknown_data(2, 0), vec![]);
     let constr1_true = PseudoExpr::constr(ConstructorShape::unknown_data(1, 0), vec![]);
-    let out = simplifier.simplify_if(cond, constr2, constr1_true);
+    let out = simplifier.simplify_if_settled(cond, constr2, constr1_true);
     assert!(
         matches!(out, PseudoExpr::If { .. }),
         "a nullary Constr<2> (Ordering variant) must NOT fold into a boolean; got {out:?}"
@@ -281,7 +281,7 @@ fn simplify_if_still_folds_church_bool_constrs() {
     let constr0_false = PseudoExpr::constr(ConstructorShape::unknown_data(0, 0), vec![]);
     let constr1_true = PseudoExpr::constr(ConstructorShape::unknown_data(1, 0), vec![]);
     // `if a<=b { False } else { True }` -> `!(a<=b)` -> `a > b` (inverted comparison).
-    let out = simplifier.simplify_if(cond, constr0_false, constr1_true);
+    let out = simplifier.simplify_if_settled(cond, constr0_false, constr1_true);
     assert!(
         matches!(
             &out,
@@ -476,7 +476,7 @@ fn tag_literal_rewrite_is_wired_in_simplify_when() {
     ];
     let mut simplifier = Simplifier::with_safe_mode(false);
 
-    let rewritten = simplifier.simplify_when(subject, None, clauses);
+    let rewritten = simplifier.simplify_when_settled(subject, None, clauses);
 
     assert!(
         matches!(
@@ -591,6 +591,7 @@ fn tag_comparison_if_rewrites_to_constructor_when_before_boolean_collapse() {
             &PseudoExpr::int(10),
             &PseudoExpr::Bool(false),
         )
+        .map(|step| simplifier.finish(step))
         .expect("expected tag-comparison if rewrite");
 
     assert!(
@@ -625,6 +626,7 @@ fn expect_tag_comparison_if_rewrites_true_fail_before_or_collapse() {
             &PseudoExpr::Bool(true),
             &PseudoExpr::error(),
         )
+        .map(|step| simplifier.finish(step))
         .expect("expected expect-like tag-comparison rewrite");
 
     assert!(
@@ -665,6 +667,7 @@ fn expect_tag_comparison_if_keeps_fail_on_matching_arm() {
             &PseudoExpr::error(),
             &PseudoExpr::Bool(true),
         )
+        .map(|step| simplifier.finish(step))
         .expect("expected expect-like tag-comparison rewrite");
 
     assert!(
@@ -700,6 +703,7 @@ fn two_clause_empty_list_bool_rewrites_to_list_is_empty() {
 
     let rewritten = simplifier
         .try_simplify_two_clause_wildcard_when(&subject, &None, &clauses)
+        .map(|step| simplifier.finish(step))
         .expect("expected list emptiness rewrite");
 
     assert_list_is_empty_call(&rewritten, "xs");
@@ -713,7 +717,7 @@ fn two_clause_wildcard_rewrite_is_wired_in_simplify_when() {
     ];
     let mut simplifier = Simplifier::with_safe_mode(false);
 
-    let rewritten = simplifier.simplify_when(PseudoExpr::var("xs"), None, clauses);
+    let rewritten = simplifier.simplify_when_settled(PseudoExpr::var("xs"), None, clauses);
 
     assert_list_is_empty_call(&rewritten, "xs");
 }
@@ -729,6 +733,7 @@ fn two_clause_empty_list_inverted_bool_rewrites_to_not_list_is_empty() {
 
     let rewritten = simplifier
         .try_simplify_two_clause_wildcard_when(&subject, &None, &clauses)
+        .map(|step| simplifier.finish(step))
         .expect("expected inverted list emptiness rewrite");
 
     assert!(
@@ -755,6 +760,7 @@ fn two_clause_empty_list_unit_fail_rewrites_to_expect_is_empty() {
 
     let rewritten = simplifier
         .try_simplify_two_clause_wildcard_when(&subject, &None, &clauses)
+        .map(|step| simplifier.finish(step))
         .expect("expected expect(List.is_empty(xs)) rewrite");
 
     let args = assert_expect_call(&rewritten);
@@ -773,6 +779,7 @@ fn two_clause_empty_list_fail_value_rewrites_to_expect_not_empty() {
 
     let rewritten = simplifier
         .try_simplify_two_clause_wildcard_when(&subject, &None, &clauses)
+        .map(|step| simplifier.finish(step))
         .expect("expected expect(!List.is_empty(xs), value) rewrite");
 
     let args = assert_expect_call(&rewritten);
@@ -807,6 +814,7 @@ fn two_clause_fail_with_message_does_not_match_nomsg_expect_rewrite() {
     assert!(
         simplifier
             .try_simplify_two_clause_wildcard_when(&subject, &None, &clauses)
+            .map(|step| simplifier.finish(step))
             .is_none(),
         "fail-message cases must stay out of the no-message expect rewrite"
     );
@@ -826,6 +834,7 @@ fn two_clause_generic_pattern_unit_fail_rewrites_to_expect_when() {
 
     let rewritten = simplifier
         .try_simplify_two_clause_wildcard_when(&subject, &None, &clauses)
+        .map(|step| simplifier.finish(step))
         .expect("expected generic expect(when ...) rewrite");
 
     let args = assert_expect_call(&rewritten);

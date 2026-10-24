@@ -1,6 +1,7 @@
 //! Function application simplification methods for Simplifier.
 
 use super::Simplifier;
+use super::step::Step;
 use crate::decompile::constructor_data::{
     rewrite_constr_exposer_wrapper, rewrite_constr_unpack_pair_projection,
 };
@@ -16,40 +17,71 @@ mod builtin_names;
 mod hoist;
 mod lambda;
 
-/// Action returned by `simplify_apply_match` for the CPS task loop.
+/// Action returned by `simplify_apply_match` to the `Apply` loop.
 pub(super) enum ApplyAction {
-    /// Simplification complete; push result to results stack.
+    /// Simplification complete: this is the result.
     Done(PseudoExpr),
-    /// Re-enter the Apply loop with new (unsimplified) function and args.
-    /// The task loop will push `Enter` tasks for each + `ApplyAfterSimplify`.
+    /// The result is what this step produces.
+    Then(Step),
+    /// Re-enter the Apply loop with new (unsimplified) function and args:
+    /// each is simplified, then the loop runs again.
     ContinueLoop {
         function: PseudoExpr,
         args: Vec<PseudoExpr>,
         /// Delay depth entries to restore after the next simplification round.
         delay_restore: Option<DelayRestoreList>,
     },
-    /// Re-simplify the expression through the full CPS pipeline.
+    /// [`Self::ContinueLoop`] once `function` — a step still running — has
+    /// its result.
+    ContinueLoopAfter {
+        function: Step,
+        args: Vec<PseudoExpr>,
+        delay_restore: Option<DelayRestoreList>,
+    },
+    /// Re-simplify the expression from the top.
     Resimplify(PseudoExpr),
 }
 
 impl Simplifier {
-    /// Constructs an Apply node and simplifies it via the canonical `Walker`
-    /// hook pipeline (`pre_expr` + `post_apply`).
-    pub(super) fn simplify_apply(
-        &mut self,
-        function: PseudoExpr,
-        args: Vec<PseudoExpr>,
-    ) -> PseudoExpr {
-        self.simplify(PseudoExpr::Apply {
+    /// Constructs an Apply node and simplifies it as an Apply node — see
+    /// [`Self::simplify_apply_expr`].
+    pub(super) fn simplify_apply(&mut self, function: PseudoExpr, args: Vec<PseudoExpr>) -> Step {
+        Step::refold(PseudoExpr::Apply {
             function: PBox::new(function),
             args: args.into(),
         })
     }
 
+    /// `if cond { then_fn(trigger) } else { else_fn(trigger) }` for a CPS
+    /// `if` whose continuations are applied to the trigger: each
+    /// application is simplified, then the `if` over them.
+    pub(super) fn if_over_triggered_branches(
+        cond: PseudoExpr,
+        then_fn: PseudoExpr,
+        else_fn: PseudoExpr,
+        trigger: PseudoExpr,
+    ) -> Step {
+        let then_applied = PseudoExpr::Apply {
+            function: PBox::new(then_fn),
+            args: vec![trigger.clone()].into(),
+        };
+        let else_applied = PseudoExpr::Apply {
+            function: PBox::new(else_fn),
+            args: vec![trigger].into(),
+        };
+        Step::fold_all(
+            vec![then_applied, else_applied],
+            move |simplifier, mut applied| {
+                let else_applied = applied.pop().expect("simplified else application");
+                let then_applied = applied.pop().expect("simplified then application");
+                simplifier.simplify_if(cond, then_applied, else_applied)
+            },
+        )
+    }
+
     /// Pattern-matching core of Apply simplification.
     ///
-    /// Called from the CPS task loop after `func` and `args` are already
-    /// simplified.
+    /// Called from the `Apply` loop once `func` and `args` are simplified.
     pub(super) fn simplify_apply_match(
         &mut self,
         func: PseudoExpr,
@@ -220,13 +252,13 @@ impl Simplifier {
         ) || matches!(&func, PseudoExpr::RecFn { .. });
 
         if !self.safe_mode && !recursive_call_target {
-            if let Some(hoisted) = self.hoist_let_from_apply_args(func.clone(), args.clone()) {
-                return ApplyAction::Done(hoisted);
+            if let Some(i) = Self::hoistable_let_arg(&func, &args) {
+                return ApplyAction::Then(self.hoist_let_from_apply_args(func, args, i));
             }
-            if let Some(hoisted_literals) =
-                self.hoist_large_data_literals_from_apply_args(func.clone(), args.clone())
-            {
-                return ApplyAction::Done(hoisted_literals);
+            if let Some(i) = Self::large_data_literal_arg(&args) {
+                return ApplyAction::Done(
+                    self.hoist_large_data_literals_from_apply_args(func, args, i),
+                );
             }
         }
 
@@ -312,10 +344,10 @@ impl Simplifier {
                 Self::unwrap_delay_owned(args.pop().expect("partial forced-if else branch arg"));
             let if_result = self.simplify_if(cond, then_branch, else_branch);
             if residual_args.is_empty() {
-                return ApplyAction::Done(if_result);
+                return ApplyAction::Then(if_result);
             }
             // More args beyond the 3rd: apply the rest to the if result
-            return ApplyAction::ContinueLoop {
+            return ApplyAction::ContinueLoopAfter {
                 function: if_result,
                 args: residual_args,
                 delay_restore: None,
@@ -348,7 +380,7 @@ impl Simplifier {
                 ),
                 WhenClause::new(WhenPattern::Wildcard, PseudoExpr::error()),
             ];
-            return ApplyAction::Done(self.simplify_when(subject, None, clauses));
+            return ApplyAction::Then(self.simplify_when(subject, None, clauses));
         }
 
         // Expect!(cond, delay(value), ..msg) -> expect!(cond, value, ..msg)
@@ -868,7 +900,7 @@ impl Simplifier {
                             }
                         })
                         .collect();
-                    return ApplyAction::Done(self.simplify_when(
+                    return ApplyAction::Then(self.simplify_when(
                         subject.into_inner(),
                         subject_name,
                         new_clauses,
@@ -907,22 +939,22 @@ impl Simplifier {
             });
         match &func {
             PseudoExpr::When { .. } if args_are_cheap => {
-                return ApplyAction::Done(
+                return ApplyAction::Then(
                     self.distribute_apply_with_shared_args(func.clone(), args),
                 );
             }
             PseudoExpr::When { .. } if !self.safe_mode && !args.is_empty() => {
-                return ApplyAction::Done(
+                return ApplyAction::Then(
                     self.distribute_apply_with_shared_args(func.clone(), args),
                 );
             }
             PseudoExpr::If { .. } if args_are_cheap => {
-                return ApplyAction::Done(
+                return ApplyAction::Then(
                     self.distribute_apply_with_shared_args(func.clone(), args),
                 );
             }
             PseudoExpr::If { .. } if !self.safe_mode && !args.is_empty() => {
-                return ApplyAction::Done(
+                return ApplyAction::Then(
                     self.distribute_apply_with_shared_args(func.clone(), args),
                 );
             }
@@ -989,7 +1021,7 @@ impl Simplifier {
 
             let retained_func = self.clone_with_fresh_ids(&func);
             let applied_expr = self.bind_name_in_body(rec_name, retained_func, applied_body);
-            return ApplyAction::Done(self.simplify(applied_expr));
+            return ApplyAction::Then(Step::refold(applied_expr));
         }
 
         // Check for __y_comb_X(fn(self, params...) { body }) -> anonymous RecFn
@@ -1162,7 +1194,7 @@ impl Simplifier {
                     Self::unwrap_delay_owned(args.next().expect("if then-branch arg"));
                 let else_branch =
                     Self::unwrap_delay_owned(args.next().expect("if else-branch arg"));
-                return ApplyAction::Done(self.simplify_if(cond, then_branch, else_branch));
+                return ApplyAction::Then(self.simplify_if(cond, then_branch, else_branch));
             }
         }
 
@@ -1195,7 +1227,7 @@ impl Simplifier {
                     Self::unwrap_delay_owned(all_args.next().expect("partial if then arg"));
                 let else_branch =
                     Self::unwrap_delay_owned(all_args.next().expect("partial if else arg"));
-                return ApplyAction::Done(self.simplify_if(cond, then_branch, else_branch));
+                return ApplyAction::Then(self.simplify_if(cond, then_branch, else_branch));
             }
 
             if !self.safe_mode && total == 4 {
@@ -1218,27 +1250,21 @@ impl Simplifier {
                             .expect("partial CPS if then continuation checked above");
                         let else_br = Self::extract_continuation_body_owned(else_fn)
                             .expect("partial CPS if else continuation checked above");
-                        return ApplyAction::Done(self.simplify_if(cond, then_br, else_br));
+                        return ApplyAction::Then(self.simplify_if(cond, then_br, else_br));
                     }
 
                     // Fallback: unwrap delay and apply trigger
                     let then_fn = Self::unwrap_delay_owned(then_fn);
                     let else_fn = Self::unwrap_delay_owned(else_fn);
-                    let then_applied = self.simplify(PseudoExpr::Apply {
-                        function: PBox::new(then_fn),
-                        args: vec![trigger.clone()].into(),
-                    });
-                    let else_applied = self.simplify(PseudoExpr::Apply {
-                        function: PBox::new(else_fn),
-                        args: vec![trigger].into(),
-                    });
-                    return ApplyAction::Done(self.simplify_if(cond, then_applied, else_applied));
+                    return ApplyAction::Then(Self::if_over_triggered_branches(
+                        cond, then_fn, else_fn, trigger,
+                    ));
                 }
             }
 
             if total >= 4 {
                 // Over-applied: merge all into BuiltinCall and let simplify_builtin_call handle it
-                return ApplyAction::Done(self.simplify_builtin_call(bname, all_args.into_vec()));
+                return ApplyAction::Then(self.simplify_builtin_call(bname, all_args.into_vec()));
             }
 
             unreachable!("partial Apply-form if shape checked at least three args");
@@ -1365,7 +1391,7 @@ impl Simplifier {
                         .expect("4-arg CPS if then continuation checked above");
                     let else_br = Self::extract_continuation_body_owned(else_fn)
                         .expect("4-arg CPS if else continuation checked above");
-                    return ApplyAction::Done(self.simplify_if(cond, then_br, else_br));
+                    return ApplyAction::Then(self.simplify_if(cond, then_br, else_br));
                 }
 
                 // Fallback: branches are delay-wrapped or have used parameters.
@@ -1378,15 +1404,9 @@ impl Simplifier {
                 let else_fn =
                     Self::unwrap_delay_owned(args.next().expect("4-arg CPS if else function"));
                 let trigger = args.next().expect("4-arg CPS if trigger");
-                let then_applied = self.simplify(PseudoExpr::Apply {
-                    function: PBox::new(then_fn),
-                    args: vec![trigger.clone()].into(),
-                });
-                let else_applied = self.simplify(PseudoExpr::Apply {
-                    function: PBox::new(else_fn),
-                    args: vec![trigger].into(),
-                });
-                return ApplyAction::Done(self.simplify_if(cond, then_applied, else_applied));
+                return ApplyAction::Then(Self::if_over_triggered_branches(
+                    cond, then_fn, else_fn, trigger,
+                ));
             }
         }
 
@@ -1403,7 +1423,7 @@ impl Simplifier {
             let _snd_selector = args.next().expect("5-arg CPS if snd selector");
             let then_branch = Self::unwrap_delay_owned(args.next().expect("5-arg CPS if then arg"));
             let else_branch = Self::unwrap_delay_owned(args.next().expect("5-arg CPS if else arg"));
-            return ApplyAction::Done(self.simplify_if(cond, then_branch, else_branch));
+            return ApplyAction::Then(self.simplify_if(cond, then_branch, else_branch));
         }
 
         // Generic over-application fallback for if-like calls:
@@ -1417,7 +1437,7 @@ impl Simplifier {
                 Self::unwrap_delay_owned(core_args.next().expect("generic if then arg"));
             let else_branch =
                 Self::unwrap_delay_owned(core_args.next().expect("generic if else arg"));
-            return ApplyAction::ContinueLoop {
+            return ApplyAction::ContinueLoopAfter {
                 function: self.simplify_if(cond, then_branch, else_branch),
                 args: residual_args,
                 delay_restore: None,
@@ -1540,7 +1560,7 @@ impl Simplifier {
                         });
                     }
 
-                    return ApplyAction::Done(self.simplify_if(cond, then_branch, else_branch));
+                    return ApplyAction::Then(self.simplify_if(cond, then_branch, else_branch));
                 }
             }
         }
@@ -1822,6 +1842,29 @@ impl Simplifier {
             function: PBox::new(func),
             args: args.into(),
         })
+    }
+
+    /// [`Self::simplify_apply_match`] with any step it returns run to its
+    /// result, so the suites can match on `Done` and `ContinueLoop`.
+    #[cfg(test)]
+    pub(super) fn simplify_apply_match_settled(
+        &mut self,
+        func: PseudoExpr,
+        args: Vec<PseudoExpr>,
+    ) -> ApplyAction {
+        match self.simplify_apply_match(func, args) {
+            ApplyAction::Then(step) => ApplyAction::Done(self.finish(step)),
+            ApplyAction::ContinueLoopAfter {
+                function,
+                args,
+                delay_restore,
+            } => ApplyAction::ContinueLoop {
+                function: self.finish(function),
+                args,
+                delay_restore,
+            },
+            action => action,
+        }
     }
 }
 

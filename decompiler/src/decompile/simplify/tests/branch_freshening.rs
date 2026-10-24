@@ -52,13 +52,17 @@ fn test_cps_selector_inlining_freshens_shared_delayed_lambda_body_ids() {
     ];
 
     let mut simplifier = Simplifier::with_safe_mode(false);
-    let simplified = match simplifier.simplify_apply_match(function, args) {
+    let simplified = match simplifier.simplify_apply_match_settled(function, args) {
         super::super::apply::ApplyAction::Done(expr) => expr,
         super::super::apply::ApplyAction::ContinueLoop { .. } => {
             panic!("expected CPS selector inlining to finish in Done")
         }
         super::super::apply::ApplyAction::Resimplify(_) => {
             panic!("expected CPS selector inlining to finish in Done")
+        }
+        super::super::apply::ApplyAction::Then(_)
+        | super::super::apply::ApplyAction::ContinueLoopAfter { .. } => {
+            unreachable!("settled apply actions carry no step")
         }
     };
 
@@ -144,7 +148,8 @@ fn test_if_when_merge_freshens_repeated_then_branch_binder_ids() {
     };
 
     let mut simplifier = Simplifier::with_safe_mode(false);
-    let simplified = simplifier.simplify_if(condition, then_branch, PseudoExpr::Int(0.into()));
+    let simplified =
+        simplifier.simplify_if_settled(condition, then_branch, PseudoExpr::Int(0.into()));
     let PseudoExpr::When { clauses, .. } = simplified else {
         panic!("expected When, got {simplified:?}");
     };

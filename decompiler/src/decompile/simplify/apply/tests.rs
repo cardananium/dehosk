@@ -27,13 +27,16 @@ fn let_id_from_continue_loop(action: ApplyAction) -> VarId {
         ApplyAction::Done(expr) | ApplyAction::Resimplify(expr) => {
             panic!("expected continue-loop lambda desugar, got: {expr:?}")
         }
+        ApplyAction::Then(_) | ApplyAction::ContinueLoopAfter { .. } => {
+            unreachable!("settled apply actions carry no step")
+        }
     }
 }
 
 #[test]
 fn immediate_lambda_application_fallback_keeps_param_id() {
     let param = Binder::new("x", VarId::fresh_binding());
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::Lambda {
             params: vec![param.clone()],
             body: PBox::new(PseudoExpr::Unit),
@@ -47,7 +50,7 @@ fn immediate_lambda_application_fallback_keeps_param_id() {
 #[test]
 fn over_application_fallback_keeps_bound_param_id() {
     let param = Binder::new("x", VarId::fresh_binding());
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::Lambda {
             params: vec![param.clone()],
             body: PBox::new(PseudoExpr::var("next")),
@@ -64,7 +67,7 @@ fn over_application_iife_moves_args_and_preserves_ids() {
     let callee_id = VarId::from_raw(9921);
     let arg_id = VarId::from_raw(9922);
     let residual_id = VarId::from_raw(9923);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::Lambda {
             params: vec![bound.clone()],
             body: PBox::new(PseudoExpr::var_with_id("next", callee_id)),
@@ -122,7 +125,7 @@ fn over_application_capture_fallback_preserves_original_force_lambda_shape() {
     let x = Binder::new("x", VarId::from_raw(9924));
     let foreign_x_id = VarId::from_raw(9925);
     let residual_id = VarId::from_raw(9926);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::Force(PBox::new(PseudoExpr::Lambda {
             params: vec![x.clone()],
             body: PBox::new(PseudoExpr::var_with_id("next", VarId::from_raw(9927))),
@@ -168,7 +171,7 @@ fn over_application_capture_fallback_preserves_original_force_lambda_shape() {
 fn under_application_fallback_keeps_bound_param_id() {
     let bound = Binder::new("x", VarId::fresh_binding());
     let remaining = Binder::new("y", VarId::fresh_binding());
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::Lambda {
             params: vec![bound.clone(), remaining.clone()],
             body: PBox::new(PseudoExpr::var_with_id("y", remaining.id)),
@@ -184,7 +187,7 @@ fn under_application_iife_moves_arg_and_preserves_ids() {
     let bound = Binder::new("config", VarId::from_raw(9910));
     let remaining = Binder::new("datum", VarId::from_raw(9911));
     let arg_id = VarId::from_raw(9912);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::Lambda {
             params: vec![bound.clone(), remaining.clone()],
             body: PBox::new(PseudoExpr::Tuple(
@@ -245,7 +248,7 @@ fn under_application_capture_fallback_preserves_original_force_lambda_shape() {
     let x = Binder::new("x", VarId::from_raw(9913));
     let y = Binder::new("y", VarId::from_raw(9914));
     let foreign_x_id = VarId::from_raw(9915);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::Force(PBox::new(PseudoExpr::Lambda {
             params: vec![x.clone(), y.clone()],
             body: PBox::new(PseudoExpr::var_with_id("y", y.id)),
@@ -282,7 +285,7 @@ fn under_application_capture_fallback_preserves_original_force_lambda_shape() {
 fn expect_tag_rewrite_moves_value_arg_and_preserves_id() {
     let subject_id = VarId::from_raw(9990);
     let value_id = VarId::from_raw(9991);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::expect_helper(),
         vec![
             PseudoExpr::BinOp {
@@ -340,7 +343,7 @@ fn y_comb_direct_application_moves_extra_args_and_preserves_ids() {
     let self_id = VarId::from_raw(9960);
     let param_id = VarId::from_raw(9961);
     let arg_id = VarId::from_raw(9962);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::var("__y_comb_direct"),
         vec![
             PseudoExpr::Lambda {
@@ -394,7 +397,7 @@ fn and_or_helper_application_moves_args_and_preserves_ids() {
         .and_vars
         .insert_binding("and_fn", Some(and_id));
 
-    let action = simplifier.simplify_apply_match(
+    let action = simplifier.simplify_apply_match_settled(
         PseudoExpr::var_with_id("and_fn", and_id),
         vec![
             PseudoExpr::var_with_id("left", left_id),
@@ -424,7 +427,7 @@ fn and_or_helper_application_moves_args_and_preserves_ids() {
         .or_vars
         .insert_binding("or_fn", Some(or_id));
 
-    let action = simplifier.simplify_apply_match(
+    let action = simplifier.simplify_apply_match_settled(
         PseudoExpr::var_with_id("or_fn", or_id),
         vec![
             PseudoExpr::Delay(PBox::new(PseudoExpr::var_with_id("left", left_id))),
@@ -451,7 +454,7 @@ fn direct_f_if_moves_condition_and_delayed_branches() {
     let cond_id = VarId::from_raw(9977);
     let then_id = VarId::from_raw(9978);
     let else_id = VarId::from_raw(9979);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::var("f"),
         vec![
             PseudoExpr::var_with_id("cond", cond_id),
@@ -486,7 +489,7 @@ fn direct_f_if_moves_condition_and_delayed_branches() {
 fn direct_f_if_and_pattern_moves_then_branch() {
     let cond_id = VarId::from_raw(9980);
     let then_id = VarId::from_raw(9981);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::var("f"),
         vec![
             PseudoExpr::var_with_id("cond", cond_id),
@@ -512,7 +515,7 @@ fn direct_f_if_and_pattern_moves_then_branch() {
 #[test]
 fn constr_exposer_wrapper_moves_index_arg_and_preserves_id() {
     let subject_id = VarId::from_raw(9982);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::var("__constr_index_exposer"),
         vec![PseudoExpr::var_with_id("subject", subject_id)],
     );
@@ -530,7 +533,7 @@ fn constr_exposer_wrapper_moves_index_arg_and_preserves_id() {
 #[test]
 fn constr_exposer_wrapper_moves_fields_arg_and_preserves_id() {
     let subject_id = VarId::from_raw(9983);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::var("__constr_fields_exposer"),
         vec![PseudoExpr::var_with_id("subject", subject_id)],
     );
@@ -550,7 +553,7 @@ fn forced_partial_if_moves_builtin_and_apply_args() {
     let cond_id = VarId::from_raw(9988);
     let then_id = VarId::from_raw(9989);
     let else_id = VarId::from_raw(9990);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::Force(PBox::new(PseudoExpr::BuiltinCall {
             name: crate::BuiltinId::expect_known("if"),
             args: vec![
@@ -592,7 +595,7 @@ fn forced_partial_if_extra_args_moves_residual_args() {
     let then_id = VarId::from_raw(9992);
     let else_id = VarId::from_raw(9993);
     let residual_id = VarId::from_raw(9994);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::Force(PBox::new(PseudoExpr::BuiltinCall {
             name: crate::BuiltinId::expect_known("if"),
             args: vec![
@@ -635,7 +638,7 @@ fn forced_partial_if_extra_args_moves_residual_args() {
 /// reversing it would drop the fields the selected argument does not take.
 #[test]
 fn data_origin_constr_application_is_not_reversed() {
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::constr(
             ConstructorShape::unknown_data(0, 2),
             vec![
@@ -657,7 +660,7 @@ fn scott_application_reversal_moves_selected_arg_and_fields() {
     let skipped_id = VarId::from_raw(9985);
     let first_field_id = VarId::from_raw(9986);
     let second_field_id = VarId::from_raw(9987);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::constr(
             ConstructorShape::scott_positional(1, 2),
             vec![
@@ -704,7 +707,7 @@ fn scott_application_reversal_moves_selected_arg_and_fields() {
 #[test]
 fn scott_list_emptiness_moves_branch_values() {
     let subject_id = VarId::from_raw(9984);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::var_with_id("xs", subject_id),
         vec![
             PseudoExpr::Lambda {
@@ -743,7 +746,7 @@ fn partial_application_moves_arg_and_preserves_ids() {
         Some(callee_id),
         (BinaryOp::Sub, PseudoExpr::int(0), true),
     );
-    let action = simplifier.simplify_apply_match(
+    let action = simplifier.simplify_apply_match_settled(
         PseudoExpr::var_with_id("c", callee_id),
         vec![PseudoExpr::var_with_id("x", arg_id)],
     );
@@ -769,7 +772,7 @@ fn partial_application_moves_arg_and_preserves_ids() {
         Some(callee_id),
         (BinaryOp::Eq, PseudoExpr::int(1), false),
     );
-    let action = simplifier.simplify_apply_match(
+    let action = simplifier.simplify_apply_match_settled(
         PseudoExpr::var_with_id("c", callee_id),
         vec![PseudoExpr::var_with_id("x", arg_id)],
     );
@@ -799,7 +802,7 @@ fn constr_pack_partial_application_moves_fields_and_preserves_ids() {
         PseudoExpr::int(2),
     );
 
-    let action = simplifier.simplify_apply_match(
+    let action = simplifier.simplify_apply_match_settled(
         PseudoExpr::var_with_id("pack", callee_id),
         vec![PseudoExpr::var_with_id("fields", fields_id)],
     );
@@ -827,7 +830,7 @@ fn constr_pack_partial_application_extra_args_moves_residual_args() {
         PseudoExpr::int(3),
     );
 
-    let action = simplifier.simplify_apply_match(
+    let action = simplifier.simplify_apply_match_settled(
         PseudoExpr::var_with_id("pack", callee_id),
         vec![
             PseudoExpr::var_with_id("fields", fields_id),
@@ -856,7 +859,7 @@ fn constr_pack_partial_application_extra_args_moves_residual_args() {
 fn constr_pack_direct_application_moves_tag_and_fields_and_preserves_ids() {
     let tag_id = VarId::from_raw(9935);
     let fields_id = VarId::from_raw(9936);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::BuiltinCall {
             name: crate::BuiltinId::expect_known("Constr.pack"),
             args: vec![PseudoExpr::var_with_id("tag", tag_id)].into(),
@@ -888,7 +891,7 @@ fn partial_apply_if_moves_builtin_and_apply_args_and_preserves_ids() {
     let cond_id = VarId::from_raw(9937);
     let then_id = VarId::from_raw(9938);
     let else_id = VarId::from_raw(9939);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::BuiltinCall {
             name: crate::BuiltinId::expect_known("if"),
             args: vec![
@@ -929,7 +932,7 @@ fn partial_apply_if_cps_moves_continuation_bodies_and_preserves_ids() {
     let cond_id = VarId::from_raw(9940);
     let then_id = VarId::from_raw(9941);
     let else_id = VarId::from_raw(9942);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::BuiltinCall {
             name: crate::BuiltinId::expect_known("if"),
             args: vec![PseudoExpr::var_with_id("cond", cond_id)].into(),
@@ -977,7 +980,7 @@ fn partial_apply_if_cps_fallback_moves_functions_and_preserves_trigger_ids() {
     let then_fn_id = VarId::from_raw(9947);
     let else_fn_id = VarId::from_raw(9948);
     let trigger_id = VarId::from_raw(9949);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::BuiltinCall {
             name: crate::BuiltinId::expect_known("if"),
             args: vec![PseudoExpr::var_with_id("cond", cond_id)].into(),
@@ -1028,7 +1031,7 @@ fn generic_if_over_application_moves_core_and_residual_args() {
     let else_id = VarId::from_raw(9952);
     let first_residual_id = VarId::from_raw(9953);
     let second_residual_id = VarId::from_raw(9954);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::BuiltinCall {
             name: crate::BuiltinId::expect_known("if"),
             args: vec![].into(),
@@ -1079,7 +1082,7 @@ fn generic_if_over_application_moves_core_and_residual_args() {
 fn apply_if_cps_and_moves_cond_and_then_body_preserving_ids() {
     let cond_id = VarId::from_raw(9959);
     let then_id = VarId::from_raw(9960);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::BuiltinCall {
             name: crate::BuiltinId::expect_known("if"),
             args: vec![].into(),
@@ -1110,7 +1113,7 @@ fn apply_if_cps_and_moves_cond_and_then_body_preserving_ids() {
 fn apply_if_cps_or_moves_cond_and_else_body_preserving_ids() {
     let cond_id = VarId::from_raw(9961);
     let else_id = VarId::from_raw(9962);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::BuiltinCall {
             name: crate::BuiltinId::expect_known("if"),
             args: vec![].into(),
@@ -1141,7 +1144,7 @@ fn apply_if_cps_or_moves_cond_and_else_body_preserving_ids() {
 fn apply_if_cps_expect_moves_cond_and_value_body_preserving_ids() {
     let cond_id = VarId::from_raw(9963);
     let value_id = VarId::from_raw(9964);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::BuiltinCall {
             name: crate::BuiltinId::expect_known("if"),
             args: vec![].into(),
@@ -1184,7 +1187,7 @@ fn apply_if_cps_expect_moves_cond_and_value_body_preserving_ids() {
 fn apply_if_cps_inverted_expect_moves_else_body_preserving_ids() {
     let cond_id = VarId::from_raw(9965);
     let value_id = VarId::from_raw(9966);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::BuiltinCall {
             name: crate::BuiltinId::expect_known("if"),
             args: vec![].into(),
@@ -1227,7 +1230,7 @@ fn apply_if_cps_regular_if_moves_all_bodies_preserving_ids() {
     let cond_id = VarId::from_raw(9967);
     let then_id = VarId::from_raw(9968);
     let else_id = VarId::from_raw(9969);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::BuiltinCall {
             name: crate::BuiltinId::expect_known("if"),
             args: vec![].into(),
@@ -1269,7 +1272,7 @@ fn selector_if_five_arg_moves_condition_and_branches() {
     let else_id = VarId::from_raw(9972);
     let fst_param = Binder::new("fst", VarId::from_raw(9973));
     let snd_param = Binder::new("snd", VarId::from_raw(9974));
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::BuiltinCall {
             name: crate::BuiltinId::expect_known("if"),
             args: vec![].into(),
@@ -1317,7 +1320,7 @@ fn apply_if_cps_fallback_moves_functions_and_preserves_trigger_ids() {
     let then_fn_id = VarId::from_raw(9967);
     let else_fn_id = VarId::from_raw(9968);
     let trigger_id = VarId::from_raw(9969);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::BuiltinCall {
             name: crate::BuiltinId::expect_known("if"),
             args: vec![].into(),
@@ -1367,7 +1370,7 @@ fn double_delayed_scott_encoding_moves_lambda_branch_and_preserves_ids() {
     let subject_id = VarId::from_raw(9940);
     let field_id = VarId::from_raw(9941);
     let body_id = VarId::from_raw(9942);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::Force(PBox::new(PseudoExpr::Force(PBox::new(
             PseudoExpr::var_with_id("subject", subject_id),
         )))),
@@ -1414,7 +1417,7 @@ fn double_delayed_scott_encoding_moves_lambda_branch_and_preserves_ids() {
 fn double_delayed_scott_encoding_moves_bare_branch_and_preserves_ids() {
     let first_id = VarId::from_raw(9943);
     let second_id = VarId::from_raw(9944);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::Force(PBox::new(PseudoExpr::Force(PBox::new(PseudoExpr::var(
             "subject",
         ))))),
@@ -1462,7 +1465,7 @@ fn double_delayed_scott_encoding_moves_bare_branch_and_preserves_ids() {
 fn apply_form_binop_moves_mixed_builtin_and_apply_args_preserving_order() {
     let left_id = VarId::from_raw(9955);
     let right_id = VarId::from_raw(9956);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::BuiltinCall {
             name: crate::BuiltinId::expect_known("Int.sub"),
             args: vec![PseudoExpr::var_with_id("left", left_id)].into(),
@@ -1488,7 +1491,7 @@ fn apply_form_binop_moves_mixed_builtin_and_apply_args_preserving_order() {
 fn apply_form_binop_moves_nullary_apply_args_and_preserves_ids() {
     let left_id = VarId::from_raw(9957);
     let right_id = VarId::from_raw(9958);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::BuiltinCall {
             name: crate::BuiltinId::expect_known("Int.add"),
             args: vec![].into(),
@@ -1516,7 +1519,7 @@ fn apply_form_binop_moves_nullary_apply_args_and_preserves_ids() {
 #[test]
 fn apply_form_list_head_tail_depth_moves_subject_and_preserves_ids() {
     let xs_id = VarId::from_raw(9950);
-    let action = Simplifier::with_safe_mode(false).simplify_apply_match(
+    let action = Simplifier::with_safe_mode(false).simplify_apply_match_settled(
         PseudoExpr::BuiltinCall {
             name: crate::BuiltinId::expect_known("List.head"),
             args: vec![].into(),

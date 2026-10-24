@@ -1,6 +1,8 @@
 //! Lambda and recursive function simplification methods for Simplifier.
 
 use super::Simplifier;
+use super::state::LexicalNameShadow;
+use super::step::Step;
 use crate::decompile::list_traversal::list_tail_argument;
 use crate::pseudo::OptionVarIdGet;
 use crate::pseudo::ast::PBox;
@@ -943,24 +945,38 @@ impl Simplifier {
         }
     }
 
-    pub(super) fn simplify_lambda(&mut self, params: Vec<Binder>, body: PseudoExpr) -> PseudoExpr {
+    pub(super) fn simplify_lambda(&mut self, params: Vec<Binder>, body: PseudoExpr) -> Step {
         let param_ids: Vec<Option<VarId>> = Self::existing_binding_ref_ids(&body, &params)
             .into_iter()
             .zip(params.iter())
             .map(|(existing, param)| existing.or((param != "_").then_some(param.id)))
             .collect();
-        let lexical_shadows: Vec<_> = params
+        let lexical_shadows: Vec<LexicalNameShadow> = params
             .iter()
             .zip(param_ids.iter())
-            .map(|(param, id)| {
-                (
-                    param.as_str(),
-                    self.shadow_lexical_name(param.as_str(), *id),
-                )
-            })
+            .map(|(param, id)| self.shadow_lexical_name(param.as_str(), *id))
             .collect();
 
-        let mut simplified_body = self.simplify(body);
+        Step::fold(body, move |simplifier, simplified_body| {
+            Step::Done(simplifier.simplify_lambda_body(
+                params,
+                param_ids,
+                lexical_shadows,
+                simplified_body,
+            ))
+        })
+    }
+
+    /// The rest of [`Self::simplify_lambda`], over the simplified body:
+    /// `lexical_shadows` are the name shadows the parameters opened, one per
+    /// parameter, restored here.
+    fn simplify_lambda_body(
+        &mut self,
+        params: Vec<Binder>,
+        param_ids: Vec<Option<VarId>>,
+        lexical_shadows: Vec<LexicalNameShadow>,
+        mut simplified_body: PseudoExpr,
+    ) -> PseudoExpr {
         let param_bindings: HashMap<&str, VarId> = params
             .iter()
             .zip(param_ids.iter().copied())
@@ -971,8 +987,8 @@ impl Simplifier {
                 Self::annotate_binding_refs(simplified_body, &param_bindings, &mut Vec::new());
         }
 
-        for (param, shadow) in lexical_shadows {
-            self.restore_lexical_name(param, shadow);
+        for (param, shadow) in params.iter().zip(lexical_shadows) {
+            self.restore_lexical_name(param.as_str(), shadow);
         }
 
         // Y/fix definition that has already lost its outer `rec` wrapper:
@@ -1105,7 +1121,7 @@ impl Simplifier {
         name: Binder,
         params: Vec<Binder>,
         body: PseudoExpr,
-    ) -> PseudoExpr {
+    ) -> Step {
         let rec_id = self.stable_binding_id(&body, &name);
         let initial_param_ids: Vec<Option<VarId>> =
             params.iter().map(|param| Some(param.id)).collect();
@@ -1125,8 +1141,27 @@ impl Simplifier {
             .rec_vars
             .insert_binding(name.to_string(), rec_id);
 
+        Step::fold(body, move |simplifier, simplified| {
+            Step::Done(simplifier.simplify_recfn_body(
+                name,
+                params,
+                rec_id,
+                lexical_shadows,
+                simplified,
+            ))
+        })
+    }
+
+    /// The rest of [`Self::simplify_recfn`], over the simplified body.
+    fn simplify_recfn_body(
+        &mut self,
+        name: Binder,
+        params: Vec<Binder>,
+        rec_id: Option<VarId>,
+        lexical_shadows: Vec<(String, LexicalNameShadow)>,
+        simplified: PseudoExpr,
+    ) -> PseudoExpr {
         let rewrite_rec_id = rec_id.unwrap_or(name.id);
-        let simplified = self.simplify(body);
         let mut simplified_body = self.rewrite_expect_nonempty_list_search_recfn(
             name.as_str(),
             rewrite_rec_id,

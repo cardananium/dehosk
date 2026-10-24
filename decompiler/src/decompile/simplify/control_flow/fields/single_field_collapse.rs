@@ -4,6 +4,7 @@ use crate::decompile::simplify::Simplifier;
 use crate::decompile::simplify::postprocess::{
     ContextType, SumTypeId, context_field_at, sum_type_constructor_fields,
 };
+use crate::decompile::simplify::step::Step;
 use crate::pseudo::OptionVarIdGet;
 use crate::pseudo::ast::{Binder, PseudoExpr, WhenClause, WhenPattern};
 use crate::pseudo::constructor::ConstructorShape;
@@ -11,12 +12,14 @@ use crate::pseudo::nameless::VarKind;
 use crate::pseudo::var_id::VarId;
 
 impl Simplifier {
+    /// `Some` clause when the rewrite applies; whether it does is only
+    /// known once the collapsed body is simplified.
     pub(super) fn collapse_exact_single_field_subject_fields_clause(
         &mut self,
         clause: &WhenClause,
         subject_name: &str,
         subject_id: Option<VarId>,
-    ) -> Option<WhenClause> {
+    ) -> Step<Option<WhenClause>> {
         let WhenPattern::Constructor {
             type_hint,
             tag,
@@ -24,15 +27,15 @@ impl Simplifier {
             shape,
         } = &clause.pattern
         else {
-            return None;
+            return Step::Done(None);
         };
         let existing_field_binder = match fields.as_slice() {
             [] => None,
             [field] => Some(field.clone()),
-            _ => return None,
+            _ => return Step::Done(None),
         };
         if clause.guard.is_some() {
-            return None;
+            return Step::Done(None);
         }
 
         let PseudoExpr::When {
@@ -41,13 +44,13 @@ impl Simplifier {
             ..
         } = &clause.body
         else {
-            return None;
+            return Step::Done(None);
         };
         if !Self::direct_subject_fields_matches(outer_subject, subject_name, subject_id) {
-            return None;
+            return Step::Done(None);
         }
         if outer_clauses.len() != 2 {
-            return None;
+            return Step::Done(None);
         }
 
         let mut fallback = None;
@@ -57,7 +60,7 @@ impl Simplifier {
 
         for outer_clause in outer_clauses {
             if outer_clause.guard.is_some() {
-                return None;
+                return Step::Done(None);
             }
             match &outer_clause.pattern {
                 WhenPattern::List { elements, tail } if elements.is_empty() && tail.is_none() => {
@@ -68,13 +71,15 @@ impl Simplifier {
                     tail_binder = tail.clone();
                     nonempty_body = Some(outer_clause.body.clone());
                 }
-                _ => return None,
+                _ => return Step::Done(None),
             }
         }
 
-        let fallback = fallback?;
-        let nonempty_body = nonempty_body?;
-        let outer_head_binder = head_binder?;
+        let (Some(fallback), Some(nonempty_body), Some(outer_head_binder)) =
+            (fallback, nonempty_body, head_binder)
+        else {
+            return Step::Done(None);
+        };
 
         let PseudoExpr::When {
             subject: inner_subject,
@@ -82,7 +87,7 @@ impl Simplifier {
             ..
         } = nonempty_body
         else {
-            return None;
+            return Step::Done(None);
         };
         let lifted_inner_subject_binder = match inner_subject.as_ref() {
             PseudoExpr::Var { name, id, .. }
@@ -174,7 +179,7 @@ impl Simplifier {
                 )
         );
         if !inner_subject_matches {
-            return None;
+            return Step::Done(None);
         }
 
         let transformed_inner_clauses =
@@ -238,12 +243,16 @@ impl Simplifier {
                         body,
                     })
                 })
-                .collect::<Option<Vec<_>>>()?;
+                .collect::<Option<Vec<_>>>();
+        let Some(transformed_inner_clauses) = transformed_inner_clauses else {
+            return Step::Done(None);
+        };
 
         let type_hint = type_hint.clone();
+        let tag = *tag;
         let fields = vec![field_binder.clone()];
-        let shape = ConstructorShape::from_name_and_tag(shape.pretty_name(), *tag, fields.len());
-        let collapsed_body = self.simplify_when(
+        let shape = ConstructorShape::from_name_and_tag(shape.pretty_name(), tag, fields.len());
+        let collapsed = self.simplify_when(
             PseudoExpr::Var {
                 name: field_binder.to_string(),
                 id: Some(field_binder.id),
@@ -251,23 +260,25 @@ impl Simplifier {
             Some(field_binder),
             transformed_inner_clauses,
         );
-        if Self::contains_free_generated_payload_alias(
-            &collapsed_body,
-            &self.var_kinds.kind_annotations,
-            self.use_varkind_recovery,
-        ) {
-            return None;
-        }
+        collapsed.then(self, move |simplifier, collapsed_body| {
+            if Self::contains_free_generated_payload_alias(
+                &collapsed_body,
+                &simplifier.var_kinds.kind_annotations,
+                simplifier.use_varkind_recovery,
+            ) {
+                return Step::Done(None);
+            }
 
-        Some(WhenClause {
-            pattern: WhenPattern::Constructor {
-                type_hint,
-                tag: *tag,
-                fields,
-                shape,
-            },
-            guard: None,
-            body: collapsed_body,
+            Step::Done(Some(WhenClause {
+                pattern: WhenPattern::Constructor {
+                    type_hint,
+                    tag,
+                    fields,
+                    shape,
+                },
+                guard: None,
+                body: collapsed_body,
+            }))
         })
     }
 

@@ -2,8 +2,8 @@ use crate::decompile::simplify::state::{LexicalNameShadow, SelectorBinding};
 use crate::pseudo::ast::PseudoExpr;
 use crate::pseudo::var_id::VarId;
 
-/// State captured after pre-processing of simplify_let, held in
-/// `LetWalkerPhase::Normal` until mid-processing consumes it.
+/// State captured after pre-processing of simplify_let, held while the
+/// value is simplified until mid-processing consumes it.
 pub(crate) struct LetAfterValueState {
     pub name: String,
     pub var_id: Option<VarId>,
@@ -17,8 +17,8 @@ pub(crate) struct LetAfterValueState {
     pub has_delayed_snd: bool,
 }
 
-/// State captured after mid-processing of simplify_let, held in
-/// `LetWalkerPhase::AfterValue` until post-processing consumes it.
+/// State captured after mid-processing of simplify_let, held while the
+/// body is simplified until post-processing consumes it.
 pub(crate) struct LetAfterBodyState {
     pub name: String,
     pub var_id: Option<VarId>,
@@ -44,17 +44,4 @@ pub(crate) enum LetPostResult {
     Done(PseudoExpr),
     /// The expression needs another fold before it becomes the result.
     Resimplify(PseudoExpr),
-}
-
-/// Per-Let state stored on `Simplifier::let_walker_states` during
-/// Walker-driven traversal:
-///
-/// `pre_let` pushes `Normal` (or `Bailout` when the depth guard trips).
-/// `enter_let` pops `Normal`, runs mid-processing, pushes `AfterValue`;
-///   `Bailout` passes through unchanged.
-/// `post_let` pops `AfterValue` or `Bailout` and produces the Let.
-pub(crate) enum LetWalkerPhase {
-    Normal(LetAfterValueState),
-    AfterValue(LetAfterBodyState),
-    Bailout,
 }

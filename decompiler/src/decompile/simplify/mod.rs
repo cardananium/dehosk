@@ -20,6 +20,7 @@ pub(crate) mod postprocess;
 mod rename;
 mod selectors;
 mod state;
+mod step;
 #[cfg(test)]
 mod tests;
 mod transform;

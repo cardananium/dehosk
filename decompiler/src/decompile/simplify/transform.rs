@@ -3,8 +3,8 @@
 //! impl that drives them.
 
 use super::apply::ApplyAction;
-use super::let_binding::{LetPostResult, LetWalkerPhase};
 use super::state::DelayRestoreList;
+use super::step::Step;
 use super::{BuiltinId, Simplifier};
 use crate::decompile::constructor_data::{
     ConstrPairProjection, rewrite_constr_unpack_pair_projection,
@@ -16,7 +16,7 @@ use crate::pseudo::ast::{BinaryOp, Binder, PseudoData, PseudoExpr, UnaryOp};
 use crate::pseudo::constructor::{ConstructorShape, KnownConstructor};
 use crate::pseudo::field_selector::FieldSelector;
 use crate::pseudo::var_id::VarId;
-use crate::pseudo::walker::{FoldAction, Walker};
+use crate::pseudo::walker::{Entered, Walker};
 
 mod entry;
 
@@ -242,20 +242,19 @@ impl Simplifier {
         None
     }
 
+    /// Simplify `expr` from outside the fold machine. Code running inside it
+    /// returns a [`Step`] instead, so the machine does the descent.
     pub(crate) fn simplify(&mut self, expr: PseudoExpr) -> PseudoExpr {
-        // A named entry point for helpers recursing via
-        // `self.simplify(...)`, kept distinct from the `Walker::fold`
-        // machinery; `fold()` carries its own `maybe_grow` stack guard.
         self.fold(expr)
     }
 }
 
 // Simple structural post-order cases (`BinOp`, `Constr`, `List`,
 // `Tuple`, `Pair`, `Delay`, `Trace`, `FieldAccess`, `IndexAccess`)
-// are factored into `simplify_*` helpers that the Walker's `post_*`
-// hooks call. A helper takes ownership of already-simplified children
-// and returns the final `PseudoExpr`; re-simplification steps call
-// `self.simplify(...)` directly.
+// are factored into `simplify_*` helpers that run once the children are
+// simplified. A helper takes ownership of the simplified children; the
+// two that may re-simplify what they build (`FieldAccess`,
+// `IndexAccess`) return a [`Step`].
 impl Simplifier {
     pub(super) fn simplify_binop(
         &mut self,
@@ -547,7 +546,7 @@ impl Simplifier {
         &mut self,
         simplified_record: PseudoExpr,
         selector: FieldSelector,
-    ) -> PseudoExpr {
+    ) -> Step {
         let constr_projection = if selector.is_pair_fst() {
             Some(ConstrPairProjection::Tag)
         } else if selector.is_pair_snd() {
@@ -560,7 +559,7 @@ impl Simplifier {
             && let Some(expr) =
                 rewrite_constr_unpack_pair_projection(&simplified_record, None, projection)
         {
-            return expr;
+            return Step::Done(expr);
         }
 
         if let PseudoExpr::Var {
@@ -572,7 +571,7 @@ impl Simplifier {
             && let Some(expr) =
                 rewrite_constr_unpack_pair_projection(&simplified_record, Some(subject), projection)
         {
-            return expr;
+            return Step::Done(expr);
         }
 
         let selector_name = selector.as_pretty_name();
@@ -587,10 +586,10 @@ impl Simplifier {
                 unreachable!("Data.Constr field-access shape checked above");
             };
             if selector_name == "fields" {
-                return self.simplify(args.pop().expect("Data.Constr fields arg should exist"));
+                return Step::refold(args.pop().expect("Data.Constr fields arg should exist"));
             }
             let mut args = args.into_iter();
-            return self.simplify(args.next().expect("Data.Constr tag arg should exist"));
+            return Step::refold(args.next().expect("Data.Constr tag arg should exist"));
         }
 
         if let PseudoExpr::Data(ref data) = simplified_record
@@ -601,12 +600,12 @@ impl Simplifier {
                     .iter()
                     .map(|f| PseudoExpr::Data(Box::new(f.clone())))
                     .collect();
-                return self.simplify(PseudoExpr::List {
+                return Step::refold(PseudoExpr::List {
                     elements,
                     tail: None,
                 });
             } else if selector_name == "tag" {
-                return PseudoExpr::Int((*tag as i128).into());
+                return Step::Done(PseudoExpr::Int((*tag as i128).into()));
             }
         }
 
@@ -618,12 +617,12 @@ impl Simplifier {
                 unreachable!("Constr field-access shape checked above");
             };
             if selector_name == "fields" {
-                return PseudoExpr::List {
+                return Step::Done(PseudoExpr::List {
                     elements: fields,
                     tail: None,
-                };
+                });
             }
-            return PseudoExpr::Int((tag as i128).into());
+            return Step::Done(PseudoExpr::Int((tag as i128).into()));
         }
 
         if let PseudoExpr::Var {
@@ -633,7 +632,7 @@ impl Simplifier {
                 .then(|| self.tracked_var(&self.constructors.data_constr_bindings, name, id.get()))
                 .flatten()
         {
-            return self.simplify(PseudoExpr::field_access_typed(stored_value, selector));
+            return Step::refold(PseudoExpr::field_access_typed(stored_value, selector));
         }
 
         if matches!(
@@ -650,9 +649,9 @@ impl Simplifier {
             let fst = args.next().expect("Pair.new fst arg should exist");
             let snd = args.next().expect("Pair.new snd arg should exist");
             if selector.is_pair_fst() {
-                return fst;
+                return Step::Done(fst);
             }
-            return snd;
+            return Step::Done(snd);
         }
 
         if matches!(
@@ -663,9 +662,9 @@ impl Simplifier {
                 unreachable!("Pair field-access shape checked above");
             };
             if selector.is_pair_fst() {
-                return fst.into_inner();
+                return Step::Done(fst.into_inner());
             }
-            return snd.into_inner();
+            return Step::Done(snd.into_inner());
         }
 
         if let PseudoExpr::Let {
@@ -675,7 +674,7 @@ impl Simplifier {
             body,
         } = simplified_record
         {
-            return self.simplify(PseudoExpr::Let {
+            return Step::refold(PseudoExpr::Let {
                 name,
                 id,
                 value,
@@ -683,7 +682,7 @@ impl Simplifier {
             });
         }
 
-        PseudoExpr::field_access_typed(simplified_record, selector)
+        Step::Done(PseudoExpr::field_access_typed(simplified_record, selector))
     }
 
     pub(super) fn simplify_var(&mut self, name: String, id: Option<VarId>) -> PseudoExpr {
@@ -718,7 +717,7 @@ impl Simplifier {
         &mut self,
         simplified_collection: PseudoExpr,
         index: usize,
-    ) -> PseudoExpr {
+    ) -> Step {
         if let PseudoExpr::Let {
             name,
             id,
@@ -726,7 +725,7 @@ impl Simplifier {
             body,
         } = simplified_collection
         {
-            return self.simplify(PseudoExpr::Let {
+            return Step::refold(PseudoExpr::Let {
                 name,
                 id,
                 value,
@@ -753,7 +752,7 @@ impl Simplifier {
                     clause
                 })
                 .collect();
-            return self.simplify(PseudoExpr::When {
+            return Step::refold(PseudoExpr::When {
                 subject,
                 subject_name,
                 clauses: indexed_clauses,
@@ -767,47 +766,44 @@ impl Simplifier {
             && let Some((base, offset)) =
                 self.tracked_var(&self.constructors.tail_chain_offsets, var_name, id.get())
         {
-            return PseudoExpr::IndexAccess {
+            return Step::Done(PseudoExpr::IndexAccess {
                 collection: PBox::new(base),
                 index: index + depth + offset,
-            };
+            });
         }
-        PseudoExpr::IndexAccess {
+        Step::Done(PseudoExpr::IndexAccess {
             collection: PBox::new(current),
             index: index + depth,
-        }
+        })
     }
 }
 
-// Simplifier acts as a `Walker`, dispatching each variant through the
-// appropriate hook:
+// Simplifier acts as a `Walker`. Each node is taken by value in
+// `enter_owned`:
 //
 // - Leaves (`Int`, `ByteArray`, `String`, `Bool`, `Unit`, `Error`,
-//   `Raw`, `Data`, `HelperSymbol`) return `FoldAction::Walk` and are
-//   reconstructed by the default leaf `post_*` hooks.
-// - The 9 simple structural variants (`BinOp`, `Constr`, `List`,
-//   `Tuple`, `Pair`, `Delay`, `Trace`, `FieldAccess`, `IndexAccess`)
-//   also `Walk`: the Walker recurses into children, then the
-//   overridden `post_*` hooks run the shared `simplify_*` helpers.
-// - `Var`, `Force`, `Lambda`, `If`, `When`, `UnOp`, `BuiltinCall`
-//   and `RecFn` short-circuit via
-//   `FoldAction::Replace(self.simplify_*(...))`; those helpers
-//   already recurse through `self.simplify(...)`, so letting the
-//   Walker recurse too would double-simplify subtrees.
-// - `Let` uses the native `pre_let` / `enter_let` / `post_let` flow.
-// - `Apply` walks: the Walker folds `function` and args, then
-//   `post_apply` runs the simplify-apply loop iteratively.
+//   `Raw`, `Data`, `HelperSymbol`) walk and are reconstructed by the
+//   default leaf `post_*` hooks.
+// - The simple structural variants (`BinOp`, `Constr`, `List`, `Tuple`,
+//   `Pair`, `Delay`, `Trace`) also walk: the machine folds the children,
+//   then the overridden `post_*` hooks run the shared `simplify_*`
+//   helpers.
+// - Everything else goes to its `simplify_*` helper, which returns a
+//   [`Step`]: the children it simplifies — and whatever it rebuilds and
+//   simplifies again — are folded by the machine, not by a nested
+//   `self.simplify`. The nesting of those nodes is the script's, so a
+//   nested call per level would put the whole descent back on the call
+//   stack, which cannot grow on `wasm32`.
 impl Walker for Simplifier {
-    fn pre_expr(&mut self, expr: &PseudoExpr) -> FoldAction {
+    fn enter_owned(&mut self, expr: PseudoExpr) -> Entered {
         // Collapse cons_bytearray chains to a ByteArray literal
         // before any pattern-specific simplification, so collapsed
         // literals never reach `simplify_builtin_call` or child
         // recursion.
-        if let Some(bytes) = Self::try_collapse_cons_bytestring(expr) {
-            return FoldAction::Replace(PseudoExpr::ByteArray(bytes));
+        if let Some(bytes) = Self::try_collapse_cons_bytestring(&expr) {
+            return Entered::Done(PseudoExpr::ByteArray(bytes));
         }
-        match expr {
-            // Leaves — default leaf `post_*` hooks.
+        let step = match expr {
             PseudoExpr::Int(_)
             | PseudoExpr::ByteArray(_)
             | PseudoExpr::String(_)
@@ -816,151 +812,63 @@ impl Walker for Simplifier {
             | PseudoExpr::Error { .. }
             | PseudoExpr::Raw { .. }
             | PseudoExpr::Data(_)
-            | PseudoExpr::HelperSymbol(_) => FoldAction::Walk,
-            // Simple structural post-order — the overridden `post_*`
-            // hooks below delegate to `simplify_*` helpers.
-            PseudoExpr::BinOp { .. }
+            | PseudoExpr::HelperSymbol(_)
+            | PseudoExpr::BinOp { .. }
             | PseudoExpr::Constr { .. }
             | PseudoExpr::List { .. }
             | PseudoExpr::Tuple(_)
             | PseudoExpr::Pair(_, _)
             | PseudoExpr::Delay(_)
-            | PseudoExpr::Trace { .. }
-            | PseudoExpr::FieldAccess { .. }
-            | PseudoExpr::IndexAccess { .. } => FoldAction::Walk,
-            // Helpers already recurse via `self.simplify(...)`
-            // on children, so short-circuit Walker recursion.
-            PseudoExpr::Var { name, id } => {
-                FoldAction::Replace(self.simplify_var(name.clone(), *id))
-            }
-            PseudoExpr::Force(inner) => FoldAction::Replace(self.simplify_force((**inner).clone())),
-            PseudoExpr::Lambda { params, body } => {
-                FoldAction::Replace(self.simplify_lambda(params.clone(), (**body).clone()))
-            }
+            | PseudoExpr::Trace { .. } => return Entered::Walk(expr),
+            PseudoExpr::Var { name, id } => return Entered::Done(self.simplify_var(name, id)),
+            PseudoExpr::Force(inner) => self.simplify_force(inner.into_inner()),
+            PseudoExpr::Lambda { params, body } => self.simplify_lambda(params, body.into_inner()),
             PseudoExpr::If {
                 condition,
                 then_branch,
                 else_branch,
-            } => FoldAction::Replace(self.simplify_if(
-                (**condition).clone(),
-                (**then_branch).clone(),
-                (**else_branch).clone(),
-            )),
+            } => self.simplify_if(
+                condition.into_inner(),
+                then_branch.into_inner(),
+                else_branch.into_inner(),
+            ),
             PseudoExpr::When {
                 subject,
                 subject_name,
                 clauses,
-            } => FoldAction::Replace(self.simplify_when(
-                (**subject).clone(),
-                subject_name.clone(),
-                clauses.clone(),
-            )),
-            PseudoExpr::UnOp { op, operand } => {
-                FoldAction::Replace(self.simplify_unop(*op, (**operand).clone()))
-            }
+            } => self.simplify_when(subject.into_inner(), subject_name, clauses),
+            PseudoExpr::UnOp { op, operand } => self.simplify_unop(op, operand.into_inner()),
             PseudoExpr::BuiltinCall { name, args } => {
-                FoldAction::Replace(self.simplify_builtin_call(*name, (args.clone()).into_vec()))
+                self.simplify_builtin_call(name, args.into_vec())
             }
-            PseudoExpr::RecFn { name, params, body } => FoldAction::Replace(self.simplify_recfn(
-                name.clone(),
-                params.clone(),
-                (**body).clone(),
-            )),
-            // `Let` routes through pre_let/enter_let/post_let.
-            PseudoExpr::Let { .. } => FoldAction::Walk,
-            // `Apply` routes through post_apply; Walker
-            // folds `function` + args first, then `post_apply` runs
-            // the CPS `simplify_apply_match` loop.
-            PseudoExpr::Apply { .. } => FoldAction::Walk,
-        }
+            PseudoExpr::RecFn { name, params, body } => {
+                self.simplify_recfn(name, params, body.into_inner())
+            }
+            PseudoExpr::Let {
+                name,
+                id,
+                value,
+                body,
+            } => self.simplify_let_expr(name, id, value.into_inner(), body.into_inner()),
+            PseudoExpr::Apply { function, args } => {
+                self.simplify_apply_expr(function.into_inner(), args.into_vec())
+            }
+            PseudoExpr::FieldAccess { record, selector } => {
+                Step::fold(record.into_inner(), move |simplifier, record| {
+                    simplifier.simplify_field_access(record, selector)
+                })
+            }
+            PseudoExpr::IndexAccess { collection, index } => {
+                Step::fold(collection.into_inner(), move |simplifier, collection| {
+                    simplifier.simplify_index_access(collection, index)
+                })
+            }
+        };
+        self.suspend(step)
     }
 
-    fn pre_let(
-        &mut self,
-        name: &str,
-        id: &Option<VarId>,
-        value: &PseudoExpr,
-        body: &PseudoExpr,
-    ) -> FoldAction {
-        self.let_depth += 1;
-        if self.let_depth > 50 {
-            // Depth bail-out: skip pattern matching; let Walker recurse
-            // over children and reassemble in `post_let`.
-            self.let_walker_states.push(LetWalkerPhase::Bailout);
-        } else {
-            let state =
-                self.simplify_let_pre_process(name.to_string(), id.get(), value, body.clone());
-            self.let_walker_states.push(LetWalkerPhase::Normal(state));
-        }
-        FoldAction::Walk
-    }
-
-    fn enter_let(&mut self, name: &str, _id: &Option<VarId>, value: &PseudoExpr) -> String {
-        let phase = self
-            .let_walker_states
-            .pop()
-            .expect("enter_let: let_walker_states underflow");
-        match phase {
-            LetWalkerPhase::Normal(state) => {
-                // Feed the folded value through after_value; discard the
-                // original body it returns, since the Walker folds the
-                // same body from the Let struct next.
-                let (after_body_state, _body) = self.simplify_let_after_value(state, value.clone());
-                let new_name = after_body_state.name.clone();
-                self.let_walker_states
-                    .push(LetWalkerPhase::AfterValue(after_body_state));
-                new_name
-            }
-            LetWalkerPhase::Bailout => {
-                self.let_walker_states.push(LetWalkerPhase::Bailout);
-                name.to_string()
-            }
-            LetWalkerPhase::AfterValue(_) => {
-                panic!("enter_let: unexpected AfterValue phase (pre_let must push Normal/Bailout)")
-            }
-        }
-    }
-
-    fn post_let(
-        &mut self,
-        name: String,
-        id: Option<VarId>,
-        value: PseudoExpr,
-        body: PseudoExpr,
-    ) -> PseudoExpr {
-        let phase = self
-            .let_walker_states
-            .pop()
-            .expect("post_let: let_walker_states underflow");
-        match phase {
-            LetWalkerPhase::AfterValue(state) => {
-                match self.simplify_let_after_body(state, body) {
-                    LetPostResult::Done(expr) => {
-                        self.let_depth = self.let_depth.saturating_sub(1);
-                        expr
-                    }
-                    LetPostResult::Resimplify(expr) => {
-                        // Keep let_depth elevated while re-folding so
-                        // nested Lets still count against the guard.
-                        let re = self.fold(expr);
-                        self.let_depth = self.let_depth.saturating_sub(1);
-                        re
-                    }
-                }
-            }
-            LetWalkerPhase::Bailout => {
-                self.let_depth = self.let_depth.saturating_sub(1);
-                PseudoExpr::Let {
-                    name,
-                    id,
-                    value: PBox::new(value),
-                    body: PBox::new(body),
-                }
-            }
-            LetWalkerPhase::Normal(_) => {
-                panic!("post_let: unexpected Normal phase (enter_let must consume it)")
-            }
-        }
+    fn resume(&mut self, folded: Vec<PseudoExpr>) -> Entered {
+        self.resume_awaiting(folded)
     }
 
     fn post_binop(&mut self, op: BinaryOp, left: PseudoExpr, right: PseudoExpr) -> PseudoExpr {
@@ -996,58 +904,76 @@ impl Walker for Simplifier {
     fn post_trace(&mut self, message: PseudoExpr, value: PseudoExpr) -> PseudoExpr {
         self.simplify_trace(message, value)
     }
+}
 
-    fn post_field_access(&mut self, record: PseudoExpr, selector: FieldSelector) -> PseudoExpr {
-        self.simplify_field_access(record, selector)
+impl Simplifier {
+    /// `Apply` simplification: simplify `function` and `args`, then run the
+    /// `simplify_apply_match` loop — `Done` / `Resimplify` / `ContinueLoop`
+    /// with delay-depth save/restore — on the results.
+    pub(super) fn simplify_apply_expr(
+        &mut self,
+        function: PseudoExpr,
+        args: Vec<PseudoExpr>,
+    ) -> Step {
+        Self::fold_application(function, args, None)
     }
 
-    fn post_index_access(&mut self, collection: PseudoExpr, index: usize) -> PseudoExpr {
-        self.simplify_index_access(collection, index)
+    /// Simplify `function` and then each of `args`, and hand them to
+    /// [`Self::simplify_apply_round`] with the rollback a previous
+    /// `ContinueLoop` set up.
+    pub(super) fn fold_application(
+        function: PseudoExpr,
+        args: Vec<PseudoExpr>,
+        delay_restore: Option<DelayRestoreList>,
+    ) -> Step {
+        let mut exprs = Vec::with_capacity(args.len() + 1);
+        exprs.push(function);
+        exprs.extend(args);
+        Step::fold_all(exprs, move |simplifier, mut folded| {
+            let args = folded.split_off(1);
+            let function = folded.pop().expect("simplified apply function");
+            simplifier.simplify_apply_round(function, args, delay_restore)
+        })
     }
 
-    /// `Apply` simplification.
-    ///
-    /// `pre_expr` returns `FoldAction::Walk` for `Apply`, so the
-    /// Walker has already folded `function` and `args`. Run the
-    /// `simplify_apply_match` loop — `Done` / `Resimplify` /
-    /// `ContinueLoop` with delay-depth save/restore — iteratively
-    /// in this one method.
-    fn post_apply(&mut self, function: PseudoExpr, args: Vec<PseudoExpr>) -> PseudoExpr {
-        let mut current_function = function;
-        let mut current_args = args;
-        // `pending_restore` carries the delay-depth rollback list set
-        // up by a previous `ContinueLoop`; apply it BEFORE the next
-        // `simplify_apply_match` call.
-        let mut pending_restore: Option<DelayRestoreList> = None;
-        loop {
-            if let Some(saved) = pending_restore.take() {
-                for (param, param_id, previous) in saved {
-                    if let Some(prev_depth) = previous {
-                        self.delays
-                            .delayed_value_depths
-                            .insert_binding(param, param_id, prev_depth);
-                    } else if let Some(vid) = param_id {
-                        self.delays.delayed_value_depths.remove(vid);
-                    }
+    /// One round of the `Apply` loop over simplified children. A
+    /// `ContinueLoop` re-simplifies the new function and args and comes
+    /// back here.
+    fn simplify_apply_round(
+        &mut self,
+        function: PseudoExpr,
+        args: Vec<PseudoExpr>,
+        delay_restore: Option<DelayRestoreList>,
+    ) -> Step {
+        // The rollback a previous `ContinueLoop` set up applies BEFORE the
+        // next `simplify_apply_match` call.
+        if let Some(saved) = delay_restore {
+            for (param, param_id, previous) in saved {
+                if let Some(prev_depth) = previous {
+                    self.delays
+                        .delayed_value_depths
+                        .insert_binding(param, param_id, prev_depth);
+                } else if let Some(vid) = param_id {
+                    self.delays.delayed_value_depths.remove(vid);
                 }
             }
-            match self.simplify_apply_match(current_function, current_args) {
-                ApplyAction::Done(expr) => return expr,
-                ApplyAction::Resimplify(expr) => return self.fold(expr),
-                ApplyAction::ContinueLoop {
-                    function,
-                    args: new_args,
-                    delay_restore,
-                } => {
-                    // Fold the new function and args through the
-                    // full Walker pipeline, then loop back to re-run
-                    // `simplify_apply_match` on the simplified
-                    // children.
-                    current_function = self.fold(function);
-                    current_args = new_args.into_iter().map(|a| self.fold(a)).collect();
-                    pending_restore = delay_restore;
-                }
-            }
+        }
+        match self.simplify_apply_match(function, args) {
+            ApplyAction::Done(expr) => Step::Done(expr),
+            ApplyAction::Then(step) => step,
+            ApplyAction::Resimplify(expr) => Step::refold(expr),
+            ApplyAction::ContinueLoop {
+                function,
+                args,
+                delay_restore,
+            } => Self::fold_application(function, args, delay_restore),
+            ApplyAction::ContinueLoopAfter {
+                function,
+                args,
+                delay_restore,
+            } => function.then(self, move |_, function| {
+                Self::fold_application(function, args, delay_restore)
+            }),
         }
     }
 }

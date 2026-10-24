@@ -160,7 +160,7 @@ fn test_direct_y_combinator_helper_ignores_same_name_scope_binding() {
         body: PBox::new(PseudoExpr::var_with_id("n", VarId::new(9383))),
     };
 
-    let action = simplifier.simplify_apply_match(y, vec![callback, PseudoExpr::int(5)]);
+    let action = simplifier.simplify_apply_match_settled(y, vec![callback, PseudoExpr::int(5)]);
     match action {
         super::super::apply::ApplyAction::ContinueLoop { function, .. } => {
             assert!(

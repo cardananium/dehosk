@@ -45,7 +45,7 @@ fn test_constructor_when_fields_destructure_ignores_same_name_different_subject_
     let subject = PseudoExpr::var_with_id("x", subject_id);
     let subject_name = None;
     let mut simplifier = Simplifier::with_safe_mode(false);
-    let clauses = simplifier.destructure_when_fields(
+    let clauses = simplifier.destructure_when_fields_settled(
         &subject,
         &subject_name,
         vec![WhenClause::new(
@@ -92,7 +92,7 @@ fn test_constructor_when_fields_destructure_freshens_field_binder_against_body_n
     let subject = PseudoExpr::var("x");
     let subject_name = None;
     let mut simplifier = Simplifier::with_safe_mode(false);
-    let clauses = simplifier.destructure_when_fields(
+    let clauses = simplifier.destructure_when_fields_settled(
         &subject,
         &subject_name,
         vec![
@@ -239,7 +239,7 @@ fn test_constructor_when_fields_destructure_freshens_collapsed_single_field_bind
     let subject = PseudoExpr::var("x");
     let subject_name = None;
     let mut simplifier = Simplifier::with_safe_mode(false);
-    let clauses = simplifier.destructure_when_fields(
+    let clauses = simplifier.destructure_when_fields_settled(
         &subject,
         &subject_name,
         vec![
@@ -527,7 +527,7 @@ fn test_constructor_when_fields_destructure_skips_same_name_mismatched_inner_sub
     let tail = Binder::new("tail", VarId::new(717));
     let mut simplifier = Simplifier::with_safe_mode(false);
 
-    let clauses = simplifier.destructure_when_fields(
+    let clauses = simplifier.destructure_when_fields_settled(
         &PseudoExpr::var("x"),
         &None,
         vec![
@@ -620,7 +620,7 @@ fn test_constructor_when_fields_destructure_skips_capture_under_existing_field_b
     let old_head = Binder::new("item_1_1_1_1_1_1_1_1_1_1", VarId::new(705));
     let shadow_field = Binder::new("field_1", VarId::new(706));
     let mut simplifier = Simplifier::with_safe_mode(false);
-    let clauses = simplifier.destructure_when_fields(
+    let clauses = simplifier.destructure_when_fields_settled(
         &PseudoExpr::var("x"),
         &None,
         vec![

@@ -7,6 +7,7 @@ use crate::pseudo::constructor::ConstructorShape;
 use crate::pseudo::var_id::VarId;
 
 use super::Simplifier;
+use super::step::Step;
 
 impl Simplifier {
     fn selector_passthrough_lambda(&mut self, kept_name: &str, keep_first: bool) -> PseudoExpr {
@@ -24,7 +25,7 @@ impl Simplifier {
         }
     }
 
-    pub(super) fn simplify_force(&mut self, inner: PseudoExpr) -> PseudoExpr {
+    pub(super) fn simplify_force(&mut self, inner: PseudoExpr) -> Step {
         // force(and_fn/or_fn(a, delay(b))). Must run before inner is simplified:
         // simplify_apply rewrites the Apply into a BinOp and hides the pattern from
         // the post-simplification check.
@@ -39,37 +40,44 @@ impl Simplifier {
                 };
                 let left_arg = args.remove(0);
                 let right_arg = args.remove(0);
-                let left = Self::unwrap_delay(&self.simplify(left_arg));
-                let right = Self::unwrap_delay(&self.simplify(right_arg));
-                return PseudoExpr::BinOp {
-                    op: if is_and { BinaryOp::And } else { BinaryOp::Or },
-                    left: PBox::new(left),
-                    right: PBox::new(right),
-                };
+                return Step::fold_all(vec![left_arg, right_arg], move |_, mut operands| {
+                    let right = operands.pop().expect("simplified and/or rhs");
+                    let left = operands.pop().expect("simplified and/or lhs");
+                    let left = Self::unwrap_delay(&left);
+                    let right = Self::unwrap_delay(&right);
+                    Step::Done(PseudoExpr::BinOp {
+                        op: if is_and { BinaryOp::And } else { BinaryOp::Or },
+                        left: PBox::new(left),
+                        right: PBox::new(right),
+                    })
+                });
             }
         }
 
-        let mut inner = self.simplify(inner);
+        Step::fold(inner, |simplifier, inner| simplifier.simplify_forced(inner))
+    }
 
+    /// The rest of [`Self::simplify_force`], over the simplified operand.
+    fn simplify_forced(&mut self, inner: PseudoExpr) -> Step {
         // force(v) where v is a tracked selector binder: delay(fn(_, x) { x })
         // is the CPS fail path — the second (error) continuation.
         if let PseudoExpr::Var { name, id, .. } = &inner {
             if self.tracked_binding(&self.selectors.non_thunk_vars, name, id.get()) {
-                return inner;
+                return Step::Done(inner);
             }
             if self.tracked_binding(&self.selectors.single_delayed_snd_params, name, id.get()) {
-                return self.selector_passthrough_lambda("err", false);
+                return Step::Done(self.selector_passthrough_lambda("err", false));
             }
             if self.tracked_binding(&self.selectors.single_delayed_fst_params, name, id.get()) {
-                return self.selector_passthrough_lambda("ok", true);
+                return Step::Done(self.selector_passthrough_lambda("ok", true));
             }
 
             // Double-delay snd/fst selector from tracked let bindings.
             if self.tracked_binding(&self.selectors.delayed_snd_selectors, name, id.get()) {
-                return self.selector_passthrough_lambda("err", false);
+                return Step::Done(self.selector_passthrough_lambda("err", false));
             }
             if self.tracked_binding(&self.selectors.delayed_fst_selectors, name, id.get()) {
-                return self.selector_passthrough_lambda("ok", true);
+                return Step::Done(self.selector_passthrough_lambda("ok", true));
             }
 
             // General force/delay cancellation handled in post-pass (cancel_force_delay_vars)
@@ -82,11 +90,11 @@ impl Simplifier {
         {
             // fst selector: Ok/Some
             if self.tracked_binding(&self.selectors.delayed_fst_selectors, name, id.get()) {
-                return self.selector_passthrough_lambda("x", true);
+                return Step::Done(self.selector_passthrough_lambda("x", true));
             }
             // snd selector: Err/None
             if self.tracked_binding(&self.selectors.delayed_snd_selectors, name, id.get()) {
-                return self.selector_passthrough_lambda("y", false);
+                return Step::Done(self.selector_passthrough_lambda("y", false));
             }
             if let Some((delay_count, delayed_expr)) =
                 self.tracked_var(&self.recursion.delayed_rec_vars, name, id.get())
@@ -107,57 +115,57 @@ impl Simplifier {
                 if delay_count > 2 {
                     unwrapped = Self::build_delay_chain(unwrapped, delay_count - 2);
                 }
-                return self.simplify(unwrapped);
+                return Step::refold(unwrapped);
             }
         }
 
-        // Force(force(selector_var)(...)) with a known selector: rewrite to a
-        // direct lambda application and keep simplifying under the outer force.
-        loop {
-            if let PseudoExpr::Apply { function, args } = &inner
-                && let PseudoExpr::Force(inner_force) = function.as_ref()
-                && let PseudoExpr::Var { name, id, .. } = inner_force.as_ref()
-            {
-                let selector = if self.tracked_binding(
-                    &self.selectors.single_delayed_snd_params,
-                    name,
-                    id.get(),
-                ) {
-                    Some(self.selector_passthrough_lambda("err", false))
-                } else if self.tracked_binding(
-                    &self.selectors.single_delayed_fst_params,
-                    name,
-                    id.get(),
-                ) {
-                    Some(self.selector_passthrough_lambda("ok", true))
-                } else if self.tracked_binding(
-                    &self.selectors.delayed_snd_selectors,
-                    name,
-                    id.get(),
-                ) {
-                    Some(self.selector_passthrough_lambda("err", false))
-                } else if self.tracked_binding(
-                    &self.selectors.delayed_fst_selectors,
-                    name,
-                    id.get(),
-                ) {
-                    Some(self.selector_passthrough_lambda("ok", true))
-                } else {
-                    None
+        self.simplify_forced_selector_calls(inner)
+    }
+
+    /// Force(force(selector_var)(...)) with a known selector: rewrite to a
+    /// direct lambda application and keep simplifying under the outer force
+    /// — the application is simplified, then this runs again on the result.
+    fn simplify_forced_selector_calls(&mut self, inner: PseudoExpr) -> Step {
+        if let PseudoExpr::Apply { function, args } = &inner
+            && let PseudoExpr::Force(inner_force) = function.as_ref()
+            && let PseudoExpr::Var { name, id, .. } = inner_force.as_ref()
+        {
+            let selector = if self.tracked_binding(
+                &self.selectors.single_delayed_snd_params,
+                name,
+                id.get(),
+            ) {
+                Some(self.selector_passthrough_lambda("err", false))
+            } else if self.tracked_binding(
+                &self.selectors.single_delayed_fst_params,
+                name,
+                id.get(),
+            ) {
+                Some(self.selector_passthrough_lambda("ok", true))
+            } else if self.tracked_binding(&self.selectors.delayed_snd_selectors, name, id.get()) {
+                Some(self.selector_passthrough_lambda("err", false))
+            } else if self.tracked_binding(&self.selectors.delayed_fst_selectors, name, id.get()) {
+                Some(self.selector_passthrough_lambda("ok", true))
+            } else {
+                None
+            };
+
+            if let Some(selector_lambda) = selector {
+                let applied = PseudoExpr::Apply {
+                    function: PBox::new(selector_lambda),
+                    args: args.clone(),
                 };
-
-                if let Some(selector_lambda) = selector {
-                    let applied = PseudoExpr::Apply {
-                        function: PBox::new(selector_lambda),
-                        args: args.clone(),
-                    };
-                    inner = self.simplify(applied);
-                    continue;
-                }
+                return Step::fold(applied, |simplifier, inner| {
+                    simplifier.simplify_forced_selector_calls(inner)
+                });
             }
-            break;
         }
+        self.simplify_forced_shapes(inner)
+    }
 
+    /// The shape rewrites of a simplified `force` operand, once no known
+    /// selector call is left in it.
+    fn simplify_forced_shapes(&mut self, inner: PseudoExpr) -> Step {
         // Collapse the redundant outer force on a field-accessed Scott call:
         // Force(force(v).#k(a1, ...)) -> force(v).#k(a1, ...)
         if !self.safe_mode
@@ -188,27 +196,27 @@ impl Simplifier {
                 && Self::can_short_circuit_with_boolean(&then_branch)
                 && self.is_false(&else_branch)
             {
-                return PseudoExpr::BinOp {
+                return Step::Done(PseudoExpr::BinOp {
                     op: BinaryOp::And,
                     left: PBox::new(cond),
                     right: PBox::new(then_branch),
-                };
+                });
             }
             if !self.safe_mode
                 && Self::can_short_circuit_with_boolean(&cond)
                 && Self::can_short_circuit_with_boolean(&else_branch)
                 && self.is_true(&then_branch)
             {
-                return PseudoExpr::BinOp {
+                return Step::Done(PseudoExpr::BinOp {
                     op: BinaryOp::Or,
                     left: PBox::new(cond),
                     right: PBox::new(else_branch),
-                };
+                });
             }
             if let Some(expect_expr) =
                 self.maybe_emit_expect(cond.clone(), then_branch.clone(), else_branch.clone())
             {
-                return expect_expr;
+                return Step::Done(expect_expr);
             }
 
             return self.simplify_if(cond, then_branch, else_branch);
@@ -236,15 +244,15 @@ impl Simplifier {
                 if let Some(expect_expr) =
                     self.maybe_emit_expect(cond.clone(), non_empty_case.clone(), empty_case)
                 {
-                    return expect_expr;
+                    return Step::Done(expect_expr);
                 }
-                return PseudoExpr::Apply {
+                return Step::Done(PseudoExpr::Apply {
                     function: PBox::new(PseudoExpr::expect_helper()),
                     args: vec![cond, non_empty_case].into(),
-                };
+                });
             }
 
-            return PseudoExpr::When {
+            return Step::Done(PseudoExpr::When {
                 subject: PBox::new(list),
                 subject_name: None,
                 clauses: vec![
@@ -257,7 +265,7 @@ impl Simplifier {
                     ),
                     WhenClause::new(WhenPattern::Wildcard, non_empty_case),
                 ],
-            };
+            });
         }
 
         // Scott-encoded N-constructor case analysis:
@@ -292,29 +300,36 @@ impl Simplifier {
                 .collect();
 
             if branches.iter().all(|b| b.is_some()) {
-                let subject = self.simplify(inner_force.as_ref().clone());
-
-                let clauses: Vec<_> = branches
+                // The subject is simplified first, then each branch body.
+                let mut exprs = vec![inner_force.as_ref().clone()];
+                let patterns: Vec<WhenPattern> = branches
                     .into_iter()
                     .enumerate()
                     .map(|(i, b)| {
                         let (params, body) = b.unwrap();
                         let arity = params.len();
-                        WhenClause::new(
-                            WhenPattern::constructor(
-                                ConstructorShape::scott_positional(i, arity),
-                                params,
-                            ),
-                            self.simplify(body),
+                        exprs.push(body);
+                        WhenPattern::constructor(
+                            ConstructorShape::scott_positional(i, arity),
+                            params,
                         )
                     })
                     .collect();
 
-                return PseudoExpr::When {
-                    subject: PBox::new(subject),
-                    subject_name: None,
-                    clauses,
-                };
+                return Step::fold_all(exprs, move |_, simplified| {
+                    let mut simplified = simplified.into_iter();
+                    let subject = simplified.next().expect("simplified Scott case subject");
+                    let clauses = patterns
+                        .into_iter()
+                        .zip(simplified)
+                        .map(|(pattern, body)| WhenClause::new(pattern, body))
+                        .collect();
+                    Step::Done(PseudoExpr::When {
+                        subject: PBox::new(subject),
+                        subject_name: None,
+                        clauses,
+                    })
+                });
             }
         }
 
@@ -358,7 +373,7 @@ impl Simplifier {
 
                 // Empty case fails: the fold is really an assertion that list is non-empty.
                 if Self::is_fail(&empty_case) {
-                    return PseudoExpr::Apply {
+                    return Step::Done(PseudoExpr::Apply {
                         function: PBox::new(PseudoExpr::expect_helper()),
                         args: vec![
                             PseudoExpr::UnOp {
@@ -371,11 +386,11 @@ impl Simplifier {
                             non_empty_case,
                         ]
                         .into(),
-                    };
+                    });
                 }
 
                 // General when on list
-                return PseudoExpr::When {
+                return Step::Done(PseudoExpr::When {
                     subject: PBox::new(list),
                     subject_name: None,
                     clauses: vec![
@@ -388,7 +403,7 @@ impl Simplifier {
                         ),
                         WhenClause::new(WhenPattern::Wildcard, non_empty_case),
                     ],
-                };
+                });
             }
         }
 
@@ -399,21 +414,21 @@ impl Simplifier {
             if !self.safe_mode && self.is_and_var(name, *id) && args.len() == 2 {
                 let left = Self::unwrap_delay(&args[0]);
                 let right = Self::unwrap_delay(&args[1]);
-                return PseudoExpr::BinOp {
+                return Step::Done(PseudoExpr::BinOp {
                     op: BinaryOp::And,
                     left: PBox::new(left),
                     right: PBox::new(right),
-                };
+                });
             }
 
             if !self.safe_mode && self.is_or_var(name, *id) && args.len() == 2 {
                 let left = Self::unwrap_delay(&args[0]);
                 let right = Self::unwrap_delay(&args[1]);
-                return PseudoExpr::BinOp {
+                return Step::Done(PseudoExpr::BinOp {
                     op: BinaryOp::Or,
                     left: PBox::new(left),
                     right: PBox::new(right),
-                };
+                });
             }
 
             // Expand partial-if lambda: fn(x) { if(x, then_val) } called with 2 args
@@ -440,10 +455,10 @@ impl Simplifier {
                     && self.is_true(&else_branch)
                     && Self::can_short_circuit_with_boolean(&cond)
                 {
-                    return PseudoExpr::UnOp {
+                    return Step::Done(PseudoExpr::UnOp {
                         op: UnaryOp::Not,
                         operand: PBox::new(cond),
-                    };
+                    });
                 }
 
                 // if(cond1, delay(cond2), delay(False)) -> cond1 && cond2
@@ -451,11 +466,11 @@ impl Simplifier {
                     && Self::can_short_circuit_with_boolean(&cond)
                     && Self::can_short_circuit_with_boolean(&then_branch)
                 {
-                    return PseudoExpr::BinOp {
+                    return Step::Done(PseudoExpr::BinOp {
                         op: BinaryOp::And,
                         left: PBox::new(cond),
                         right: PBox::new(then_branch),
-                    };
+                    });
                 }
 
                 // if(cond1, delay(True), delay(cond2)) -> cond1 || cond2
@@ -463,11 +478,11 @@ impl Simplifier {
                     && Self::can_short_circuit_with_boolean(&cond)
                     && Self::can_short_circuit_with_boolean(&else_branch)
                 {
-                    return PseudoExpr::BinOp {
+                    return Step::Done(PseudoExpr::BinOp {
                         op: BinaryOp::Or,
                         left: PBox::new(cond),
                         right: PBox::new(else_branch),
-                    };
+                    });
                 }
 
                 return self.simplify_if(cond, then_branch, else_branch);
@@ -480,19 +495,19 @@ impl Simplifier {
                 && let Some(builtin_name) = self.builtin_alias_for_var(name, id.get())
                 && Self::is_force2_builtin(builtin_name)
             {
-                return PseudoExpr::BuiltinCall {
+                return Step::Done(PseudoExpr::BuiltinCall {
                     name: Self::nice_builtin_name(builtin_name),
                     args: vec![].into(),
-                };
+                });
             }
             if let PseudoExpr::BuiltinCall { name, args } = inner2.as_ref()
                 && args.is_empty()
                 && Self::is_force2_builtin(*name)
             {
-                return PseudoExpr::BuiltinCall {
+                return Step::Done(PseudoExpr::BuiltinCall {
                     name: Self::nice_builtin_name(*name),
                     args: vec![].into(),
-                };
+                });
             }
         }
 
@@ -501,10 +516,10 @@ impl Simplifier {
             && args.is_empty()
             && Self::is_force1_builtin(*name)
         {
-            return PseudoExpr::BuiltinCall {
+            return Step::Done(PseudoExpr::BuiltinCall {
                 name: Self::nice_builtin_name(*name),
                 args: vec![].into(),
-            };
+            });
         }
 
         // Force(BuiltinCall("if", [cond, delay(then), delay(else)])) -> simplify_if(cond, then, else)
@@ -521,7 +536,7 @@ impl Simplifier {
 
         // force(delay(x)) -> x
         if let PseudoExpr::Delay(inner2) = inner {
-            return inner2.into_inner();
+            return Step::Done(inner2.into_inner());
         }
 
         // Push force through leading let/trace wrappers iteratively:
@@ -533,12 +548,12 @@ impl Simplifier {
 
         // force(binop) -> binop; an operator result is never a thunk
         if matches!(inner, PseudoExpr::BinOp { .. } | PseudoExpr::UnOp { .. }) {
-            return inner;
+            return Step::Done(inner);
         }
 
         // force(simple_value) -> simple_value; the delay is already stripped
         if Self::is_non_thunk_value(&inner) {
-            return inner;
+            return Step::Done(inner);
         }
 
         // force(if cond { ... } else { ... })
@@ -550,14 +565,14 @@ impl Simplifier {
         {
             // force(if cond { False } else { True }) -> !cond
             if !self.safe_mode && self.is_false(then_branch) && self.is_true(else_branch) {
-                return PseudoExpr::UnOp {
+                return Step::Done(PseudoExpr::UnOp {
                     op: UnaryOp::Not,
                     operand: condition.clone(),
-                };
+                });
             }
             // force(if cond { True } else { False }) -> just cond (identity)
             if !self.safe_mode && self.is_true(then_branch) && self.is_false(else_branch) {
-                return (**condition).clone();
+                return Step::Done((**condition).clone());
             }
             // force(if cond { value } else { fail }) -> expect!(cond, value)
             //
@@ -568,7 +583,7 @@ impl Simplifier {
             if !self.safe_mode && Self::is_fail(else_branch) && !Self::is_fail(then_branch) {
                 if Self::when_has_guardless_wildcard_fail(condition.as_ref()) {
                     if Self::is_void(then_branch) {
-                        return (**condition).clone();
+                        return Step::Done((**condition).clone());
                     }
                     // Non-Void then_branch: fall through to the generic
                     // handling below.
@@ -581,10 +596,10 @@ impl Simplifier {
                     if let Some(msg) = Self::fail_message(else_branch) {
                         args.push(PseudoExpr::String(msg.to_string()));
                     }
-                    return PseudoExpr::Apply {
+                    return Step::Done(PseudoExpr::Apply {
                         function: PBox::new(PseudoExpr::expect_helper()),
                         args: args.into(),
-                    };
+                    });
                 }
             }
             // force(if cond { fail } else { value }) -> expect!(!cond, value)
@@ -601,10 +616,10 @@ impl Simplifier {
                 if let Some(msg) = msg {
                     args.push(PseudoExpr::String(msg));
                 }
-                return PseudoExpr::Apply {
+                return Step::Done(PseudoExpr::Apply {
                     function: PBox::new(PseudoExpr::expect_helper()),
                     args: args.into(),
-                };
+                });
             }
             // force(if cond { then } else { else }) where neither is fail
             return self.simplify_if(
@@ -629,11 +644,11 @@ impl Simplifier {
                     body: Self::unwrap_delay(&c.body),
                 })
                 .collect();
-            return PseudoExpr::When {
+            return Step::Done(PseudoExpr::When {
                 subject: subject.clone(),
                 subject_name: subject_name.clone(),
                 clauses,
-            };
+            });
         }
 
         // force(and(a, delay(b))) -> a && b
@@ -645,11 +660,11 @@ impl Simplifier {
         {
             let left = Self::unwrap_delay(&args[0]);
             let right = Self::unwrap_delay(&args[1]);
-            return PseudoExpr::BinOp {
+            return Step::Done(PseudoExpr::BinOp {
                 op: BinaryOp::And,
                 left: PBox::new(left),
                 right: PBox::new(right),
-            };
+            });
         }
 
         // force(f(cond, delay(then), delay(else))) where f is if_then_else
@@ -690,11 +705,11 @@ impl Simplifier {
                     && Self::can_short_circuit_with_boolean(&then_branch)
                     && self.is_false(&else_branch)
                 {
-                    return PseudoExpr::BinOp {
+                    return Step::Done(PseudoExpr::BinOp {
                         op: BinaryOp::And,
                         left: PBox::new(cond),
                         right: PBox::new(then_branch),
-                    };
+                    });
                 }
 
                 // if(cond1, delay(True), delay(cond2)) -> cond1 || cond2
@@ -703,11 +718,11 @@ impl Simplifier {
                     && Self::can_short_circuit_with_boolean(&else_branch)
                     && self.is_true(&then_branch)
                 {
-                    return PseudoExpr::BinOp {
+                    return Step::Done(PseudoExpr::BinOp {
                         op: BinaryOp::Or,
                         left: PBox::new(cond),
                         right: PBox::new(else_branch),
-                    };
+                    });
                 }
 
                 // if(cond, delay(value), delay(fail)) -> expect!, with any fail
@@ -717,10 +732,10 @@ impl Simplifier {
                     if let Some(msg) = Self::fail_message(&else_branch) {
                         args.push(PseudoExpr::String(msg.to_string()));
                     }
-                    return PseudoExpr::Apply {
+                    return Step::Done(PseudoExpr::Apply {
                         function: PBox::new(PseudoExpr::expect_helper()),
                         args: args.into(),
-                    };
+                    });
                 }
 
                 // if(cond, delay(fail), delay(value)) -> expect!(!cond, value),
@@ -737,10 +752,10 @@ impl Simplifier {
                     if let Some(msg) = msg {
                         args.push(PseudoExpr::String(msg));
                     }
-                    return PseudoExpr::Apply {
+                    return Step::Done(PseudoExpr::Apply {
                         function: PBox::new(PseudoExpr::expect_helper()),
                         args: args.into(),
-                    };
+                    });
                 }
 
                 // Regular if
@@ -754,7 +769,7 @@ impl Simplifier {
                 inner2.as_ref(),
                 PseudoExpr::BinOp { .. } | PseudoExpr::UnOp { .. }
             ) {
-                return (**inner2).clone();
+                return Step::Done((**inner2).clone());
             }
         }
 
@@ -772,20 +787,20 @@ impl Simplifier {
                 | PseudoExpr::Trace { .. }
                 | PseudoExpr::Error { .. }
         ) {
-            return inner;
+            return Step::Done(inner);
         }
         // Also strip force from expect!(...) calls
         if let PseudoExpr::Apply { ref function, .. } = inner
             && let PseudoExpr::Var { name, .. } = function.as_ref()
             && name == "expect!"
         {
-            return inner;
+            return Step::Done(inner);
         }
 
-        PseudoExpr::Force(PBox::new(inner))
+        Step::Done(PseudoExpr::Force(PBox::new(inner)))
     }
 
-    fn simplify_force_through_wrappers(&mut self, expr: PseudoExpr) -> PseudoExpr {
+    fn simplify_force_through_wrappers(&mut self, expr: PseudoExpr) -> Step {
         enum ForceWrapper {
             Let {
                 name: String,
@@ -819,21 +834,23 @@ impl Simplifier {
             }
         }
 
-        let mut forced = self.simplify_force(current);
-        while let Some(wrapper) = wrappers.pop() {
-            forced = match wrapper {
-                ForceWrapper::Let { name, id, value } => PseudoExpr::Let {
-                    name,
-                    id,
-                    value,
-                    body: PBox::new(forced),
-                },
-                ForceWrapper::Trace { message } => PseudoExpr::Trace {
-                    message,
-                    value: PBox::new(forced),
-                },
-            };
-        }
-        forced
+        let forced = self.simplify_force(current);
+        forced.map(self, move |mut forced| {
+            while let Some(wrapper) = wrappers.pop() {
+                forced = match wrapper {
+                    ForceWrapper::Let { name, id, value } => PseudoExpr::Let {
+                        name,
+                        id,
+                        value,
+                        body: PBox::new(forced),
+                    },
+                    ForceWrapper::Trace { message } => PseudoExpr::Trace {
+                        message,
+                        value: PBox::new(forced),
+                    },
+                };
+            }
+            forced
+        })
     }
 }

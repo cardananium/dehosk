@@ -1,5 +1,6 @@
 use super::Simplifier;
 use crate::decompile::list_traversal::list_tail_argument;
+use crate::decompile::simplify::step::Step;
 use crate::pseudo::OptionVarIdGet;
 use crate::pseudo::ast::{Binder, PseudoExpr, WhenClause, WhenPattern};
 use crate::pseudo::var_id::VarId;
@@ -10,7 +11,7 @@ impl Simplifier {
         cond: &PseudoExpr,
         then_branch: &PseudoExpr,
         else_branch: &PseudoExpr,
-    ) -> Option<PseudoExpr> {
+    ) -> Option<Step> {
         // Reconstruct list matches before boolean collapse:
         // if xs { body(xs[0], xs[1..]) } else { empty_case }
         //   > when xs is { [] -> empty_case; [xs_h, ..xs_t] -> body(xs_h, xs_t) }

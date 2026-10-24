@@ -4,6 +4,7 @@ mod single_field_collapse;
 
 use super::Simplifier;
 use crate::decompile::helper::hoist::var_is_referenced_id_aware;
+use crate::decompile::simplify::step::Step;
 use crate::pseudo::OptionVarIdGet;
 use crate::pseudo::ast::{PseudoExpr, PseudoType, WhenClause, WhenPattern};
 use crate::pseudo::constructor::ConstructorShape;
@@ -15,7 +16,7 @@ impl Simplifier {
         cond: &PseudoExpr,
         then_branch: &PseudoExpr,
         else_branch: &PseudoExpr,
-    ) -> Option<PseudoExpr> {
+    ) -> Option<Step> {
         // Convert `if var { A } else { B }` to
         // `when var is { Constr<1> -> A; _ -> B }` when the condition is a
         // Data-like constructor test rather than a real Bool.

@@ -409,11 +409,10 @@ pub(crate) struct Simplifier {
     /// (e.g. `introduce_field_index_aliases`) insert here; the
     /// state copy syncs back out at end of `simplify_with_state`.
     pub(crate) var_kinds: VarKindTracking,
-    /// Per-Let stack for Walker-driven Let traversal (`pre_let` →
-    /// `enter_let` → `post_let`), parallel to the CPS task queue's
-    /// `LetAfterValue` / `LetAfterBody` / `LetBailout` frames; empty
-    /// when not mid-Let on the Walker path.
-    pub(super) let_walker_states: Vec<super::let_binding::LetWalkerPhase>,
+    /// Continuations of the simplifications suspended in the fold machine,
+    /// innermost last: a [`super::step::Step::Fold`] parks its continuation
+    /// here while the machine simplifies what it asked for.
+    pub(super) awaiting: Vec<super::step::Then<PseudoExpr>>,
 }
 
 impl Simplifier {
@@ -436,7 +435,7 @@ impl Simplifier {
             identity: IdentityTracking::default(),
             helpers: HelperPreservationTracking::default(),
             var_kinds: VarKindTracking::default(),
-            let_walker_states: Vec::new(),
+            awaiting: Vec::new(),
         }
     }
 

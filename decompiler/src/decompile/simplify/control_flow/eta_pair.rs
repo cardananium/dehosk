@@ -1,5 +1,6 @@
 use super::Simplifier;
 use crate::decompile::pair_patterns::pair_pattern_binders_with_ids;
+use crate::decompile::simplify::step::Step;
 use crate::pseudo::ast::PBox;
 use crate::pseudo::ast::{Binder, PseudoExpr, WhenClause};
 
@@ -9,7 +10,7 @@ impl Simplifier {
         subject: &PseudoExpr,
         subject_name: &Option<Binder>,
         clauses: &[WhenClause],
-    ) -> Option<PseudoExpr> {
+    ) -> Option<Step> {
         // Collapse one-clause eta-expanded Scott pair wrappers:
         // when fn(sel, x) { sel(a, x) } is { Pair(left, right) -> body }
         // -> body[left := a], wrapped in fn(right) { ... } when the
@@ -44,6 +45,6 @@ impl Simplifier {
             body = self.bind_binder_in_body(name, subject.clone(), body);
         }
 
-        Some(self.simplify(body))
+        Some(Step::refold(body))
     }
 }

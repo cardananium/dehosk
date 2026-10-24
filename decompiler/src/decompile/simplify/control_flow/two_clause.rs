@@ -1,4 +1,5 @@
 use super::{Simplifier, summary::TwoClauseWildcardSummary};
+use crate::decompile::simplify::step::Step;
 use crate::pseudo::ast::PBox;
 use crate::pseudo::ast::{Binder, PseudoExpr, UnaryOp, WhenClause, WhenPattern};
 
@@ -8,7 +9,7 @@ impl Simplifier {
         subject: &PseudoExpr,
         subject_name: &Option<Binder>,
         clauses: &[WhenClause],
-    ) -> Option<PseudoExpr> {
+    ) -> Option<Step> {
         // Pattern: when x is { [] -> Void _ -> fail } -> expect!(List.is_empty(x))
         let two_clause_summary = TwoClauseWildcardSummary::from_clauses(clauses)?;
 
@@ -29,14 +30,14 @@ impl Simplifier {
                 function: PBox::new(self.make_var("List.is_empty")),
                 args: vec![subject.clone()].into(),
             };
-            return Some(if empty_val {
+            return Some(Step::Done(if empty_val {
                 empty_check
             } else {
                 PseudoExpr::UnOp {
                     op: UnaryOp::Not,
                     operand: PBox::new(empty_check),
                 }
-            });
+            }));
         }
 
         // Check for [] -> Void/Unit, _ -> fail pattern.
@@ -46,14 +47,14 @@ impl Simplifier {
             && two_clause_summary.second_is_fail_nomsg;
 
         if is_empty_check {
-            return Some(PseudoExpr::Apply {
+            return Some(Step::Done(PseudoExpr::Apply {
                 function: PBox::new(PseudoExpr::expect_helper()),
                 args: vec![PseudoExpr::Apply {
                     function: PBox::new(self.make_var("List.is_empty")),
                     args: vec![subject.clone()].into(),
                 }]
                 .into(),
-            });
+            }));
         }
 
         // Check for [] -> fail, _ -> value pattern (expect list is NOT empty).
@@ -62,7 +63,7 @@ impl Simplifier {
             && two_clause_summary.second_is_wildcard;
 
         if is_not_empty_check {
-            return Some(PseudoExpr::Apply {
+            return Some(Step::Done(PseudoExpr::Apply {
                 function: PBox::new(PseudoExpr::expect_helper()),
                 args: vec![
                     PseudoExpr::UnOp {
@@ -75,7 +76,7 @@ impl Simplifier {
                     two_clause_summary.second.body.clone(),
                 ]
                 .into(),
-            });
+            }));
         }
 
         let is_guard_expect_pattern =
@@ -87,7 +88,7 @@ impl Simplifier {
             && two_clause_summary.first_is_voidish
             && two_clause_summary.second_is_fail_nomsg
         {
-            return Some(Self::expect_void(self.simplify_when(
+            let when = self.simplify_when(
                 subject.clone(),
                 subject_name.clone(),
                 vec![
@@ -97,7 +98,8 @@ impl Simplifier {
                     ),
                     WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Bool(false)),
                 ],
-            )));
+            );
+            return Some(when.map(self, Self::expect_void));
         }
 
         // Mirrored generic pattern check:
@@ -106,7 +108,7 @@ impl Simplifier {
             && two_clause_summary.first_is_fail_nomsg
             && two_clause_summary.second_is_voidish
         {
-            return Some(Self::expect_void(self.simplify_when(
+            let when = self.simplify_when(
                 subject.clone(),
                 subject_name.clone(),
                 vec![
@@ -116,7 +118,8 @@ impl Simplifier {
                     ),
                     WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Bool(true)),
                 ],
-            )));
+            );
+            return Some(when.map(self, Self::expect_void));
         }
 
         None

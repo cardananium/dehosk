@@ -40,13 +40,13 @@ fn walker_adapter_matches_simplify_on_leaves() {
 }
 
 #[test]
-fn walker_adapter_leaf_pre_expr_returns_walk() {
+fn walker_adapter_leaf_enter_owned_returns_walk() {
     // Leaves must route through the Walker's native `post_*` hooks, not
-    // a `Replace(simplify(…))` round-trip. Both paths are identity on
-    // leaves, so behavioural parity cannot distinguish routing; this
-    // pins `pre_expr`'s decision directly.
+    // through a `simplify_*` helper. Both paths are identity on leaves,
+    // so behavioural parity cannot distinguish routing; this pins
+    // `enter_owned`'s decision directly.
     use crate::pseudo::ast::PseudoData;
-    use crate::pseudo::walker::{FoldAction, Walker};
+    use crate::pseudo::walker::{Entered, Walker};
 
     let mut simplifier = Simplifier::with_safe_mode(false);
 
@@ -65,10 +65,10 @@ fn walker_adapter_leaf_pre_expr_returns_walk() {
     ];
 
     for leaf in leaves {
-        match simplifier.pre_expr(&leaf) {
-            FoldAction::Walk => {}
-            FoldAction::Replace(_) => panic!(
-                "leaf {:?} must return FoldAction::Walk from Simplifier::pre_expr",
+        match simplifier.enter_owned(leaf.clone()) {
+            Entered::Walk(_) => {}
+            Entered::Done(_) | Entered::Await(_) => panic!(
+                "leaf {:?} must return Entered::Walk from Simplifier::enter_owned",
                 leaf
             ),
         }
@@ -115,11 +115,10 @@ fn walker_adapter_matches_simplify_on_let_apply() {
 
 #[test]
 fn walker_adapter_post_hooks_walk_structural_variants() {
-    // These structural variants must return `FoldAction::Walk` from
-    // `pre_expr`, so the Walker recurses into children and fires the
-    // overridden `post_*` hooks instead of short-circuiting via
-    // `Replace(simplify(…))`.
-    use crate::pseudo::walker::{FoldAction, Walker};
+    // These structural variants must return `Entered::Walk` from
+    // `enter_owned`, so the Walker recurses into children and fires the
+    // overridden `post_*` hooks.
+    use crate::pseudo::walker::{Entered, Walker};
 
     let mut simplifier = Simplifier::with_safe_mode(false);
 
@@ -144,6 +143,23 @@ fn walker_adapter_post_hooks_walk_structural_variants() {
             message: PBox::new(PseudoExpr::String("msg".to_string())),
             value: PBox::new(PseudoExpr::int(7)),
         },
+    ];
+
+    for expr in structural {
+        match simplifier.enter_owned(expr.clone()) {
+            Entered::Walk(_) => {}
+            Entered::Done(_) | Entered::Await(_) => panic!(
+                "structural variant {:?} must return Entered::Walk from Simplifier::enter_owned",
+                expr
+            ),
+        }
+    }
+
+    // `FieldAccess` and `IndexAccess` may re-simplify what they rebuild,
+    // `Let` processes its binding around the value and the body, and
+    // `Apply` runs the `simplify_apply_match` loop: each has the machine
+    // fold its children and finishes in a continuation.
+    let awaiting = vec![
         PseudoExpr::field_access(
             PseudoExpr::Pair(PBox::new(PseudoExpr::int(1)), PBox::new(PseudoExpr::int(2))),
             "fst".to_string(),
@@ -155,44 +171,17 @@ fn walker_adapter_post_hooks_walk_structural_variants() {
             }),
             index: 0,
         },
+        PseudoExpr::let_bind("x", PseudoExpr::int(1), PseudoExpr::var("x")),
+        PseudoExpr::apply(PseudoExpr::var("f"), vec![PseudoExpr::int(1)]),
     ];
 
-    for expr in structural {
-        match simplifier.pre_expr(&expr) {
-            FoldAction::Walk => {}
-            FoldAction::Replace(_) => panic!(
-                "structural variant {:?} must return FoldAction::Walk from Simplifier::pre_expr",
+    for expr in awaiting {
+        match simplifier.enter_owned(expr.clone()) {
+            Entered::Await(_) => {}
+            Entered::Walk(_) | Entered::Done(_) => panic!(
+                "{:?} must return Entered::Await from Simplifier::enter_owned",
                 expr
             ),
-        }
-    }
-
-    // `Let` also returns `FoldAction::Walk`, routing through
-    // `pre_let` / `enter_let` / `post_let`;
-    // `walker_adapter_let_routes_via_pre_enter_post_let_hooks` pins the
-    // full three-hook flow.
-    match simplifier.pre_expr(&PseudoExpr::let_bind(
-        "x",
-        PseudoExpr::int(1),
-        PseudoExpr::var("x"),
-    )) {
-        FoldAction::Walk => {}
-        FoldAction::Replace(_) => {
-            panic!("Let must return FoldAction::Walk (pre_let owns the phase handoff)")
-        }
-    }
-
-    // `Apply` also returns `FoldAction::Walk`: the Walker folds
-    // `function` and args, then `post_apply` runs the
-    // `simplify_apply_match` loop;
-    // `walker_adapter_apply_routes_via_post_apply_hook` pins it.
-    match simplifier.pre_expr(&PseudoExpr::apply(
-        PseudoExpr::var("f"),
-        vec![PseudoExpr::int(1)],
-    )) {
-        FoldAction::Walk => {}
-        FoldAction::Replace(_) => {
-            panic!("Apply must return FoldAction::Walk (post_apply runs the CPS loop)")
         }
     }
 }
@@ -271,16 +260,15 @@ fn walker_adapter_matches_simplify_on_structural_variants() {
 }
 
 #[test]
-fn walker_adapter_helper_variants_route_via_pre_expr_replace() {
+fn walker_adapter_helper_variants_route_via_simplify_helpers() {
     // `Var` / `Force` / `Lambda` / `If` / `When` / `UnOp` /
-    // `BuiltinCall` / `RecFn` must return `FoldAction::Replace(_)`:
-    // their `simplify_*` helpers already recurse via
-    // `self.simplify(...)` on children, so Walker recursion would
-    // duplicate it.
+    // `BuiltinCall` / `RecFn` must not be walked: their `simplify_*`
+    // helpers decide which children to simplify, and when, so they
+    // answer `Entered::Done` or `Entered::Await` from `enter_owned`.
     // `walker_adapter_post_hooks_walk_structural_variants` asserts
     // the opposite decision for the structural variants.
     use crate::pseudo::ast::{Binder, WhenClause, WhenPattern};
-    use crate::pseudo::walker::{FoldAction, Walker};
+    use crate::pseudo::walker::{Entered, Walker};
 
     let mut simplifier = Simplifier::with_safe_mode(false);
 
@@ -321,10 +309,10 @@ fn walker_adapter_helper_variants_route_via_pre_expr_replace() {
     ];
 
     for expr in helper_variants {
-        match simplifier.pre_expr(&expr) {
-            FoldAction::Replace(_) => {}
-            FoldAction::Walk => panic!(
-                "helper-delegated variant {:?} must return FoldAction::Replace from Simplifier::pre_expr",
+        match simplifier.enter_owned(expr.clone()) {
+            Entered::Done(_) | Entered::Await(_) => {}
+            Entered::Walk(_) => panic!(
+                "helper-delegated variant {:?} must not return Entered::Walk from Simplifier::enter_owned",
                 expr
             ),
         }
@@ -333,7 +321,7 @@ fn walker_adapter_helper_variants_route_via_pre_expr_replace() {
 
 #[test]
 fn walker_adapter_matches_simplify_on_helper_variants() {
-    // Behavioural parity: the Walker's `pre_expr` Replace path and
+    // Behavioural parity: the Walker's `enter_owned` helper path and
     // `simplify()` must agree on every helper-delegated variant.
     use crate::pseudo::ast::{Binder, WhenClause, WhenPattern};
     use crate::pseudo::walker::Walker;
@@ -400,17 +388,17 @@ fn walker_adapter_matches_simplify_on_helper_variants() {
         let via_walker = Simplifier::with_safe_mode(false).fold(expr.clone());
         assert_eq!(
             via_walker, via_simplify,
-            "Walker pre_expr helper-variant routing must match simplify() for {:?}",
+            "Walker enter_owned helper-variant routing must match simplify() for {:?}",
             expr
         );
     }
 }
 
 #[test]
-fn walker_adapter_let_routes_via_pre_enter_post_let_hooks() {
-    // `Let` must flow through the `pre_let` / `enter_let` /
-    // `post_let` hooks, not through a `pre_expr` Replace; a simple
-    // Let folding to the `simplify()` result exercises all three.
+fn walker_adapter_let_routes_via_simplify_let_expr() {
+    // `Let` flows through `simplify_let_expr`: pre-processing, the
+    // value, the binding, the body, then post-processing; a simple
+    // Let folding to the `simplify()` result exercises all of it.
     use crate::pseudo::walker::Walker;
 
     // Trivial Let → body substitution path: after simplification,
@@ -420,16 +408,16 @@ fn walker_adapter_let_routes_via_pre_enter_post_let_hooks() {
     let via_simplify = simplify(expr);
     assert_eq!(
         via_walker, via_simplify,
-        "Walker pre_let/enter_let/post_let must match simplify() for trivial Let"
+        "Walker Let routing must match simplify() for trivial Let"
     );
 }
 
 #[test]
 fn walker_adapter_matches_simplify_on_let_variants() {
-    // Behavioural parity: the `pre_let` / `enter_let` / `post_let`
-    // flow must agree with `simplify()` across representative Let
-    // shapes — inlinable bindings, let-in-value, let-in-body, and
-    // nested Lets, which exercise state-stack push/pop discipline.
+    // Behavioural parity: the `simplify_let_expr` flow must agree with
+    // `simplify()` across representative Let shapes — inlinable
+    // bindings, let-in-value, let-in-body, and nested Lets, which
+    // exercise the continuation stack's push/pop discipline.
     use crate::pseudo::walker::Walker;
 
     let inputs = vec![
@@ -457,8 +445,8 @@ fn walker_adapter_matches_simplify_on_let_variants() {
                 right: PBox::new(PseudoExpr::var("z")),
             },
         ),
-        // Nested Lets — exercises state-stack push/pop invariants in
-        // pre_let/enter_let/post_let.
+        // Nested Lets — exercises the continuation stack's push/pop
+        // invariants.
         PseudoExpr::let_bind(
             "a",
             PseudoExpr::int(1),
@@ -479,7 +467,7 @@ fn walker_adapter_matches_simplify_on_let_variants() {
         let via_walker = Simplifier::with_safe_mode(false).fold(expr.clone());
         assert_eq!(
             via_walker, via_simplify,
-            "Walker Let routing (pre_let/enter_let/post_let) must match simplify() for {:?}",
+            "Walker Let routing must match simplify() for {:?}",
             expr
         );
     }

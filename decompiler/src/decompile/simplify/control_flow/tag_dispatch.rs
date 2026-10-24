@@ -1,4 +1,5 @@
 use super::Simplifier;
+use crate::decompile::simplify::step::Step;
 use crate::pseudo::ast::{PseudoExpr, WhenClause, WhenPattern};
 use crate::pseudo::constructor::ConstructorShape;
 
@@ -8,7 +9,7 @@ impl Simplifier {
         eq_tag_comparison: &Option<(PseudoExpr, usize)>,
         then_branch: &PseudoExpr,
         else_branch: &PseudoExpr,
-    ) -> Option<PseudoExpr> {
+    ) -> Option<Step> {
         // Before converting to ||/&&, check if condition is a tag comparison.
         // `if purpose.tag == N { True } else { fail }` should become
         // `when purpose is { Constr<N> -> True; _ -> fail }` -> `expect Purpose = ...`
@@ -43,7 +44,7 @@ impl Simplifier {
         eq_tag_comparison: &Option<(PseudoExpr, usize)>,
         then_branch: &PseudoExpr,
         else_branch: &PseudoExpr,
-    ) -> Option<PseudoExpr> {
+    ) -> Option<Step> {
         // Convert `if x.tag == N` or `if m == N` (where m = x.tag) to
         // constructor when. This must run before boolean collapse rules so
         // `if z.tag == 0 { expr } else { False }` becomes

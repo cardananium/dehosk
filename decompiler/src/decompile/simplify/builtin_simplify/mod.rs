@@ -1,6 +1,7 @@
 //! Builtin function and unary operation simplification methods for Simplifier.
 
 use super::Simplifier;
+use super::step::Step;
 use crate::builtins::BuiltinId;
 use crate::decompile::constructor_data::{
     ConstrPairProjection, rewrite_constr_unpack_pair_projection,
@@ -30,9 +31,14 @@ impl Simplifier {
         }
     }
 
-    pub(super) fn simplify_unop(&mut self, op: UnaryOp, operand: PseudoExpr) -> PseudoExpr {
-        let inner = self.simplify(operand);
+    pub(super) fn simplify_unop(&mut self, op: UnaryOp, operand: PseudoExpr) -> Step {
+        Step::fold(operand, move |simplifier, inner| {
+            Step::Done(simplifier.simplify_unop_operand(op, inner))
+        })
+    }
 
+    /// The rest of [`Self::simplify_unop`], over the simplified operand.
+    fn simplify_unop_operand(&self, op: UnaryOp, inner: PseudoExpr) -> PseudoExpr {
         // For Not, try to simplify
         if op != UnaryOp::Not {
             return PseudoExpr::UnOp {
@@ -100,12 +106,18 @@ impl Simplifier {
         &mut self,
         name: crate::builtins::BuiltinId,
         args: Vec<PseudoExpr>,
-    ) -> PseudoExpr {
-        let mut simplified_args = Vec::with_capacity(args.len());
-        for arg in args {
-            simplified_args.push(self.simplify(arg));
-        }
+    ) -> Step {
+        Step::fold_all(args, move |simplifier, simplified_args| {
+            simplifier.simplify_builtin_call_args(name, simplified_args)
+        })
+    }
 
+    /// The rest of [`Self::simplify_builtin_call`], over the simplified args.
+    fn simplify_builtin_call_args(
+        &mut self,
+        name: crate::builtins::BuiltinId,
+        mut simplified_args: Vec<PseudoExpr>,
+    ) -> Step {
         if !self.safe_mode {
             if simplified_args
                 .iter()
@@ -122,7 +134,7 @@ impl Simplifier {
                 && let Some(hoisted_literals) =
                     self.hoist_large_data_literals_from_builtin_args(name, &mut simplified_args)
             {
-                return hoisted_literals;
+                return Step::Done(hoisted_literals);
             }
         }
 
@@ -134,7 +146,7 @@ impl Simplifier {
             && simplified_args.len() == 1
             && matches!(&simplified_args[0], PseudoExpr::Unit)
         {
-            return PseudoExpr::list(vec![]);
+            return Step::Done(PseudoExpr::list(vec![]));
         }
 
         // Data pack/unpack round-trip elimination: pack(unpack(x)) → x and
@@ -184,7 +196,7 @@ impl Simplifier {
                     else {
                         unreachable!("round-trip BuiltinCall shape checked above");
                     };
-                    return args.pop().expect("round-trip inner arg should exist");
+                    return Step::Done(args.pop().expect("round-trip inner arg should exist"));
                 }
                 // Check Apply form: outer(Apply(BuiltinCall(inner, []), [x]))
                 if matches!(
@@ -207,7 +219,7 @@ impl Simplifier {
                     else {
                         unreachable!("round-trip Apply shape checked above");
                     };
-                    return args.pop().expect("round-trip apply arg should exist");
+                    return Step::Done(args.pop().expect("round-trip apply arg should exist"));
                 }
             }
         }
@@ -221,16 +233,16 @@ impl Simplifier {
             let mut args = simplified_args;
             let fields_expr = args.pop().unwrap();
             let tag_expr = args.pop().unwrap();
-            return Self::normalize_constructor_data_expr(tag_expr, fields_expr);
+            return Step::Done(Self::normalize_constructor_data_expr(tag_expr, fields_expr));
         }
 
         // List.head(List.tail^N(x)) → x[N]; a bare List.head(x) becomes x[0].
         if (name == BuiltinId::ListHead) && simplified_args.len() == 1 {
             let (collection, depth) = list_subject_and_tail_depth(&simplified_args[0]);
-            return PseudoExpr::IndexAccess {
+            return Step::Done(PseudoExpr::IndexAccess {
                 collection: PBox::new(collection),
                 index: depth,
-            };
+            });
         }
 
         // List.prepend(elem, list) → [elem, ..list_elements] when second arg is a List literal
@@ -247,10 +259,10 @@ impl Simplifier {
             let mut new_elements = Vec::with_capacity(elements.len() + 1);
             new_elements.push(elem);
             new_elements.append(&mut elements);
-            return PseudoExpr::List {
+            return Step::Done(PseudoExpr::List {
                 elements: new_elements.into(),
                 tail,
-            };
+            });
         }
 
         // 3-arg if in BuiltinCall form: if(cond, then, else) → simplify_if.
@@ -283,11 +295,11 @@ impl Simplifier {
                         && self.is_false(else_br)
                         && !Self::is_fail(then_br)
                     {
-                        return PseudoExpr::BinOp {
+                        return Step::Done(PseudoExpr::BinOp {
                             op: BinaryOp::And,
                             left: PBox::new(cond.clone()),
                             right: PBox::new(then_br.clone()),
-                        };
+                        });
                     }
 
                     // Check for || pattern
@@ -295,11 +307,11 @@ impl Simplifier {
                         && Self::can_short_circuit_with_boolean(else_br)
                         && self.is_true(then_br)
                     {
-                        return PseudoExpr::BinOp {
+                        return Step::Done(PseudoExpr::BinOp {
                             op: BinaryOp::Or,
                             left: PBox::new(cond.clone()),
                             right: PBox::new(else_br.clone()),
-                        };
+                        });
                     }
 
                     // expect! pattern; fail messages carry into the 3-arg form.
@@ -314,10 +326,10 @@ impl Simplifier {
                         if let Some(msg) = Self::fail_message(else_br) {
                             args.push(PseudoExpr::String(msg.to_string()));
                         }
-                        return PseudoExpr::Apply {
+                        return Step::Done(PseudoExpr::Apply {
                             function: PBox::new(PseudoExpr::expect_helper()),
                             args: args.into(),
-                        };
+                        });
                     }
 
                     // Inverted expect!, with the same guard and fail-message
@@ -337,10 +349,10 @@ impl Simplifier {
                         if let Some(msg) = msg {
                             args.push(PseudoExpr::String(msg));
                         }
-                        return PseudoExpr::Apply {
+                        return Step::Done(PseudoExpr::Apply {
                             function: PBox::new(PseudoExpr::expect_helper()),
                             args: args.into(),
-                        };
+                        });
                     }
 
                     // Regular if expression
@@ -353,9 +365,7 @@ impl Simplifier {
                 let then_fn = Self::unwrap_delay_owned(iter.next().unwrap());
                 let else_fn = Self::unwrap_delay_owned(iter.next().unwrap());
                 let trigger = iter.next().unwrap();
-                let then_applied = self.simplify_apply(then_fn, vec![trigger.clone()]);
-                let else_applied = self.simplify_apply(else_fn, vec![trigger]);
-                return self.simplify_if(cond, then_applied, else_applied);
+                return Self::if_over_triggered_branches(cond, then_fn, else_fn, trigger);
             }
         }
 
@@ -388,8 +398,10 @@ impl Simplifier {
             let cond = iter.next().unwrap();
             let then_branch = Self::unwrap_delay_owned(iter.next().unwrap());
             let else_branch = Self::unwrap_delay_owned(iter.next().unwrap());
-            let if_result = self.simplify_if(cond, then_branch, else_branch);
-            return self.simplify_apply(if_result, applied_args);
+            let if_step = self.simplify_if(cond, then_branch, else_branch);
+            return if_step.then(self, move |simplifier, if_result| {
+                simplifier.simplify_apply(if_result, applied_args)
+            });
         }
 
         // Check for constructor tag access: Pair.first(Constr.unpack(x)) -> x.tag
@@ -414,7 +426,7 @@ impl Simplifier {
                 tracked_subject,
                 ConstrPairProjection::Tag,
             ) {
-                return expr;
+                return Step::Done(expr);
             }
             // Pair.first(Pair.new(a, b)) -> a
             if let PseudoExpr::BuiltinCall {
@@ -424,18 +436,18 @@ impl Simplifier {
             {
                 if (inner_name == "Pair.new" || inner_name == "new_pair") && inner_args.len() == 2 {
                     let mut iter = inner_args.into_iter();
-                    return iter.next().unwrap();
+                    return Step::Done(iter.next().unwrap());
                 }
-                return PseudoExpr::field_access(
+                return Step::Done(PseudoExpr::field_access(
                     PseudoExpr::BuiltinCall {
                         name: inner_name,
                         args: inner_args,
                     },
                     "fst".to_string(),
-                );
+                ));
             }
             // General: Pair.first(x) -> x.fst
-            return PseudoExpr::field_access(arg, "fst".to_string());
+            return Step::Done(PseudoExpr::field_access(arg, "fst".to_string()));
         }
 
         // Check for constructor fields access: Pair.second(Constr.unpack(x)) -> x.fields
@@ -460,7 +472,7 @@ impl Simplifier {
                 tracked_subject,
                 ConstrPairProjection::Fields,
             ) {
-                return expr;
+                return Step::Done(expr);
             }
             // Pair.second(Pair.new(a, b)) -> b
             if let PseudoExpr::BuiltinCall {
@@ -471,18 +483,18 @@ impl Simplifier {
                 if (inner_name == "Pair.new" || inner_name == "new_pair") && inner_args.len() == 2 {
                     let mut iter = inner_args.into_iter();
                     let _first = iter.next().unwrap();
-                    return iter.next().unwrap();
+                    return Step::Done(iter.next().unwrap());
                 }
-                return PseudoExpr::field_access(
+                return Step::Done(PseudoExpr::field_access(
                     PseudoExpr::BuiltinCall {
                         name: inner_name,
                         args: inner_args,
                     },
                     "snd".to_string(),
-                );
+                ));
             }
             // General: Pair.second(x) -> x.snd
-            return PseudoExpr::field_access(arg, "snd".to_string());
+            return Step::Done(PseudoExpr::field_access(arg, "snd".to_string()));
         }
 
         // Convert 2-arg comparison builtins to BinOp: Int.eq(x, y) -> x == y
@@ -499,11 +511,11 @@ impl Simplifier {
                 let right = args.pop().unwrap();
                 let left = args.pop().unwrap();
                 let (left, right) = Self::canonicalize_commutative_binop(op, left, right);
-                return PseudoExpr::BinOp {
+                return Step::Done(PseudoExpr::BinOp {
                     op,
                     left: PBox::new(left),
                     right: PBox::new(right),
-                };
+                });
             }
         }
 
@@ -522,19 +534,19 @@ impl Simplifier {
                 let right = args.pop().unwrap();
                 let left = args.pop().unwrap();
                 let (left, right) = Self::canonicalize_commutative_binop(op, left, right);
-                return PseudoExpr::BinOp {
+                return Step::Done(PseudoExpr::BinOp {
                     op,
                     left: PBox::new(left),
                     right: PBox::new(right),
-                };
+                });
             }
         }
 
         // Replace certain builtin calls with nicer representations
-        PseudoExpr::BuiltinCall {
+        Step::Done(PseudoExpr::BuiltinCall {
             name: nice,
             args: simplified_args.into(),
-        }
+        })
     }
 
     /// Extract a tag comparison from an equality check: `x.tag == N`,
@@ -631,7 +643,7 @@ impl Simplifier {
         &mut self,
         name: crate::builtins::BuiltinId,
         args: &[PseudoExpr],
-    ) -> Option<PseudoExpr> {
+    ) -> Option<Step> {
         let mut let_indices = Vec::new();
         let mut let_binders = Vec::new();
         let mut let_ids = Vec::new();

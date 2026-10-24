@@ -8,7 +8,9 @@
 //! All hooks have identity default implementations, so `impl Walker for
 //! MyPass {}` reconstructs the tree unchanged.
 
-pub(crate) use super::fold::{ExprFolder as Walker, ExprVisitor as WalkVisitor, FoldAction};
+pub(crate) use super::fold::{
+    Entered, ExprFolder as Walker, ExprVisitor as WalkVisitor, FoldAction,
+};
 
 #[cfg(test)]
 mod tests;

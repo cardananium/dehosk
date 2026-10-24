@@ -1,4 +1,5 @@
 use super::Simplifier;
+use crate::decompile::simplify::step::Step;
 use crate::pseudo::ast::PBox;
 use crate::pseudo::ast::{PseudoExpr, WhenClause};
 use crate::pseudo::var_id::OptionVarIdGet;
@@ -12,7 +13,7 @@ impl Simplifier {
         &mut self,
         func: PseudoExpr,
         args: Vec<PseudoExpr>,
-    ) -> PseudoExpr {
+    ) -> Step {
         match func {
             PseudoExpr::When {
                 subject,
@@ -76,21 +77,16 @@ impl Simplifier {
                 };
                 self.simplify_if(condition.into_inner(), then_applied, else_applied)
             }
-            _ => PseudoExpr::Apply {
+            _ => Step::Done(PseudoExpr::Apply {
                 function: PBox::new(func),
                 args: args.into(),
-            },
+            }),
         }
     }
 
-    /// Hoist let bindings from apply args to outer scope.
-    ///
-    /// `f(let x = v in body)` → `let x = v in f(body)`
-    pub(super) fn hoist_let_from_apply_args(
-        &mut self,
-        func: PseudoExpr,
-        args: Vec<PseudoExpr>,
-    ) -> Option<PseudoExpr> {
+    /// The arg [`Self::hoist_let_from_apply_args`] would hoist a let
+    /// binding out of, if any.
+    pub(super) fn hoistable_let_arg(func: &PseudoExpr, args: &[PseudoExpr]) -> Option<usize> {
         fn contains_nested_function(expr: &PseudoExpr) -> bool {
             let mut pending: Vec<&PseudoExpr> = vec![expr];
             while let Some(cur) = pending.pop() {
@@ -178,7 +174,7 @@ impl Simplifier {
             false
         }
 
-        let i = args.iter().enumerate().find_map(|(i, arg)| {
+        args.iter().enumerate().find_map(|(i, arg)| {
             if let PseudoExpr::Let {
                 name, value, body, ..
             } = arg
@@ -214,8 +210,19 @@ impl Simplifier {
                 return Some(i);
             }
             None
-        })?;
+        })
+    }
 
+    /// Hoist the let binding in arg `i` — as found by
+    /// [`Self::hoistable_let_arg`] — to the outer scope.
+    ///
+    /// `f(let x = v in body)` → `let x = v in f(body)`
+    pub(super) fn hoist_let_from_apply_args(
+        &mut self,
+        func: PseudoExpr,
+        args: Vec<PseudoExpr>,
+        i: usize,
+    ) -> Step {
         let mut new_args = args;
         let selected_arg = std::mem::replace(&mut new_args[i], PseudoExpr::Unit);
         let PseudoExpr::Let {
@@ -232,13 +239,21 @@ impl Simplifier {
             function: PBox::new(func),
             args: new_args.into(),
         };
-        Some(match id.get() {
+        match id.get() {
             Some(let_id) => self.simplify_let(name, let_id, value.into_inner(), inner),
             None => self.simplify_compat_let(name, value.into_inner(), inner),
-        })
+        }
     }
 
-    /// Hoist large data literals from apply args into let bindings.
+    /// The first arg large enough for
+    /// [`Self::hoist_large_data_literals_from_apply_args`] to hoist.
+    pub(super) fn large_data_literal_arg(args: &[PseudoExpr]) -> Option<usize> {
+        args.iter()
+            .position(|arg| Self::static_data_expr_node_count(arg).is_some_and(|count| count > 8))
+    }
+
+    /// Hoist the large data literal in arg `i` — as found by
+    /// [`Self::large_data_literal_arg`] — into a let binding.
     ///
     /// `f(#"aabbcc...very long...")` → `let data_literal = #"aabbcc..."; f(data_literal)`
     ///
@@ -248,10 +263,8 @@ impl Simplifier {
         &mut self,
         func: PseudoExpr,
         args: Vec<PseudoExpr>,
-    ) -> Option<PseudoExpr> {
-        let i = args.iter().position(|arg| {
-            Self::static_data_expr_node_count(arg).is_some_and(|count| count > 8)
-        })?;
+        i: usize,
+    ) -> PseudoExpr {
         let lit_name = format!("data_literal_{}", i);
         let binder = self.fresh_synthetic_binder(&lit_name);
         self.var_kinds.kind_annotations.insert(
@@ -264,6 +277,6 @@ impl Simplifier {
             function: PBox::new(func),
             args: new_args.into(),
         };
-        Some(self.make_let_for_binder(binder, lifted, inner))
+        self.make_let_for_binder(binder, lifted, inner)
     }
 }

@@ -48,7 +48,7 @@ fn fields_bound_by_alias_scan(round: u32) -> usize {
         }),
     };
 
-    let clauses = simplifier.destructure_when_fields(
+    let clauses = simplifier.destructure_when_fields_settled(
         &subject,
         &subject_name,
         vec![WhenClause::new(

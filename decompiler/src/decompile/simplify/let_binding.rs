@@ -15,21 +15,23 @@ mod when_return;
 
 use super::Simplifier;
 use super::postprocess::context_field_type_from_display_name;
+use super::step::Step;
+use crate::pseudo::OptionVarIdGet;
 use crate::pseudo::ast::PseudoExpr;
 use crate::pseudo::var_id::VarId;
-pub(super) use state::{LetAfterBodyState, LetAfterValueState, LetPostResult, LetWalkerPhase};
+pub(super) use state::{LetAfterBodyState, LetAfterValueState, LetPostResult};
 
 impl Simplifier {
-    /// Builds a Let with a concrete binding id and runs the `Walker`
-    /// hooks: `pre_let` + `enter_let` + `post_let`.
+    /// Builds a Let with a concrete binding id and simplifies it as a Let
+    /// node — see [`Self::simplify_let_expr`].
     pub(super) fn simplify_let(
         &mut self,
         name: String,
         var_id: VarId,
         value: PseudoExpr,
         body: PseudoExpr,
-    ) -> PseudoExpr {
-        self.simplify(PseudoExpr::Let {
+    ) -> Step {
+        Step::refold(PseudoExpr::Let {
             name,
             id: Some(var_id),
             value: PBox::new(value),
@@ -43,8 +45,8 @@ impl Simplifier {
         name: String,
         value: PseudoExpr,
         body: PseudoExpr,
-    ) -> PseudoExpr {
-        self.simplify(PseudoExpr::Let {
+    ) -> Step {
+        Step::refold(PseudoExpr::Let {
             name,
             id: None,
             value: PBox::new(value),
@@ -52,11 +54,60 @@ impl Simplifier {
         })
     }
 
+    /// Simplify a `Let` node: pre-process against the raw value and body,
+    /// simplify the value, open the binding, simplify the body, then
+    /// post-process — re-simplifying the result when post-processing asks
+    /// for it.
+    ///
+    /// `let_depth` counts the Lets being processed; past 50 the pattern
+    /// passes are skipped and the node is only rebuilt from its simplified
+    /// children.
+    pub(super) fn simplify_let_expr(
+        &mut self,
+        name: String,
+        id: Option<VarId>,
+        value: PseudoExpr,
+        body: PseudoExpr,
+    ) -> Step {
+        self.let_depth += 1;
+        if self.let_depth > 50 {
+            return Step::fold(value, move |_, value| {
+                Step::fold(body, move |simplifier, body| {
+                    simplifier.let_depth = simplifier.let_depth.saturating_sub(1);
+                    Step::Done(PseudoExpr::Let {
+                        name,
+                        id,
+                        value: PBox::new(value),
+                        body: PBox::new(body),
+                    })
+                })
+            });
+        }
+        let state = self.simplify_let_pre_process(name, id.get(), &value, body);
+        Step::fold(value, move |simplifier, value| {
+            let (state, body) = simplifier.simplify_let_after_value(state, value);
+            Step::fold(body, move |simplifier, body| {
+                match simplifier.simplify_let_after_body(state, body) {
+                    LetPostResult::Done(expr) => {
+                        simplifier.let_depth = simplifier.let_depth.saturating_sub(1);
+                        Step::Done(expr)
+                    }
+                    // `let_depth` stays raised while the result is
+                    // re-simplified, so Lets nested in it still count.
+                    LetPostResult::Resimplify(expr) => Step::fold(expr, |simplifier, expr| {
+                        simplifier.let_depth = simplifier.let_depth.saturating_sub(1);
+                        Step::Done(expr)
+                    }),
+                }
+            })
+        })
+    }
+
     /// Analyses the raw (unsimplified) value and body, registers tracking
     /// facts on `self`, and returns the state later phases need.
     ///
-    /// Called from the CPS task loop on `Enter(Let{…})`; the loop pushes
-    /// `Enter(value)` next.
+    /// Called from [`Self::simplify_let_expr`] before the value is
+    /// simplified.
     pub(super) fn simplify_let_pre_process(
         &mut self,
         name: String,
@@ -300,7 +351,7 @@ impl Simplifier {
 
     /// Performs delay-depth tracking, alias detection, partial-app tracking,
     /// context propagation, and name renaming, then returns the state for
-    /// body processing with the still-unsimplified body for the task loop.
+    /// body processing with the still-unsimplified body.
     pub(super) fn simplify_let_after_value(
         &mut self,
         state: LetAfterValueState,

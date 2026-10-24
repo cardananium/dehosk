@@ -18,6 +18,7 @@ use std::collections::HashSet;
 
 use super::Simplifier;
 use super::postprocess::{SumTypeId, sum_type_constructor_fields};
+use super::step::Step;
 use crate::pseudo::ast::{BinaryOp, Binder, PseudoExpr, UnaryOp, WhenClause, WhenPattern};
 #[cfg(test)]
 use crate::pseudo::constructor::ConstructorShape;
@@ -80,10 +81,50 @@ impl Simplifier {
         condition: PseudoExpr,
         then_branch: PseudoExpr,
         else_branch: PseudoExpr,
+    ) -> Step {
+        Step::fold_all(
+            vec![condition, then_branch, else_branch],
+            |simplifier, mut parts| {
+                let else_br = parts.pop().expect("simplified else branch");
+                let then_br = parts.pop().expect("simplified then branch");
+                let cond = parts.pop().expect("simplified condition");
+                simplifier.simplify_if_parts(cond, then_br, else_br)
+            },
+        )
+    }
+
+    /// [`Self::simplify_if`] run to its result, for the suites.
+    #[cfg(test)]
+    pub(super) fn simplify_if_settled(
+        &mut self,
+        condition: PseudoExpr,
+        then_branch: PseudoExpr,
+        else_branch: PseudoExpr,
     ) -> PseudoExpr {
-        let cond = self.simplify(condition);
-        let mut then_br = self.simplify(then_branch);
-        let mut else_br = self.simplify(else_branch);
+        let step = self.simplify_if(condition, then_branch, else_branch);
+        self.finish(step)
+    }
+
+    /// [`Self::simplify_when`] run to its result, for the suites.
+    #[cfg(test)]
+    pub(super) fn simplify_when_settled(
+        &mut self,
+        subject: PseudoExpr,
+        subject_name: Option<Binder>,
+        clauses: Vec<WhenClause>,
+    ) -> PseudoExpr {
+        let step = self.simplify_when(subject, subject_name, clauses);
+        self.finish(step)
+    }
+
+    /// The rest of [`Self::simplify_if`], over the simplified condition and
+    /// branches.
+    fn simplify_if_parts(
+        &mut self,
+        cond: PseudoExpr,
+        mut then_br: PseudoExpr,
+        mut else_br: PseudoExpr,
+    ) -> Step {
         let mut cond_can_short_circuit = None;
         let mut then_can_short_circuit = None;
         let mut else_can_short_circuit = None;
@@ -105,16 +146,16 @@ impl Simplifier {
 
         // Constant condition folding: if True { A } else { B } -> A
         if self.is_true(&cond) {
-            return then_br;
+            return Step::Done(then_br);
         }
         // Constant condition folding: if False { A } else { B } -> B
         if self.is_false(&cond) {
-            return else_br;
+            return Step::Done(else_br);
         }
 
         // if cond { A } else { A } -> A, when cond is side-effect free
         if then_br == else_br && Self::is_side_effect_free_if_condition(&cond) {
-            return then_br;
+            return Step::Done(then_br);
         }
 
         // if cond { False } else { True } -> !cond (with simplification)
@@ -134,17 +175,17 @@ impl Simplifier {
                     _ => None,
                 };
                 if let Some(new_op) = inverted {
-                    return PseudoExpr::BinOp {
+                    return Step::Done(PseudoExpr::BinOp {
                         op: new_op,
                         left: left.clone(),
                         right: right.clone(),
-                    };
+                    });
                 }
             }
-            return PseudoExpr::UnOp {
+            return Step::Done(PseudoExpr::UnOp {
                 op: UnaryOp::Not,
                 operand: PBox::new(cond),
-            };
+            });
         }
 
         // if cond { True } else { False } -> cond
@@ -152,7 +193,7 @@ impl Simplifier {
             && self.is_false(&else_br)
             && Self::cached_can_short_circuit_with_boolean(&mut cond_can_short_circuit, &cond)
         {
-            return cond;
+            return Step::Done(cond);
         }
 
         // No Scott boolean collapse (`if cond { choose_fst } else { choose_snd }`
@@ -160,10 +201,10 @@ impl Simplifier {
         // `fn_3(x, y)(delay(a), delay(b))`, and a Bool is not callable. Proving
         // the result is only used as a Bool needs call-graph analysis.
 
-        if let Some(expr) =
+        if let Some(step) =
             self.try_simplify_expect_tag_comparison_if(&eq_tag_comparison, &then_br, &else_br)
         {
-            return expr;
+            return step;
         }
 
         // If-when merge: if (when subject is { P1 -> True; P2 -> False; ... }) { A } else { B }
@@ -221,14 +262,14 @@ impl Simplifier {
             }
         }
 
-        if let Some(expr) = self.try_reconstruct_list_subject_if(&cond, &then_br, &else_br) {
-            return expr;
+        if let Some(step) = self.try_reconstruct_list_subject_if(&cond, &then_br, &else_br) {
+            return step;
         }
 
-        if let Some(expr) =
+        if let Some(step) =
             self.try_simplify_tag_comparison_if(&eq_tag_comparison, &then_br, &else_br)
         {
-            return expr;
+            return step;
         }
 
         // Build the integer when-chain BEFORE boolean collapse, or
@@ -245,7 +286,7 @@ impl Simplifier {
             {
                 return self.simplify_when(subject.into_inner(), subject_name, clauses);
             }
-            return when_expr;
+            return Step::Done(when_expr);
         }
 
         // Merge nested ifs with a shared False fallback:
@@ -282,11 +323,11 @@ impl Simplifier {
             && Self::cached_can_short_circuit_with_boolean(&mut cond_can_short_circuit, &cond)
             && Self::cached_can_short_circuit_with_boolean(&mut else_can_short_circuit, &else_br)
         {
-            return PseudoExpr::BinOp {
+            return Step::Done(PseudoExpr::BinOp {
                 op: BinaryOp::Or,
                 left: PBox::new(Self::unwrap_delay(&cond)),
                 right: PBox::new(Self::unwrap_delay(&else_br)),
-            };
+            });
         }
 
         // if cond { False } else { expr } -> !cond && expr
@@ -299,11 +340,11 @@ impl Simplifier {
             && Self::cached_can_short_circuit_with_boolean(&mut else_can_short_circuit, &else_br)
         {
             let negated_cond = self.negate_condition(cond);
-            return PseudoExpr::BinOp {
+            return Step::Done(PseudoExpr::BinOp {
                 op: BinaryOp::And,
                 left: PBox::new(negated_cond),
                 right: PBox::new(Self::unwrap_delay(&else_br)),
-            };
+            });
         }
 
         // if cond { expr } else { True } -> !cond || expr
@@ -316,11 +357,11 @@ impl Simplifier {
             && Self::cached_can_short_circuit_with_boolean(&mut then_can_short_circuit, &then_br)
         {
             let negated_cond = self.negate_condition(cond);
-            return PseudoExpr::BinOp {
+            return Step::Done(PseudoExpr::BinOp {
                 op: BinaryOp::Or,
                 left: PBox::new(negated_cond),
                 right: PBox::new(Self::unwrap_delay(&then_br)),
-            };
+            });
         }
 
         // if cond { expr } else { False } -> cond && expr
@@ -328,15 +369,15 @@ impl Simplifier {
             && Self::cached_can_short_circuit_with_boolean(&mut cond_can_short_circuit, &cond)
             && Self::cached_can_short_circuit_with_boolean(&mut then_can_short_circuit, &then_br)
         {
-            return PseudoExpr::BinOp {
+            return Step::Done(PseudoExpr::BinOp {
                 op: BinaryOp::And,
                 left: PBox::new(Self::unwrap_delay(&cond)),
                 right: PBox::new(Self::unwrap_delay(&then_br)),
-            };
+            });
         }
 
         if let Some(expr) = Self::try_simplify_if_expect(&cond, &then_br, &else_br) {
-            return expr;
+            return Step::Done(expr);
         }
 
         // Readability: avoid inline `if (when ...)` and similar control-flow-heavy
@@ -350,7 +391,7 @@ impl Simplifier {
                 .unwrap_or_else(|| "condition_ok".to_string());
             let cond_name = self.fresh_name_for_scope(&mut used_names, base);
             let binder = self.fresh_synthetic_binder(&cond_name);
-            return self.make_let_for_binder(
+            return Step::Done(self.make_let_for_binder(
                 binder.clone(),
                 cond,
                 PseudoExpr::If {
@@ -358,18 +399,18 @@ impl Simplifier {
                     then_branch: PBox::new(then_br),
                     else_branch: PBox::new(else_br),
                 },
-            );
+            ));
         }
 
-        if let Some(expr) = self.try_simplify_data_like_condition_if(&cond, &then_br, &else_br) {
-            return expr;
+        if let Some(step) = self.try_simplify_data_like_condition_if(&cond, &then_br, &else_br) {
+            return step;
         }
 
-        PseudoExpr::If {
+        Step::Done(PseudoExpr::If {
             condition: PBox::new(cond),
             then_branch: PBox::new(then_br),
             else_branch: PBox::new(else_br),
-        }
+        })
     }
 
     pub(super) fn simplify_when(
@@ -377,9 +418,19 @@ impl Simplifier {
         subject: PseudoExpr,
         subject_name: Option<Binder>,
         clauses: Vec<WhenClause>,
-    ) -> PseudoExpr {
-        let simplified_subject = self.simplify(subject);
+    ) -> Step {
+        Step::fold(subject, move |simplifier, simplified_subject| {
+            simplifier.simplify_when_subject(simplified_subject, subject_name, clauses)
+        })
+    }
 
+    /// The rest of [`Self::simplify_when`], over the simplified subject.
+    fn simplify_when_subject(
+        &mut self,
+        simplified_subject: PseudoExpr,
+        subject_name: Option<Binder>,
+        clauses: Vec<WhenClause>,
+    ) -> Step {
         // Remove arity checks: `expect [] = expr` (single empty-list clause +
         // error fallback), compiler-generated assertions that a list/fields is
         // exhausted. Skip a subject containing an explicit Error — the rewrite
@@ -406,7 +457,7 @@ impl Simplifier {
                 && elements.is_empty()
                 && clause.guard.is_none()
             {
-                return self.simplify(clause.body.clone());
+                return Step::refold(clause.body.clone());
             }
         }
 
@@ -446,93 +497,137 @@ impl Simplifier {
             None
         };
 
-        let mut simplified_clauses = Vec::with_capacity(clauses.len());
-        let mut scott_clause_summary = ScottClauseSummary::default();
-        if let Some(ctx_name) = subject_sum_type.as_deref() {
-            for clause in clauses {
-                let override_entry = if let WhenPattern::Constructor { tag, .. } = &clause.pattern {
-                    if let Some(script_version) = self.script_version {
-                        if let Some(fields) = SumTypeId::from_display_name(ctx_name)
-                            .and_then(|id| sum_type_constructor_fields(id, *tag, script_version))
-                        {
-                            let override_data: Vec<(String, Option<String>)> = fields
-                                .iter()
-                                .map(|(n, t)| {
-                                    (
-                                        n.display_name().to_string(),
-                                        t.map(|ft| ft.display_name().to_string()),
-                                    )
-                                })
-                                .collect();
-                            // Register type info for constructor fields
-                            for (name, maybe_type) in &override_data {
-                                self.context
-                                    .context_field_names
-                                    .insert(name.clone(), name.clone());
-                                // Dual-write by VarId (use name_to_id bridge for constructor fields)
-                                if let Some(&vid) = self.naming.name_to_id.get(name) {
-                                    self.context
-                                        .context_field_names_by_id
-                                        .insert(vid, name.clone());
-                                }
-                                if let Some(type_name) = maybe_type {
-                                    self.context
-                                        .context_var_types
-                                        .insert(name.clone(), type_name.clone());
-                                    if let Some(&vid) = self.naming.name_to_id.get(name) {
-                                        self.context
-                                            .context_var_types_by_id
-                                            .insert(vid, type_name.clone());
-                                    }
-                                }
-                            }
-                            let prev = self
-                                .context
-                                .sum_type_field_overrides
-                                .insert(ctx_name.to_string(), override_data);
-                            Some((ctx_name.to_string(), prev))
-                        } else {
-                            None
+        let simplified_clauses = Vec::with_capacity(clauses.len());
+        self.simplify_when_clauses(WhenClauseLoop {
+            subject: simplified_subject,
+            subject_name,
+            subject_sum_type,
+            clauses: clauses.into_iter(),
+            simplified_clauses,
+            scott_clause_summary: ScottClauseSummary::default(),
+        })
+    }
+
+    /// Simplify the next clause's guard and body, then the clauses after
+    /// it; once none is left, go on to [`Self::simplify_when_clauses_done`].
+    ///
+    /// A sum-type context subject (`purpose`/`script_info`) enables
+    /// constructor-specific field overrides while each clause is
+    /// simplified.
+    fn simplify_when_clauses(&mut self, mut state: WhenClauseLoop) -> Step {
+        let Some(clause) = state.clauses.next() else {
+            return self.simplify_when_clauses_done(
+                state.subject,
+                state.subject_name,
+                state.simplified_clauses,
+                state.scott_clause_summary,
+            );
+        };
+        let override_entry = if let Some(ctx_name) = state.subject_sum_type.as_deref()
+            && let WhenPattern::Constructor { tag, .. } = &clause.pattern
+        {
+            if let Some(script_version) = self.script_version {
+                if let Some(fields) = SumTypeId::from_display_name(ctx_name)
+                    .and_then(|id| sum_type_constructor_fields(id, *tag, script_version))
+                {
+                    let override_data: Vec<(String, Option<String>)> = fields
+                        .iter()
+                        .map(|(n, t)| {
+                            (
+                                n.display_name().to_string(),
+                                t.map(|ft| ft.display_name().to_string()),
+                            )
+                        })
+                        .collect();
+                    // Register type info for constructor fields
+                    for (name, maybe_type) in &override_data {
+                        self.context
+                            .context_field_names
+                            .insert(name.clone(), name.clone());
+                        // Dual-write by VarId (use name_to_id bridge for constructor fields)
+                        if let Some(&vid) = self.naming.name_to_id.get(name) {
+                            self.context
+                                .context_field_names_by_id
+                                .insert(vid, name.clone());
                         }
-                    } else {
-                        None
+                        if let Some(type_name) = maybe_type {
+                            self.context
+                                .context_var_types
+                                .insert(name.clone(), type_name.clone());
+                            if let Some(&vid) = self.naming.name_to_id.get(name) {
+                                self.context
+                                    .context_var_types_by_id
+                                    .insert(vid, type_name.clone());
+                            }
+                        }
                     }
+                    let prev = self
+                        .context
+                        .sum_type_field_overrides
+                        .insert(ctx_name.to_string(), override_data);
+                    Some((ctx_name.to_string(), prev))
                 } else {
                     None
-                };
-
-                let result = WhenClause {
-                    pattern: clause.pattern,
-                    guard: clause.guard.map(|guard| self.simplify(guard)),
-                    body: self.simplify(clause.body),
-                };
-                scott_clause_summary.add_assign(ScottClauseSummary::observe(&result.body));
-
-                if let Some((ctx_name, prev)) = override_entry {
-                    match prev {
-                        Some(old) => {
-                            self.context.sum_type_field_overrides.insert(ctx_name, old);
-                        }
-                        None => {
-                            self.context.sum_type_field_overrides.remove(&ctx_name);
-                        }
-                    }
                 }
-
-                simplified_clauses.push(result);
+            } else {
+                None
             }
         } else {
-            for clause in clauses {
-                let result = WhenClause {
-                    pattern: clause.pattern,
-                    guard: clause.guard.map(|guard| self.simplify(guard)),
-                    body: self.simplify(clause.body),
-                };
-                scott_clause_summary.add_assign(ScottClauseSummary::observe(&result.body));
-                simplified_clauses.push(result);
-            }
-        }
+            None
+        };
 
+        let WhenClause {
+            pattern,
+            guard,
+            body,
+        } = clause;
+        let has_guard = guard.is_some();
+        let mut exprs = Vec::with_capacity(2);
+        exprs.extend(guard);
+        exprs.push(body);
+        Step::fold_all(exprs, move |simplifier, mut parts| {
+            let body = parts.pop().expect("simplified clause body");
+            let guard = has_guard.then(|| parts.pop().expect("simplified clause guard"));
+            let result = WhenClause {
+                pattern,
+                guard,
+                body,
+            };
+            state
+                .scott_clause_summary
+                .add_assign(ScottClauseSummary::observe(&result.body));
+
+            if let Some((ctx_name, prev)) = override_entry {
+                match prev {
+                    Some(old) => {
+                        simplifier
+                            .context
+                            .sum_type_field_overrides
+                            .insert(ctx_name, old);
+                    }
+                    None => {
+                        simplifier
+                            .context
+                            .sum_type_field_overrides
+                            .remove(&ctx_name);
+                    }
+                }
+            }
+
+            state.simplified_clauses.push(result);
+            simplifier.simplify_when_clauses(state)
+        })
+    }
+
+    /// The rest of [`Self::simplify_when`], over the simplified subject and
+    /// clauses.
+    fn simplify_when_clauses_done(
+        &mut self,
+        simplified_subject: PseudoExpr,
+        subject_name: Option<Binder>,
+        mut simplified_clauses: Vec<WhenClause>,
+        scott_clause_summary: ScottClauseSummary,
+    ) -> Step {
         if scott_clause_summary.may_rewrite()
             && let Some(rewritten_clauses) =
                 Self::rewrite_scott_constructor_when_clauses(&simplified_clauses)
@@ -540,12 +635,12 @@ impl Simplifier {
             simplified_clauses = rewritten_clauses;
         }
 
-        if let Some(expr) = self.collapse_eta_pair_selector_when(
+        if let Some(step) = self.collapse_eta_pair_selector_when(
             &simplified_subject,
             &subject_name,
             &simplified_clauses,
         ) {
-            return expr;
+            return step;
         }
 
         if let Some((subject, clauses)) =
@@ -559,15 +654,15 @@ impl Simplifier {
             &subject_name,
             &simplified_clauses,
         ) {
-            return expr;
+            return Step::Done(expr);
         }
 
-        if let Some(expr) = self.try_simplify_two_clause_wildcard_when(
+        if let Some(step) = self.try_simplify_two_clause_wildcard_when(
             &simplified_subject,
             &subject_name,
             &simplified_clauses,
         ) {
-            return expr;
+            return step;
         }
 
         let initial_shape_summary = WhenClauseShapeSummary::analyze(&simplified_clauses);
@@ -588,12 +683,30 @@ impl Simplifier {
         // When-clause field destructuring:
         // Convert `when x is { Constr<N> -> ... fv[0] ... fv[1] ... }` where fv = x.fields
         // into `when x is { Constr<N>(field_0, field_1) -> ... field_0 ... field_1 ... }`
-        let simplified_clauses = if shape_summary.has_constructor_clause {
+        let destructured = if shape_summary.has_constructor_clause {
             self.destructure_when_fields(&simplified_subject, &subject_name, simplified_clauses)
         } else {
-            simplified_clauses
+            Step::Done(simplified_clauses)
         };
+        destructured.then(self, move |simplifier, simplified_clauses| {
+            simplifier.simplify_when_destructured(
+                simplified_subject,
+                subject_name,
+                simplified_clauses,
+                shape_summary,
+            )
+        })
+    }
 
+    /// The rest of [`Self::simplify_when`], once constructor clause fields
+    /// are destructured.
+    fn simplify_when_destructured(
+        &mut self,
+        simplified_subject: PseudoExpr,
+        subject_name: Option<Binder>,
+        simplified_clauses: Vec<WhenClause>,
+        shape_summary: WhenClauseShapeSummary,
+    ) -> Step {
         // List head/tail destructuring:
         // Convert wildcard clause `_ -> let h = subj[0]; let t = List.tail(subj); body`
         // into `[h, ..t] -> body`
@@ -688,11 +801,11 @@ impl Simplifier {
         };
 
         if simplified_clauses.len() <= 1 && !shape_summary.has_guardless_wildcard_if_body {
-            return PseudoExpr::When {
+            return Step::Done(PseudoExpr::When {
                 subject: PBox::new(simplified_subject),
                 subject_name,
                 clauses: simplified_clauses,
-            };
+            });
         }
 
         let late_summary = LateWhenClauseSummary::analyze(&simplified_clauses);
@@ -710,11 +823,11 @@ impl Simplifier {
                 simplified_clauses
             };
 
-            return PseudoExpr::When {
+            return Step::Done(PseudoExpr::When {
                 subject: PBox::new(simplified_subject),
                 subject_name,
                 clauses: simplified_clauses,
-            };
+            });
         }
         let outcome_summary = late_summary.outcome;
 
@@ -770,15 +883,16 @@ impl Simplifier {
                 };
                 // Same order (True-arm→tag1, False-arm→tag0) → identity.
                 if true_body_tag == 1 && false_body_tag == 0 {
-                    return self.simplify(subject_expr);
+                    return Step::refold(subject_expr);
                 }
                 // Swapped order (True-arm→tag0, False-arm→tag1) → negation.
                 if true_body_tag == 0 && false_body_tag == 1 {
-                    let simplified = self.simplify(subject_expr);
-                    return PseudoExpr::UnOp {
-                        op: UnaryOp::Not,
-                        operand: PBox::new(simplified),
-                    };
+                    return Step::fold(subject_expr, |_, simplified| {
+                        Step::Done(PseudoExpr::UnOp {
+                            op: UnaryOp::Not,
+                            operand: PBox::new(simplified),
+                        })
+                    });
                 }
             }
             // Per-bool church-bool collapse orientation.
@@ -837,7 +951,7 @@ impl Simplifier {
                 .filter(|clause| !Self::is_fail(&clause.body))
                 .all(|clause| !Self::pattern_binds_any_used_name(&clause.pattern, &used_names));
             if safe {
-                return first_body.clone();
+                return Step::Done(first_body.clone());
             }
         }
 
@@ -863,10 +977,23 @@ impl Simplifier {
             simplified_clauses
         };
 
-        PseudoExpr::When {
+        Step::Done(PseudoExpr::When {
             subject: PBox::new(simplified_subject),
             subject_name,
             clauses: simplified_clauses,
-        }
+        })
     }
+}
+
+/// A `when` whose clauses are being simplified one after another: the
+/// simplified subject, the clauses still to go and the ones done.
+struct WhenClauseLoop {
+    subject: PseudoExpr,
+    subject_name: Option<Binder>,
+    /// The context sum type the subject is (`purpose`/`script_info`), whose
+    /// constructor fields are overridden per clause.
+    subject_sum_type: Option<String>,
+    clauses: std::vec::IntoIter<WhenClause>,
+    simplified_clauses: Vec<WhenClause>,
+    scott_clause_summary: ScottClauseSummary,
 }
