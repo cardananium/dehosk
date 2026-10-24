@@ -359,13 +359,14 @@ fn extract_from(body: PseudoExpr, abort_only: bool, walk: &mut Walk) -> PseudoEx
 /// signature string — at every node, the questions cost time and memory
 /// quadratic in the body's depth, and a script picks its depth: 32 KiB of
 /// flat nests tens of thousands of constructors.
-struct Facts {
+pub(super) struct Facts {
     of: HashMap<*const PseudoExpr, NodeFacts>,
 }
 
 #[derive(Clone, Copy)]
-struct NodeFacts {
-    /// [`count_nodes`].
+pub(super) struct NodeFacts {
+    /// Nodes in the subtree, counted through [`scope_children`] (pattern-
+    /// literal payloads not included).
     size: usize,
     /// Holds an observable effect — a `trace` or a messaged `fail`, pattern
     /// literals included — which bars extraction.
@@ -380,12 +381,22 @@ struct NodeFacts {
     extractable: bool,
     /// A hash of what [`Canon`] writes for the node, binder placeholders and
     /// variable references left out. Nodes with one signature share it, so a
-    /// signature is only built for a node that shares its shape.
+    /// signature is only built for a node that shares its shape. The same
+    /// holds for [`abstract_signature`], which differs only in how it writes
+    /// variables.
     shape: u64,
 }
 
+impl NodeFacts {
+    /// `(shape, size)`: two nodes with one signature, abstract or not, have
+    /// one key.
+    pub(super) fn key(&self) -> (u64, usize) {
+        (self.shape, self.size)
+    }
+}
+
 impl Facts {
-    fn of(root: &PseudoExpr) -> Self {
+    pub(super) fn of(root: &PseudoExpr) -> Self {
         let mut of: HashMap<*const PseudoExpr, NodeFacts> = HashMap::new();
         // Post-order over every child, pattern literals included: a node is
         // folded once all of its children are.
@@ -405,7 +416,7 @@ impl Facts {
         Facts { of }
     }
 
-    fn get(&self, node: &PseudoExpr) -> NodeFacts {
+    pub(super) fn get(&self, node: &PseudoExpr) -> NodeFacts {
         self.of[&(node as *const PseudoExpr)]
     }
 }
@@ -594,7 +605,7 @@ fn may_hold_candidate(body: &PseudoExpr, walk: &mut Walk) -> bool {
     walk.spend(looked_at) && found
 }
 
-/// Whether `expr` has at least `n` nodes as [`count_nodes`] counts them,
+/// Whether `expr` has at least `n` nodes as [`NodeFacts`] counts them,
 /// looking at no more than `n` of them.
 fn has_at_least_nodes(expr: &PseudoExpr, n: usize) -> bool {
     let mut seen = 0;
@@ -969,7 +980,7 @@ fn substitute_in_place(
 
 /// Every child of `expr`, pattern-literal payloads included — the mutable
 /// counterpart of [`PseudoExpr::child_refs_into`].
-fn push_children_mut<'a>(expr: &'a mut PseudoExpr, out: &mut Vec<&'a mut PseudoExpr>) {
+pub(super) fn push_children_mut<'a>(expr: &'a mut PseudoExpr, out: &mut Vec<&'a mut PseudoExpr>) {
     use crate::pseudo::ast::WhenPattern;
 
     match expr {
@@ -1043,15 +1054,6 @@ fn push_children_mut<'a>(expr: &'a mut PseudoExpr, out: &mut Vec<&'a mut PseudoE
     }
 }
 
-pub(super) fn count_nodes(expr: &PseudoExpr) -> usize {
-    let mut n = 0;
-    let mut pending: Vec<&PseudoExpr> = vec![expr];
-    while let Some(cur) = pending.pop() {
-        n += 1;
-        pending.extend(scope_children(cur));
-    }
-    n
-}
 
 /// A trace emission — the structural `PseudoExpr::Trace` or the raw
 /// `builtin.trace` call (`BuiltinCall { name: Trace }`), which render-prep

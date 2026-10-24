@@ -23,11 +23,11 @@ use std::collections::{HashMap, HashSet};
 
 use crate::pseudo::ast::{Binder, PBox, PseudoExpr, WhenClause, WhenPattern};
 use crate::pseudo::constructor::{ConstructorShape, KnownConstructor};
-use crate::pseudo::fold::{ExprFolder, FoldAction};
+use crate::pseudo::fold::ExprFolder;
 use crate::pseudo::var_id::VarId;
 
 use super::extract_repeated_subexpr::{
-    abstract_signature, collect_free_vars, count_nodes, pattern_binders,
+    Facts, abstract_signature, collect_free_vars, pattern_binders, push_children_mut,
 };
 use super::scope_recurse::{children, rewrite_bottom_up, substitute_var};
 
@@ -50,29 +50,35 @@ pub(super) fn lift_parametric_duplicates(expr: PseudoExpr) -> PseudoExpr {
 
 enum Walk<'a> {
     Enter(&'a PseudoExpr),
-    PushScope(VarId),
-    PopScope,
+    /// A closed rec fn's body is about to be walked / was walked: record the
+    /// span of node numbers it covers.
+    OpenBody(usize),
+    CloseBody(usize),
 }
 
-struct ClosedRecFn {
+struct ClosedRecFn<'a> {
     id: VarId,
     name: String,
-    sig: String,
-    /// Let ids whose BODY contains this one.
-    enclosing: Vec<VarId>,
+    value: &'a PseudoExpr,
+    /// The node number of its `let`.
+    at: usize,
+    /// The node numbers its `let`'s body covers. Kept instead of the list of
+    /// enclosing `let`s, which costs as much as the nesting depth — a depth
+    /// the script chooses — for every `let` that has one.
+    body: (usize, usize),
 }
 
 fn dedupe_closed_rec_fns(expr: PseudoExpr) -> PseudoExpr {
-    let mut found: Vec<ClosedRecFn> = Vec::new();
-    let mut scope: Vec<VarId> = Vec::new();
+    let facts = Facts::of(&expr);
+    let mut found: Vec<ClosedRecFn<'_>> = Vec::new();
+    let mut numbered = 0usize;
     let mut stack = vec![Walk::Enter(&expr)];
     while let Some(step) = stack.pop() {
         match step {
-            Walk::PushScope(id) => scope.push(id),
-            Walk::PopScope => {
-                scope.pop();
-            }
+            Walk::OpenBody(index) => found[index].body.0 = numbered,
+            Walk::CloseBody(index) => found[index].body.1 = numbered,
             Walk::Enter(node) => {
+                numbered += 1;
                 if let PseudoExpr::Let {
                     name,
                     id: Some(id),
@@ -80,19 +86,23 @@ fn dedupe_closed_rec_fns(expr: PseudoExpr) -> PseudoExpr {
                     body,
                 } = node
                 {
-                    if matches!(value.as_ref(), PseudoExpr::RecFn { .. })
-                        && collect_free_vars(value).is_empty()
-                    {
+                    let closed = matches!(value.as_ref(), PseudoExpr::RecFn { .. })
+                        && collect_free_vars(value).is_empty();
+                    if closed {
                         found.push(ClosedRecFn {
                             id: *id,
                             name: name.clone(),
-                            sig: abstract_signature(value).0,
-                            enclosing: scope.clone(),
+                            value,
+                            at: numbered,
+                            body: (0, 0),
                         });
+                        let index = found.len() - 1;
+                        stack.push(Walk::CloseBody(index));
+                        stack.push(Walk::Enter(body));
+                        stack.push(Walk::OpenBody(index));
+                    } else {
+                        stack.push(Walk::Enter(body));
                     }
-                    stack.push(Walk::PopScope);
-                    stack.push(Walk::Enter(body));
-                    stack.push(Walk::PushScope(*id));
                     stack.push(Walk::Enter(value));
                 } else {
                     stack.extend(children(node).into_iter().map(Walk::Enter));
@@ -101,15 +111,33 @@ fn dedupe_closed_rec_fns(expr: PseudoExpr) -> PseudoExpr {
         }
     }
 
-    let mut redirect: HashMap<VarId, (VarId, String)> = HashMap::new();
-    let mut by_sig: HashMap<&str, Vec<&ClosedRecFn>> = HashMap::new();
+    // Only rec fns sharing a shape can share a signature; nobody else's is
+    // built.
+    let mut per_shape: HashMap<(u64, usize), usize> = HashMap::new();
     for f in &found {
-        by_sig.entry(f.sig.as_str()).or_default().push(f);
+        *per_shape.entry(facts.get(f.value).key()).or_insert(0) += 1;
+    }
+    let sigs: Vec<Option<String>> = found
+        .iter()
+        .map(|f| {
+            (per_shape[&facts.get(f.value).key()] >= 2).then(|| abstract_signature(f.value).0)
+        })
+        .collect();
+    let encloses = |outer: &ClosedRecFn<'_>, inner: &ClosedRecFn<'_>| {
+        outer.body.0 <= inner.at && inner.at < outer.body.1
+    };
+
+    let mut redirect: HashMap<VarId, (VarId, String)> = HashMap::new();
+    let mut by_sig: HashMap<&str, Vec<&ClosedRecFn<'_>>> = HashMap::new();
+    for (f, sig) in found.iter().zip(&sigs) {
+        if let Some(sig) = sig {
+            by_sig.entry(sig.as_str()).or_default().push(f);
+        }
     }
     for group in by_sig.values().filter(|g| g.len() >= 2) {
         let Some(keeper) = group
             .iter()
-            .find(|k| group.iter().all(|f| f.id == k.id || f.enclosing.contains(&k.id)))
+            .find(|k| group.iter().all(|f| f.id == k.id || encloses(k, f)))
         else {
             continue;
         };
@@ -149,48 +177,43 @@ fn dedupe_closed_rec_fns(expr: PseudoExpr) -> PseudoExpr {
 
 type FreeVars = Vec<(VarId, String)>;
 
-fn at_least(expr: &PseudoExpr, n: usize) -> bool {
-    let mut seen = 0;
-    let mut pending = vec![expr];
-    while let Some(cur) = pending.pop() {
-        seen += 1;
-        if seen >= n {
-            return true;
-        }
-        pending.extend(children(cur));
-    }
-    false
-}
-
 fn lift_one_group(expr: PseudoExpr) -> Result<PseudoExpr, PseudoExpr> {
-    // Every big `when`, by shape.
-    let mut groups: HashMap<String, Vec<FreeVars>> = HashMap::new();
-    let mut sizes: HashMap<String, usize> = HashMap::new();
+    // Not moved again from here: the copies are replaced in place, at the
+    // addresses the facts below were taken at.
+    let mut expr = expr;
+    // Every big `when`, by shape. A `when` whose shape no other big `when`
+    // has cannot share its signature, so its signature — as long as its
+    // subtree — is never built: nested `when`s would otherwise cost time
+    // quadratic in a depth the script chooses.
+    let facts = Facts::of(&expr);
+    let mut big: Vec<&PseudoExpr> = Vec::new();
     let mut stack = vec![&expr];
     while let Some(node) = stack.pop() {
-        if matches!(node, PseudoExpr::When { .. }) && at_least(node, MIN_NODES) {
-            let (sig, free) = abstract_signature(node);
-            sizes.entry(sig.clone()).or_insert_with(|| count_nodes(node));
-            groups.entry(sig).or_default().push(free);
+        if matches!(node, PseudoExpr::When { .. }) && facts.get(node).key().1 >= MIN_NODES {
+            big.push(node);
         }
         stack.extend(children(node));
     }
+    let mut per_shape: HashMap<(u64, usize), usize> = HashMap::new();
+    for node in &big {
+        *per_shape.entry(facts.get(node).key()).or_insert(0) += 1;
+    }
+    let mut groups: HashMap<String, Vec<FreeVars>> = HashMap::new();
+    let mut sizes: HashMap<String, usize> = HashMap::new();
+    // Where a copy lives, to read how it uses its differing variables.
+    let mut witnesses: HashMap<String, &PseudoExpr> = HashMap::new();
+    for node in &big {
+        let key = facts.get(node).key();
+        if per_shape[&key] < 2 {
+            continue;
+        }
+        let (sig, free) = abstract_signature(node);
+        sizes.entry(sig.clone()).or_insert(key.1);
+        witnesses.entry(sig.clone()).or_insert(node);
+        groups.entry(sig).or_default().push(free);
+    }
 
     let mut best: Option<(usize, &String, Vec<usize>)> = None;
-    // Where a copy lives, to read how it uses its differing variables.
-    let mut witnesses: HashMap<&String, &PseudoExpr> = HashMap::new();
-    {
-        let mut stack = vec![&expr];
-        while let Some(node) = stack.pop() {
-            if matches!(node, PseudoExpr::When { .. }) && at_least(node, MIN_NODES) {
-                let (sig, _) = abstract_signature(node);
-                if let Some((key, _)) = groups.get_key_value(&sig) {
-                    witnesses.entry(key).or_insert(node);
-                }
-            }
-            stack.extend(children(node));
-        }
-    }
     for (sig, copies) in groups.iter().filter(|(_, c)| c.len() >= 2) {
         let first = &copies[0];
         let differing: Vec<usize> = (0..first.len())
@@ -247,60 +270,47 @@ fn lift_one_group(expr: PseudoExpr) -> Result<PseudoExpr, PseudoExpr> {
     let helper_id = VarId::fresh_binding();
     let helper_name = "lifted".to_string();
 
-    struct Replace<'a> {
-        target: &'a str,
-        differing: &'a [usize],
-        helper_id: VarId,
-        helper_name: &'a str,
-        representative: Option<(PseudoExpr, FreeVars)>,
-        replaced: usize,
-    }
-    impl ExprFolder for Replace<'_> {
-        fn machine_folds_when(&self) -> bool {
-            true
-        }
-        fn pre_expr(&mut self, expr: &PseudoExpr) -> FoldAction {
-            if !matches!(expr, PseudoExpr::When { .. }) || !at_least(expr, MIN_NODES) {
-                return FoldAction::Walk;
+    // Replace every copy with a call, in place — where the copies were found —
+    // and keep the first one met in pre-order, before it is replaced, as the
+    // helper's body. Copies never nest (one signature, one size).
+    let target_key = facts.get(witnesses[&target]).key();
+    drop(witnesses);
+    let mut representative: Option<(PseudoExpr, FreeVars)> = None;
+    {
+        let mut pending: Vec<&mut PseudoExpr> = vec![&mut expr];
+        while let Some(node) = pending.pop() {
+            let is_copy = matches!(node, PseudoExpr::When { .. })
+                && facts.get(node).key() == target_key
+                && abstract_signature(node).0 == target;
+            if !is_copy {
+                let mut kids = Vec::new();
+                push_children_mut(node, &mut kids);
+                pending.extend(kids.into_iter().rev());
+                continue;
             }
-            let (sig, free) = abstract_signature(expr);
-            if sig != self.target {
-                return FoldAction::Walk;
-            }
-            let args: Vec<PseudoExpr> = self
-                .differing
+            let (_, free) = abstract_signature(node);
+            let args: Vec<PseudoExpr> = differing
                 .iter()
                 .map(|&k| PseudoExpr::Var {
                     name: free[k].1.clone(),
                     id: Some(free[k].0),
                 })
                 .collect();
-            if self.representative.is_none() {
-                self.representative = Some((expr.clone(), free));
-            }
-            self.replaced += 1;
-            FoldAction::Replace(PseudoExpr::Apply {
+            let call = PseudoExpr::Apply {
                 function: PBox::new(PseudoExpr::Var {
-                    name: self.helper_name.to_string(),
-                    id: Some(self.helper_id),
+                    name: helper_name.clone(),
+                    id: Some(helper_id),
                 }),
                 args: args.into(),
-            })
+            };
+            let copy = std::mem::replace(node, call);
+            if representative.is_none() {
+                representative = Some((copy, free));
+            }
         }
     }
-    let mut replace = Replace {
-        target: &target,
-        differing: &differing,
-        helper_id,
-        helper_name: &helper_name,
-        representative: None,
-        replaced: 0,
-    };
-    let rewritten = replace.fold(expr);
-    let (mut body, rep_free) = replace
-        .representative
-        .take()
-        .expect("a group has at least two copies");
+    let rewritten = expr;
+    let (mut body, rep_free) = representative.expect("a group has at least two copies");
 
     let mut params = Vec::with_capacity(differing.len());
     for (position, &k) in differing.iter().enumerate() {
