@@ -3362,3 +3362,26 @@ fn pair_fst_snd_accessors_keep_ordinal_render() {
     assert_eq!(pretty_on(&fst), "p.1st", "ON must not touch .1st");
     assert_eq!(pretty_on(&snd), "p.2nd", "ON must not touch .2nd");
 }
+
+#[test]
+fn deep_nesting_stops_indenting_at_the_cap() {
+    use crate::pseudo::var_id::VarId;
+    // A list nested 600 deep: uncapped, its innermost lines would start at
+    // column 1,200.
+    let depth = 600;
+    let mut expr = PseudoExpr::var_with_id("x", VarId::new(1));
+    for _ in 0..depth {
+        expr = PseudoExpr::List {
+            elements: vec![expr, PseudoExpr::var_with_id("x", VarId::new(1))].into(),
+            tail: None,
+        };
+    }
+    let rendered = expr.to_pretty();
+    let widest = rendered
+        .lines()
+        .map(|line| line.len() - line.trim_start().len())
+        .max()
+        .unwrap_or(0);
+    assert_eq!(widest, MAX_INDENT);
+    assert!(rendered.len() < depth * 6 * (MAX_INDENT + 16));
+}

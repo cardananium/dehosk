@@ -864,23 +864,65 @@ fn wrap_in_tail_list<'a>(
 // participate through the fixpoint. `[N..]` slices need no gate: you cannot
 // slice a tuple.
 
+/// The deepest column a line is indented to. Deeper lines start at it.
+///
+/// Every nesting level indents each of its lines further, so without a cap
+/// the text grows with the square of the depth — and a script picks its
+/// depth: a 32 KiB script can nest a data literal or an `if` ladder
+/// thousands of levels deep. The layout still breaks lines as if the
+/// indentation were real; only the leading spaces past the cap are left
+/// out. No real script in the corpus decompiles past column ~210.
+const MAX_INDENT: usize = 256;
+
 #[derive(Default)]
 struct SpanWriter {
     output: String,
     active_annotations: Vec<(PseudoNodeId, usize)>,
     finished_annotations: Vec<(PseudoNodeId, usize, usize)>,
+    /// Leading spaces written on the current line, while nothing else has
+    /// been; `None` once the line has content.
+    line_indent: Option<usize>,
+}
+
+impl SpanWriter {
+    /// Append `s`, leaving out the leading spaces of a line past
+    /// [`MAX_INDENT`].
+    fn push(&mut self, s: &str) {
+        if self.line_indent.is_none() && !s.contains('\n') {
+            self.output.push_str(s);
+            return;
+        }
+        for ch in s.chars() {
+            match (ch, self.line_indent) {
+                ('\n', _) => {
+                    self.output.push('\n');
+                    self.line_indent = Some(0);
+                }
+                (' ', Some(indent)) => {
+                    if indent < MAX_INDENT {
+                        self.output.push(' ');
+                    }
+                    self.line_indent = Some(indent + 1);
+                }
+                (other, _) => {
+                    self.output.push(other);
+                    self.line_indent = None;
+                }
+            }
+        }
+    }
 }
 
 impl Render for SpanWriter {
     type Error = fmt::Error;
 
     fn write_str(&mut self, s: &str) -> Result<usize, Self::Error> {
-        self.output.push_str(s);
+        self.push(s);
         Ok(s.len())
     }
 
     fn write_str_all(&mut self, s: &str) -> Result<(), Self::Error> {
-        self.output.push_str(s);
+        self.push(s);
         Ok(())
     }
 
