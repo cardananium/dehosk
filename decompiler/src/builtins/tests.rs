@@ -207,3 +207,25 @@ fn monomorphic_return_type_covers_canonical_monomorphic_builtins() {
         Some(PseudoType::Data)
     );
 }
+
+#[test]
+fn array_builtins_have_catalogue_names_and_types() {
+    for (id, canonical, alias) in [
+        (BuiltinId::ArrayLength, "Array.length", "length_of_array"),
+        (BuiltinId::ListToArray, "List.to_array", "list_to_array"),
+        (BuiltinId::ArrayAt, "Array.at", "index_array"),
+    ] {
+        assert_eq!(id.canonical_name(), canonical);
+        assert_eq!(BuiltinId::from_name(canonical), Some(id));
+        assert_eq!(BuiltinId::from_name(alias), Some(id));
+        // Every array builtin is forced once, for its element type.
+        assert_eq!(id.force_count(), 1, "{id:?}");
+    }
+    assert_eq!(
+        BuiltinId::ArrayLength.monomorphic_return_type(),
+        Some(PseudoType::Int)
+    );
+    // No pseudo type models an array, so these stay unresolved.
+    assert_eq!(BuiltinId::ListToArray.monomorphic_return_type(), None);
+    assert_eq!(BuiltinId::ArrayAt.monomorphic_return_type(), None);
+}

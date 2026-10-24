@@ -372,11 +372,29 @@ fn collect_apply_spine(term: &Term<Name>) -> (&Term<Name>, Vec<&Term<Name>>) {
 /// about width. Flattening to single spaces lets the outer printer treat it
 /// as an atom: a long `data` constant is a long line rather than a break at
 /// the wrong column — the better failure.
+///
+/// Only the layout's whitespace is flattened. Inside a string literal every
+/// character is the string's own — the renderer escapes quotes, backslashes
+/// and control characters but leaves spaces raw — so it is copied verbatim:
+/// `"a  b"` stays two spaces wide.
 fn constant_text(value: &Constant) -> String {
     let rendered = value.to_pretty();
     let mut out = String::with_capacity(rendered.len());
     let mut pending_space = false;
+    let mut in_string = false;
+    let mut escaped = false;
     for ch in rendered.chars() {
+        if in_string {
+            out.push(ch);
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
         if ch.is_whitespace() {
             pending_space = !out.is_empty();
             continue;
@@ -386,6 +404,7 @@ fn constant_text(value: &Constant) -> String {
             pending_space = false;
         }
         out.push(ch);
+        in_string = ch == '"';
     }
     out
 }

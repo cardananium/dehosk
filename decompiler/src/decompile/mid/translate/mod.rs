@@ -796,6 +796,11 @@ fn constant_to_literal(constant: &Constant) -> MidLiteral {
         Constant::ProtoList(_, items) => {
             MidLiteral::List(items.iter().map(|item| constant_to_literal(item)).collect())
         }
+        // No surface syntax has an array literal either; its elements read
+        // as a list, which is also what `listToArray` builds one from.
+        Constant::ProtoArray(_, items) => {
+            MidLiteral::List(items.iter().map(|item| constant_to_literal(item)).collect())
+        }
         Constant::ProtoPair(_, _, a, b) => MidLiteral::Pair(
             Box::new(constant_to_literal(a)),
             Box::new(constant_to_literal(b)),

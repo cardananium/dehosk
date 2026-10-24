@@ -176,6 +176,9 @@ fn builtin_level(fun: DefaultFunction) -> BuiltinSignal {
         | F::Ripemd_160
         | F::ExpModInteger
         | F::DropList
+        | F::LengthOfArray
+        | F::ListToArray
+        | F::IndexArray
         | F::Bls12_381_G1_MultiScalarMul
         | F::Bls12_381_G2_MultiScalarMul
         | F::InsertCoin

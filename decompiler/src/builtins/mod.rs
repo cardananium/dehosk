@@ -127,6 +127,9 @@ pub enum BuiltinId {
     ValueScale,
     ValueToData,
     DataUnValue,
+    ArrayLength,
+    ListToArray,
+    ArrayAt,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -266,6 +269,9 @@ impl BuiltinId {
             "scale_value" | "Value.scale" => Self::ValueScale,
             "value_data" | "Value.to_data" => Self::ValueToData,
             "un_value_data" | "Data.un_value" => Self::DataUnValue,
+            "length_of_array" | "Array.length" => Self::ArrayLength,
+            "list_to_array" | "List.to_array" => Self::ListToArray,
+            "index_array" | "Array.at" => Self::ArrayAt,
             _ => return None,
         })
     }
@@ -404,6 +410,9 @@ impl BuiltinId {
             Self::ValueScale => "Value.scale",
             Self::ValueToData => "Value.to_data",
             Self::DataUnValue => "Data.un_value",
+            Self::ArrayLength => "Array.length",
+            Self::ListToArray => "List.to_array",
+            Self::ArrayAt => "Array.at",
         }
     }
 
@@ -464,6 +473,9 @@ impl BuiltinId {
             | Self::MkNilPairData
             | Self::NewPairs
             | Self::ListDrop
+            | Self::ArrayLength
+            | Self::ListToArray
+            | Self::ArrayAt
             | Self::Seq => 1,
             _ => 0,
         }
@@ -555,7 +567,8 @@ impl BuiltinId {
             | Self::DataToInt
             | Self::DataConstrIndex
             | Self::IntExpMod
-            | Self::ValueLookupCoin => PseudoType::Int,
+            | Self::ValueLookupCoin
+            | Self::ArrayLength => PseudoType::Int,
 
             // Bool-returning bit predicate ---
             // `ByteArray.read_bit(bytes, index)` is Bool, not Int.
@@ -660,12 +673,15 @@ impl BuiltinId {
             | Self::ConstrPack
             | Self::Trace
             | Self::Error
-            // No pseudo type models a ledger value; `List.drop` keeps its list's type.
+            // No pseudo type models a ledger value or an array; `List.drop`
+            // keeps its list's type and `Array.at` its array's element type.
             | Self::ListDrop
             | Self::ValueInsertCoin
             | Self::ValueUnion
             | Self::ValueScale
-            | Self::DataUnValue => return None,
+            | Self::DataUnValue
+            | Self::ListToArray
+            | Self::ArrayAt => return None,
         };
         Some(ty)
     }

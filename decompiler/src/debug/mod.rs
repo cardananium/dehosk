@@ -1670,6 +1670,7 @@ fn constant_to_string(c: &Constant) -> String {
         Constant::Unit => "Void".to_string(),
         Constant::Data(_) => "Data(...)".to_string(),
         Constant::ProtoList(_, xs) => format!("List(len={})", xs.len()),
+        Constant::ProtoArray(_, xs) => format!("Array(len={})", xs.len()),
         Constant::ProtoPair(_, _, _, _) => "Pair(...)".to_string(),
         Constant::Bls12_381G1Element(_) => "G1Element(...)".to_string(),
         Constant::Bls12_381G2Element(_) => "G2Element(...)".to_string(),

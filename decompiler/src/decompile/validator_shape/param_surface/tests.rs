@@ -500,3 +500,36 @@ fn data_bytestring_param_renders_full_value() {
         "must not emit a truncated hint: {out}"
     );
 }
+
+/// An applied `array` or `value` constant renders as its contents. Both
+/// used to fall through to the BLS12-381 arm and print as an opaque
+/// `<opaque BLS12-381 element>`.
+#[test]
+fn array_and_value_params_render_their_contents() {
+    use std::rc::Rc;
+    use uplc::ast::{Type, Value};
+
+    let array = Constant::ProtoArray(
+        Type::Integer,
+        vec![
+            Rc::new(Constant::Integer(1.into())),
+            Rc::new(Constant::Integer(2.into())),
+        ],
+    );
+    let value = Constant::Value(
+        Value::from_canonical_bounded_entries(vec![(vec![0xaa], vec![(vec![0xcc], 5)])])
+            .expect("canonical value"),
+    );
+    let outer = outer_with(vec![
+        AppliedParam::Constant(array),
+        AppliedParam::Constant(value),
+    ]);
+    let out =
+        format_applied_params_prefix(&outer, AppliedKind::Compile, 1).expect("expected prefix");
+    assert!(out.contains("[1, 2]"), "array elements missing: {out}");
+    assert!(
+        out.contains(r#"[Pair(#"aa", [Pair(#"cc", 5)])]"#),
+        "value entries missing: {out}"
+    );
+    assert!(!out.contains("BLS12-381"), "mislabelled as BLS: {out}");
+}

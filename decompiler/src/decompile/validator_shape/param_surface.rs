@@ -646,7 +646,45 @@ fn render_constant(c: &Constant) -> RenderForm {
                 cbor_hex: hex::encode(uplc::plutus_data_to_bytes(d)),
             }
         }
-        _ => RenderForm::Opaque {
+        // No surface syntax has an array literal: its elements, as a list.
+        Constant::ProtoArray(_, items) => {
+            let parts: Vec<String> = items
+                .iter()
+                .map(|i| render_constant(i).into_inline_value())
+                .collect();
+            RenderForm::ConstDecl {
+                ty: "Array<_>",
+                value: format!("[{}]", parts.join(", ")),
+            }
+        }
+        // Nor a value literal: its entries, as the body renders them.
+        Constant::Value(value) => {
+            let entries: Vec<String> = value
+                .clone()
+                .into_entries()
+                .into_iter()
+                .map(|(currency, tokens)| {
+                    let tokens: Vec<String> = tokens
+                        .into_iter()
+                        .map(|(token, quantity)| {
+                            format!("Pair(#\"{}\", {quantity})", hex::encode(token))
+                        })
+                        .collect();
+                    format!(
+                        "Pair(#\"{}\", [{}])",
+                        hex::encode(currency),
+                        tokens.join(", ")
+                    )
+                })
+                .collect();
+            RenderForm::ConstDecl {
+                ty: "Value",
+                value: format!("[{}]", entries.join(", ")),
+            }
+        }
+        Constant::Bls12_381G1Element(_)
+        | Constant::Bls12_381G2Element(_)
+        | Constant::Bls12_381MlResult(_) => RenderForm::Opaque {
             kind: "BLS12-381 element".to_string(),
         },
     }

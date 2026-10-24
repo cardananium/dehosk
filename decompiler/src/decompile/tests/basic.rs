@@ -554,3 +554,70 @@ fn van_rossem_builtins_and_value_constants_decompile() {
         "{output}"
     );
 }
+
+/// Parse UPLC source into the program form `decompile_program` takes.
+fn program_from_source(source: &str) -> uplc::ast::Program<uplc::ast::NamedDeBruijn> {
+    use uplc::ast::{DeBruijn, Name, NamedDeBruijn, Program};
+
+    let program: Program<Name> = uplc::parser::program(source).expect("source parses");
+    let program: Program<DeBruijn> = program.try_into().expect("source de-Bruijnizes");
+    let program: Program<NamedDeBruijn> = program.into();
+    program
+}
+
+/// The CIP-138 array builtins and an `array` constant decompile under
+/// their catalogue names, the constant as its elements.
+#[test]
+fn array_builtins_and_constants_decompile() {
+    let program = program_from_source(
+        "(program 1.1.0 (lam xs \
+           [(builtin addInteger) \
+             [(force (builtin lengthOfArray)) \
+               [(force (builtin listToArray)) [(builtin unListData) xs]]] \
+             [(force (builtin indexArray)) (con (array integer) [10, 20, 30]) (con integer 1)]]))",
+    );
+
+    let output = decompile_program(&program, DecompileOptions::default())
+        .expect("array builtins must decompile");
+    for name in ["Array.length(", "List.to_array(", "Array.at("] {
+        assert!(output.contains(name), "`{name}` missing from:\n{output}");
+    }
+    assert!(output.contains("[10, 20, 30]"), "{output}");
+}
+
+/// The UPLC echo spells arrays back in the syntax the parser reads, and
+/// copies a string constant verbatim: flattening the constant's layout must
+/// not collapse the spaces inside its literal.
+#[test]
+fn uplc_layer_echoes_arrays_and_strings_verbatim() {
+    let program = program_from_source(
+        "(program 1.1.0 [(force (builtin trace)) (con string \"two  spaces\") \
+           [(force (builtin lengthOfArray)) (con (array integer) [10, 20, 30])]])",
+    );
+    let opts = DecompileOptions {
+        output_layer: OutputLayer::Uplc,
+        ..DecompileOptions::default()
+    };
+    let out = decompile_program(&program, opts).expect("uplc layer render");
+    for text in [
+        "(builtin lengthOfArray)",
+        "(con (array integer) [10, 20, 30])",
+        "(con string \"two  spaces\")",
+    ] {
+        assert!(out.contains(text), "`{text}` missing from:\n{out}");
+    }
+}
+
+/// An array constant read from flat bytes: type tags `7 12 0`, then the
+/// elements laid out like a list's.
+#[test]
+fn array_constant_decodes_from_flat() {
+    // [(force (builtin lengthOfArray)) (con (array integer) [10, 20, 30])]
+    let program = decode_hex_to_program("010100357b297e4114944f01").expect("flat decodes");
+    let output =
+        decompile_program(&program, DecompileOptions::default()).expect("array program decompiles");
+    assert!(
+        output.contains("Array.length([10, 20, 30])"),
+        "unexpected output:\n{output}"
+    );
+}

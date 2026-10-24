@@ -238,6 +238,27 @@ fn infer_version_inconsistent_v3_builtin_in_v1v2_header() {
 }
 
 #[test]
+fn infer_version_array_builtins_are_v3_signals() {
+    // The CIP-138 array builtins are batch 6, classified with the other
+    // Van Rossem builtins.
+    for fun in [
+        DefaultFunction::LengthOfArray,
+        DefaultFunction::ListToArray,
+        DefaultFunction::IndexArray,
+    ] {
+        let prog = program((1, 1, 0), lambda("ctx", builtin(fun)));
+        assert_eq!(infer_version(&prog), VersionDecision::DefinitelyV3);
+
+        let prog = program((1, 0, 0), lambda("ctx", builtin(fun)));
+        assert_eq!(
+            infer_version(&prog),
+            VersionDecision::InconsistentV3BuiltinInV1V2,
+            "{fun:?}"
+        );
+    }
+}
+
+#[test]
 fn infer_version_unknown_uplc_version() {
     let term = lambda("ctx", constant_int(0));
     let prog = program((2, 0, 0), term);
