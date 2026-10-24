@@ -1643,7 +1643,27 @@ fn when_pattern_structural_eq(a: &WhenPattern, b: &WhenPattern) -> bool {
 
 /// Compare two PseudoExpr trees structurally without cloning: VarId fields
 /// (Var.id, Let.id, Binder.id) are ignored and binders compare by name.
+///
+/// The trees are as deep as the script nests — tens of thousands of levels
+/// inside the size limit, more than `wasm32`'s call stack can take — so the
+/// node pairs still to compare sit on a worklist instead of the call stack.
 fn structural_eq_no_clone(a: &PseudoExpr, b: &PseudoExpr) -> bool {
+    let mut pending: Vec<(&PseudoExpr, &PseudoExpr)> = vec![(a, b)];
+    while let Some((a, b)) = pending.pop() {
+        if !shallow_structural_eq(a, b, &mut pending) {
+            return false;
+        }
+    }
+    true
+}
+
+/// One node pair of [`structural_eq_no_clone`]: compare what the two nodes
+/// hold besides their children, and queue the child pairs.
+fn shallow_structural_eq<'a>(
+    a: &'a PseudoExpr,
+    b: &'a PseudoExpr,
+    pending: &mut Vec<(&'a PseudoExpr, &'a PseudoExpr)>,
+) -> bool {
     use std::mem::discriminant;
     if discriminant(a) != discriminant(b) {
         return false;
@@ -1665,7 +1685,11 @@ fn structural_eq_no_clone(a: &PseudoExpr, b: &PseudoExpr) -> bool {
                 body: b2,
                 ..
             },
-        ) => n1 == n2 && structural_eq_no_clone(v1, v2) && structural_eq_no_clone(b1, b2),
+        ) => {
+            pending.push((b1, b2));
+            pending.push((v1, v2));
+            n1 == n2
+        }
         (
             PseudoExpr::Lambda {
                 params: p1,
@@ -1675,7 +1699,10 @@ fn structural_eq_no_clone(a: &PseudoExpr, b: &PseudoExpr) -> bool {
                 params: p2,
                 body: b2,
             },
-        ) => binders_eq_by_name(p1, p2) && structural_eq_no_clone(b1, b2),
+        ) => {
+            pending.push((b1, b2));
+            binders_eq_by_name(p1, p2)
+        }
         (
             PseudoExpr::RecFn {
                 name: n1,
@@ -1687,7 +1714,10 @@ fn structural_eq_no_clone(a: &PseudoExpr, b: &PseudoExpr) -> bool {
                 params: p2,
                 body: b2,
             },
-        ) => n1.name == n2.name && binders_eq_by_name(p1, p2) && structural_eq_no_clone(b1, b2),
+        ) => {
+            pending.push((b1, b2));
+            n1.name == n2.name && binders_eq_by_name(p1, p2)
+        }
         (
             PseudoExpr::Apply {
                 function: f1,
@@ -1698,12 +1728,9 @@ fn structural_eq_no_clone(a: &PseudoExpr, b: &PseudoExpr) -> bool {
                 args: a2,
             },
         ) => {
+            pending.extend(a1.iter().zip(a2.iter()).rev());
+            pending.push((f1, f2));
             a1.len() == a2.len()
-                && structural_eq_no_clone(f1, f2)
-                && a1
-                    .iter()
-                    .zip(a2.iter())
-                    .all(|(x, y)| structural_eq_no_clone(x, y))
         }
         (
             PseudoExpr::If {
@@ -1717,9 +1744,10 @@ fn structural_eq_no_clone(a: &PseudoExpr, b: &PseudoExpr) -> bool {
                 else_branch: e2,
             },
         ) => {
-            structural_eq_no_clone(c1, c2)
-                && structural_eq_no_clone(t1, t2)
-                && structural_eq_no_clone(e1, e2)
+            pending.push((e1, e2));
+            pending.push((t1, t2));
+            pending.push((c1, c2));
+            true
         }
         (
             PseudoExpr::When {
@@ -1733,18 +1761,22 @@ fn structural_eq_no_clone(a: &PseudoExpr, b: &PseudoExpr) -> bool {
                 clauses: c2,
             },
         ) => {
-            opt_binder_eq_by_name(sn1, sn2)
-                && c1.len() == c2.len()
-                && structural_eq_no_clone(s1, s2)
-                && c1.iter().zip(c2.iter()).all(|(x, y)| {
-                    when_pattern_structural_eq(&x.pattern, &y.pattern)
-                        && match (&x.guard, &y.guard) {
-                            (Some(g1), Some(g2)) => structural_eq_no_clone(g1, g2),
-                            (None, None) => true,
-                            _ => false,
-                        }
-                        && structural_eq_no_clone(&x.body, &y.body)
-                })
+            if !opt_binder_eq_by_name(sn1, sn2) || c1.len() != c2.len() {
+                return false;
+            }
+            for (x, y) in c1.iter().zip(c2.iter()).rev() {
+                pending.push((&x.body, &y.body));
+                match (&x.guard, &y.guard) {
+                    (Some(g1), Some(g2)) => pending.push((g1, g2)),
+                    (None, None) => {}
+                    _ => return false,
+                }
+                if !when_pattern_structural_eq(&x.pattern, &y.pattern) {
+                    return false;
+                }
+            }
+            pending.push((s1, s2));
+            true
         }
         (
             PseudoExpr::List {
@@ -1756,26 +1788,22 @@ fn structural_eq_no_clone(a: &PseudoExpr, b: &PseudoExpr) -> bool {
                 tail: t2,
             },
         ) => {
+            match (t1, t2) {
+                (Some(a), Some(b)) => pending.push((a, b)),
+                (None, None) => {}
+                _ => return false,
+            }
+            pending.extend(e1.iter().zip(e2.iter()).rev());
             e1.len() == e2.len()
-                && e1
-                    .iter()
-                    .zip(e2.iter())
-                    .all(|(x, y)| structural_eq_no_clone(x, y))
-                && match (t1, t2) {
-                    (Some(a), Some(b)) => structural_eq_no_clone(a, b),
-                    (None, None) => true,
-                    _ => false,
-                }
         }
         (PseudoExpr::Tuple(e1), PseudoExpr::Tuple(e2)) => {
+            pending.extend(e1.iter().zip(e2.iter()).rev());
             e1.len() == e2.len()
-                && e1
-                    .iter()
-                    .zip(e2.iter())
-                    .all(|(x, y)| structural_eq_no_clone(x, y))
         }
         (PseudoExpr::Pair(a1, b1), PseudoExpr::Pair(a2, b2)) => {
-            structural_eq_no_clone(a1, a2) && structural_eq_no_clone(b1, b2)
+            pending.push((b1, b2));
+            pending.push((a1, a2));
+            true
         }
         (
             PseudoExpr::Constr {
@@ -1789,12 +1817,8 @@ fn structural_eq_no_clone(a: &PseudoExpr, b: &PseudoExpr) -> bool {
                 ..
             },
         ) => {
-            s1 == s2
-                && f1.len() == f2.len()
-                && f1
-                    .iter()
-                    .zip(f2.iter())
-                    .all(|(x, y)| structural_eq_no_clone(x, y))
+            pending.extend(f1.iter().zip(f2.iter()).rev());
+            s1 == s2 && f1.len() == f2.len()
         }
         (
             PseudoExpr::FieldAccess {
@@ -1807,7 +1831,10 @@ fn structural_eq_no_clone(a: &PseudoExpr, b: &PseudoExpr) -> bool {
                 selector: s2,
                 ..
             },
-        ) => s1 == s2 && structural_eq_no_clone(r1, r2),
+        ) => {
+            pending.push((r1, r2));
+            s1 == s2
+        }
         (
             PseudoExpr::IndexAccess {
                 collection: c1,
@@ -1817,7 +1844,10 @@ fn structural_eq_no_clone(a: &PseudoExpr, b: &PseudoExpr) -> bool {
                 collection: c2,
                 index: i2,
             },
-        ) => i1 == i2 && structural_eq_no_clone(c1, c2),
+        ) => {
+            pending.push((c1, c2));
+            i1 == i2
+        }
         (
             PseudoExpr::BinOp {
                 op: o1,
@@ -1829,7 +1859,11 @@ fn structural_eq_no_clone(a: &PseudoExpr, b: &PseudoExpr) -> bool {
                 left: l2,
                 right: r2,
             },
-        ) => o1 == o2 && structural_eq_no_clone(l1, l2) && structural_eq_no_clone(r1, r2),
+        ) => {
+            pending.push((r1, r2));
+            pending.push((l1, l2));
+            o1 == o2
+        }
         (
             PseudoExpr::UnOp {
                 op: o1,
@@ -1839,20 +1873,22 @@ fn structural_eq_no_clone(a: &PseudoExpr, b: &PseudoExpr) -> bool {
                 op: o2,
                 operand: a2,
             },
-        ) => o1 == o2 && structural_eq_no_clone(a1, a2),
+        ) => {
+            pending.push((a1, a2));
+            o1 == o2
+        }
         (
             PseudoExpr::BuiltinCall { name: n1, args: a1 },
             PseudoExpr::BuiltinCall { name: n2, args: a2 },
         ) => {
-            n1 == n2
-                && a1.len() == a2.len()
-                && a1
-                    .iter()
-                    .zip(a2.iter())
-                    .all(|(x, y)| structural_eq_no_clone(x, y))
+            pending.extend(a1.iter().zip(a2.iter()).rev());
+            n1 == n2 && a1.len() == a2.len()
         }
-        (PseudoExpr::Delay(i1), PseudoExpr::Delay(i2)) => structural_eq_no_clone(i1, i2),
-        (PseudoExpr::Force(i1), PseudoExpr::Force(i2)) => structural_eq_no_clone(i1, i2),
+        (PseudoExpr::Delay(i1), PseudoExpr::Delay(i2))
+        | (PseudoExpr::Force(i1), PseudoExpr::Force(i2)) => {
+            pending.push((i1, i2));
+            true
+        }
         (
             PseudoExpr::Trace {
                 message: m1,
@@ -1862,7 +1898,11 @@ fn structural_eq_no_clone(a: &PseudoExpr, b: &PseudoExpr) -> bool {
                 message: m2,
                 value: v2,
             },
-        ) => structural_eq_no_clone(m1, m2) && structural_eq_no_clone(v1, v2),
+        ) => {
+            pending.push((v1, v2));
+            pending.push((m1, m2));
+            true
+        }
         (PseudoExpr::Int(a), PseudoExpr::Int(b)) => a == b,
         (PseudoExpr::ByteArray(a), PseudoExpr::ByteArray(b)) => a == b,
         (PseudoExpr::String(a), PseudoExpr::String(b)) => a == b,
