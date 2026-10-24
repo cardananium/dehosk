@@ -32,6 +32,16 @@ use uplc::ast::{Constant, Name, Program, Term};
 
 const WIDTH: usize = 80;
 const INDENT: usize = 2;
+/// The deepest column a line is indented to. Past it, a nested construct
+/// breaks at the same column as its parent.
+///
+/// Every level would otherwise cost each of its lines two more columns, and a
+/// script nests as deep as its author likes: 64 KiB levels fit in 32 KiB of
+/// flat, and a real 16 KB mainnet validator already reaches column ~5,900 —
+/// 52 MB of echo, nearly all of it leading spaces. With the cap the echo is
+/// linear in the program's size. The text stays valid UPLC either way; only
+/// whitespace changes.
+const MAX_INDENT: usize = 64;
 
 /// Render a unique-named program with the spine-flattened layout.
 pub(super) fn render_program_flattened(program: &Program<Name>) -> String {
@@ -233,7 +243,7 @@ impl Arena {
     /// Push the pieces of one node, in reverse so they pop in order.
     fn emit(&self, node: usize, at: usize, flat: bool, jobs: &mut Vec<Job>) {
         // A separator between parts, and the one before the closing bracket.
-        let inner = at + INDENT;
+        let inner = (at + INDENT).min(MAX_INDENT);
         let sep = |jobs: &mut Vec<Job>| {
             if flat {
                 jobs.push(Job::Text(" ".to_string()));

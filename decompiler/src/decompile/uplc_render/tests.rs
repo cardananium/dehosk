@@ -75,3 +75,31 @@ fn spine_breaks_across_lines_when_too_long() {
         "must not reintroduce binary nesting, got:\n{out}"
     );
 }
+
+#[test]
+fn deep_nesting_stops_indenting_at_the_cap() {
+    // 20,000 nested delays: without the cap the echo would be ~400 MB of
+    // leading spaces.
+    let depth = 20_000;
+    let mut term = var("x");
+    for _ in 0..depth {
+        term = Term::Delay {
+            body: Rc::new(term),
+            uniq_id: 0,
+        };
+    }
+    let out = render_program_flattened(&prog(term));
+    let widest_indent = out
+        .lines()
+        .map(|line| line.len() - line.trim_start().len())
+        .max()
+        .unwrap_or(0);
+    assert_eq!(widest_indent, MAX_INDENT);
+    assert!(
+        out.len() < depth * 2 * (MAX_INDENT + 8),
+        "echo of {} bytes is not linear in the depth",
+        out.len()
+    );
+    // The canonical layout shares the cap.
+    assert!(render_program_canonical(&prog(var("x"))).contains("x"));
+}
