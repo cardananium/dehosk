@@ -1,7 +1,7 @@
 use crate::pseudo::ast::PBox;
 use crate::pseudo::ast::{BinaryOp, Binder, PseudoExpr, PseudoType, UnaryOp};
 use crate::pseudo::var_id::VarId;
-use crate::pseudo::walker::{FoldAction, Walker};
+use crate::pseudo::walker::{Entered, Walker};
 
 use super::analysis::{ClassifiedBindings, KnownBindings, selector_bool_value};
 
@@ -15,6 +15,7 @@ pub(super) fn rewrite_cps_bodies(
         classifications,
         fst_names,
         snd_names,
+        rewritten_lets: Vec::new(),
     }
     .fold(expr)
 }
@@ -23,30 +24,48 @@ struct RewriteBodies<'a> {
     classifications: &'a ClassifiedBindings,
     fst_names: &'a KnownBindings,
     snd_names: &'a KnownBindings,
+    /// The name, id and rewritten value of each classified `let` whose body
+    /// the machine is folding, innermost last.
+    rewritten_lets: Vec<(String, Option<VarId>, PseudoExpr)>,
 }
 
 impl Walker for RewriteBodies<'_> {
-    fn pre_expr(&mut self, expr: &PseudoExpr) -> FoldAction {
-        if let PseudoExpr::Let {
+    fn enter_owned(&mut self, expr: PseudoExpr) -> Entered {
+        match expr {
+            PseudoExpr::Let {
+                name,
+                id,
+                value,
+                body,
+            } if self.classifications.contains_binding(&name, id) => {
+                // Rewrite the lambda value: replace selector vars with Bool.
+                let new_value = rewrite_selector_body(&value, self.fst_names, self.snd_names);
+                // Continue folding the body normally — on the machine, since
+                // classified lets can nest as deep as the script does.
+                self.rewritten_lets.push((name, id, new_value));
+                Entered::Await(vec![body.into_inner()])
+            }
+            expr => Entered::Walk(expr),
+        }
+    }
+
+    fn resume(&mut self, mut folded: Vec<PseudoExpr>) -> Entered {
+        let (name, id, value) = self
+            .rewritten_lets
+            .pop()
+            .expect("a classified let for every folded body");
+        let body = folded.pop().expect("folded classified let body");
+        Entered::Done(PseudoExpr::Let {
             name,
             id,
-            value,
-            body,
-        } = expr
-            && self.classifications.contains_binding(name, *id)
-        {
-            // Rewrite the lambda value: replace selector vars with Bool.
-            let new_value = rewrite_selector_body(value, self.fst_names, self.snd_names);
-            // Continue folding the body normally.
-            let new_body = self.fold((**body).clone());
-            return FoldAction::Replace(PseudoExpr::Let {
-                name: name.clone(),
-                id: *id,
-                value: PBox::new(new_value),
-                body: PBox::new(new_body),
-            });
-        }
-        FoldAction::Walk
+            value: PBox::new(value),
+            body: PBox::new(body),
+        })
+    }
+
+    // Folded flat, so a deep `when` costs no stack.
+    fn machine_folds_when(&self) -> bool {
+        true
     }
 }
 
@@ -266,6 +285,11 @@ pub(super) fn rewrite_selector_body(
                 then_branch: PBox::new(then_branch),
                 else_branch: PBox::new(else_branch),
             }
+        }
+
+        // Folded flat, so a deep `when` costs no stack.
+        fn machine_folds_when(&self) -> bool {
+            true
         }
     }
 

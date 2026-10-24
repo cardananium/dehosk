@@ -4,7 +4,7 @@
 
 use crate::decompile::list_traversal::is_list_tail_of_var;
 use crate::decompile::simplify::Simplifier;
-use crate::pseudo::ast::{Binder, PseudoExpr, WhenClause};
+use crate::pseudo::ast::{Binder, PseudoExpr};
 use crate::pseudo::var_id::VarId;
 
 fn is_head_of(expr: &PseudoExpr, subj_var_name: &str) -> bool {
@@ -100,25 +100,15 @@ fn replace_legacy_access(
             self.shadowed = self.saved.pop().expect("let shadow");
         }
 
-        // Overridden only to leave `Literal` patterns alone: the default
-        // `fold_clause` folds them. The rewrite shadows on no `when` binder
-        // at all, so `shadowed` is untouched here.
-        fn fold_when(
-            &mut self,
-            subject: PseudoExpr,
-            subject_name: Option<Binder>,
-            clauses: Vec<WhenClause>,
-        ) -> PseudoExpr {
-            let subject = self.fold(subject);
-            let clauses = clauses
-                .into_iter()
-                .map(|c| WhenClause {
-                    pattern: c.pattern,
-                    guard: c.guard.map(|g| self.fold(g)),
-                    body: self.fold(c.body),
-                })
-                .collect();
-            self.post_when(subject, subject_name, clauses)
+        // Folded flat, literal patterns left as they are, so a deep `when`
+        // costs no stack. The rewrite shadows on no `when` binder at all, so
+        // `shadowed` is untouched by a clause.
+        fn machine_folds_when(&self) -> bool {
+            true
+        }
+
+        fn machine_keeps_pattern_literals(&self) -> bool {
+            true
         }
     }
 

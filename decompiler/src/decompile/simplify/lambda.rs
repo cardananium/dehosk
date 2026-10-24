@@ -527,6 +527,8 @@ impl Simplifier {
         struct BindingRefAnnotator<'a> {
             bindings: &'a HashMap<&'a str, VarId>,
             shadowed: &'a mut Vec<String>,
+            /// `shadowed`'s length when each open clause scope began.
+            clause_bases: Vec<usize>,
         }
 
         impl ExprFolder for BindingRefAnnotator<'_> {
@@ -579,36 +581,41 @@ impl Simplifier {
                 self.shadowed.pop();
             }
 
-            fn fold_when(
-                &mut self,
-                subject: PseudoExpr,
-                subject_name: Option<Binder>,
-                clauses: Vec<WhenClause>,
-            ) -> PseudoExpr {
-                let subject = self.fold(subject);
-                let clauses = clauses
-                    .into_iter()
-                    .map(|clause| {
-                        let base = self.shadowed.len();
-                        if let Some(subject_name) = &subject_name {
-                            self.shadowed.push(subject_name.to_string());
-                        }
-                        Simplifier::push_pattern_bound_names(&clause.pattern, self.shadowed);
-                        let guard = clause.guard.map(|guard| self.fold(guard));
-                        let body = self.fold(clause.body);
-                        self.shadowed.truncate(base);
-                        WhenClause {
-                            pattern: clause.pattern,
-                            guard,
-                            body,
-                        }
-                    })
-                    .collect();
-                self.post_when(subject, subject_name, clauses)
+            // Folded flat, each clause's subject name and pattern binders
+            // shadowing in the clause hooks, so a deep `when` costs no stack.
+            // Patterns stay unfolded.
+            fn machine_folds_when(&self) -> bool {
+                true
+            }
+
+            fn machine_keeps_pattern_literals(&self) -> bool {
+                true
+            }
+
+            fn machine_scopes_clauses(&self) -> bool {
+                true
+            }
+
+            fn enter_clause(&mut self, subject_name: Option<&Binder>, pattern: &WhenPattern) {
+                self.clause_bases.push(self.shadowed.len());
+                if let Some(subject_name) = subject_name {
+                    self.shadowed.push(subject_name.to_string());
+                }
+                Simplifier::push_pattern_bound_names(pattern, self.shadowed);
+            }
+
+            fn exit_clause(&mut self, _subject_name: Option<&Binder>, _pattern: &WhenPattern) {
+                let base = self.clause_bases.pop().expect("open clause scope");
+                self.shadowed.truncate(base);
             }
         }
 
-        BindingRefAnnotator { bindings, shadowed }.fold(expr)
+        BindingRefAnnotator {
+            bindings,
+            shadowed,
+            clause_bases: Vec::new(),
+        }
+        .fold(expr)
     }
 
     fn can_flatten_nested_params(outer_params: &[Binder], inner_params: &[Binder]) -> bool {

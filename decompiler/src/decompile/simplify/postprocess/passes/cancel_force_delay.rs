@@ -42,6 +42,11 @@ pub(crate) fn cancel_force_delay_vars(expr: PseudoExpr) -> PseudoExpr {
         fn post_expr(&mut self, expr: PseudoExpr) -> PseudoExpr {
             normalize_cancel_root(expr)
         }
+
+        // Folded flat, so a deep `when` costs no stack.
+        fn machine_folds_when(&self) -> bool {
+            true
+        }
     }
 
     CancelForceDelayFolder.fold(expr)

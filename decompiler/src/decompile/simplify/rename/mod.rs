@@ -1,7 +1,7 @@
 //! Variable renaming utilities for simplification.
 
 use crate::pseudo::ast::PBox;
-use crate::pseudo::ast::{Binder, PseudoExpr, WhenClause};
+use crate::pseudo::ast::{Binder, PseudoExpr, WhenPattern};
 use crate::pseudo::var_id::{OptionVarIdGet, VarId};
 use crate::pseudo::walker::{FoldAction, Walker};
 
@@ -52,6 +52,7 @@ impl Simplifier {
             new_name,
             new_id: None,
             blocked_depth: 0,
+            clause_blocks: Vec::new(),
         }
         .fold(expr.clone())
     }
@@ -73,6 +74,7 @@ impl Simplifier {
             new_name,
             new_id: Some(new_id),
             blocked_depth: 0,
+            clause_blocks: Vec::new(),
         }
         .fold(expr.clone())
     }
@@ -154,6 +156,8 @@ struct RenameBindingFolder<'a> {
     /// substitution cannot capture.
     new_id: Option<VarId>,
     blocked_depth: usize,
+    /// Whether each open `when` clause blocks the rewrite, innermost last.
+    clause_blocks: Vec<bool>,
 }
 
 impl RenameBindingFolder<'_> {
@@ -167,55 +171,6 @@ impl RenameBindingFolder<'_> {
 
     fn blocks_rewrite(&self, name: &str) -> bool {
         name == self.old_name || self.new_id.is_some_and(|_| name == self.new_name)
-    }
-
-    fn fold_when_clause(
-        &mut self,
-        subject_name: Option<&Binder>,
-        clause: WhenClause,
-    ) -> WhenClause {
-        let mut blocked =
-            subject_name.is_some_and(|subject_name| self.blocks_rewrite(subject_name));
-        if !blocked {
-            blocked = Simplifier::pattern_bound_vars(&clause.pattern)
-                .into_iter()
-                .any(|bound| self.blocks_rewrite(bound.as_str()));
-        }
-
-        let pattern = self.fold_pattern(clause.pattern);
-        let guard = clause
-            .guard
-            .map(|guard| if blocked { guard } else { self.fold(guard) });
-        let body = if blocked {
-            clause.body
-        } else {
-            self.fold(clause.body)
-        };
-
-        WhenClause {
-            pattern,
-            guard,
-            body,
-        }
-    }
-
-    fn rewrite_when(
-        &mut self,
-        subject: &PseudoExpr,
-        subject_name: &Option<Binder>,
-        clauses: &[WhenClause],
-    ) -> PseudoExpr {
-        let subject = self.fold(subject.clone());
-        let clauses = clauses
-            .iter()
-            .cloned()
-            .map(|clause| self.fold_when_clause(subject_name.as_ref(), clause))
-            .collect();
-        PseudoExpr::When {
-            subject: PBox::new(subject),
-            subject_name: subject_name.clone(),
-            clauses,
-        }
     }
 }
 
@@ -232,12 +187,37 @@ impl Walker for RenameBindingFolder<'_> {
                     id: self.new_id.or(*id),
                 })
             }
-            PseudoExpr::When {
-                subject,
-                subject_name,
-                clauses,
-            } => FoldAction::Replace(self.rewrite_when(subject, subject_name, clauses)),
             _ => FoldAction::Walk,
+        }
+    }
+
+    // Folded flat, so a deep `when` costs no stack. A clause whose subject
+    // name or pattern binders block the rewrite keeps its guard and body as
+    // they are — `pre_expr` stops at them while the clause's block is up —
+    // but its literal pattern, folded before the clause opens, is still
+    // rewritten.
+    fn machine_folds_when(&self) -> bool {
+        true
+    }
+
+    fn machine_scopes_clauses(&self) -> bool {
+        true
+    }
+
+    fn enter_clause(&mut self, subject_name: Option<&Binder>, pattern: &WhenPattern) {
+        let blocked = subject_name.is_some_and(|subject_name| self.blocks_rewrite(subject_name))
+            || Simplifier::pattern_bound_vars(pattern)
+                .into_iter()
+                .any(|bound| self.blocks_rewrite(bound.as_str()));
+        if blocked {
+            self.blocked_depth += 1;
+        }
+        self.clause_blocks.push(blocked);
+    }
+
+    fn exit_clause(&mut self, _subject_name: Option<&Binder>, _pattern: &WhenPattern) {
+        if self.clause_blocks.pop().expect("open clause") {
+            self.blocked_depth -= 1;
         }
     }
 
@@ -333,6 +313,11 @@ impl Walker for SelfCallCleanupFolder<'_> {
         if name == self.fn_name {
             self.blocked_depth -= 1;
         }
+    }
+
+    // Folded flat, so a deep `when` costs no stack.
+    fn machine_folds_when(&self) -> bool {
+        true
     }
 }
 

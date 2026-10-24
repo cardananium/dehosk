@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::decompile::simplify::Simplifier;
-use crate::pseudo::ast::{Binder, PseudoExpr, WhenClause};
+use crate::pseudo::ast::{Binder, PseudoExpr, WhenPattern};
 use crate::pseudo::var_id::VarId;
 
 use super::{
@@ -260,46 +260,41 @@ impl Simplifier {
                 self.shadow = self.saved.pop().expect("let shadow");
             }
 
-            // Not on the generic step machine (its clauses need subject-name
-            // and pattern-binder shadowing), so overridden here rather than via
-            // `fold_clause` — which would also fold `Literal` patterns.
-            fn fold_when(
-                &mut self,
-                subject: PseudoExpr,
-                subject_name: Option<Binder>,
-                clauses: Vec<WhenClause>,
-            ) -> PseudoExpr {
-                let subject = self.fold(subject);
-                let outer_shadow = self.shadow;
-                let clauses = clauses
-                    .into_iter()
-                    .map(|c| {
-                        self.shadow = outer_shadow;
-                        if let Some(subject_name) = &subject_name {
-                            self.shadow = shadow_access_binder(
-                                self.shadow,
-                                subject_name,
-                                self.collection_var,
-                                self.collection_id,
-                            );
-                        }
-                        self.shadow = shadow_access_pattern(
-                            self.shadow,
-                            &c.pattern,
-                            self.collection_var,
-                            self.collection_id,
-                        );
-                        let guard = c.guard.map(|g| self.fold(g));
-                        let body = self.fold(c.body);
-                        WhenClause {
-                            pattern: c.pattern,
-                            guard,
-                            body,
-                        }
-                    })
-                    .collect();
-                self.shadow = outer_shadow;
-                self.post_when(subject, subject_name, clauses)
+            // Folded flat, the subject-name and pattern-binder shadowing of
+            // each clause opened and closed in the clause hooks, so a deep
+            // `when` costs no stack. Patterns stay unfolded.
+            fn machine_folds_when(&self) -> bool {
+                true
+            }
+
+            fn machine_keeps_pattern_literals(&self) -> bool {
+                true
+            }
+
+            fn machine_scopes_clauses(&self) -> bool {
+                true
+            }
+
+            fn enter_clause(&mut self, subject_name: Option<&Binder>, pattern: &WhenPattern) {
+                self.saved.push(self.shadow);
+                if let Some(subject_name) = subject_name {
+                    self.shadow = shadow_access_binder(
+                        self.shadow,
+                        subject_name,
+                        self.collection_var,
+                        self.collection_id,
+                    );
+                }
+                self.shadow = shadow_access_pattern(
+                    self.shadow,
+                    pattern,
+                    self.collection_var,
+                    self.collection_id,
+                );
+            }
+
+            fn exit_clause(&mut self, _subject_name: Option<&Binder>, _pattern: &WhenPattern) {
+                self.shadow = self.saved.pop().expect("clause shadow");
             }
         }
 

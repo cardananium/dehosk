@@ -111,4 +111,9 @@ impl Walker for LetValueSelfRefRestorer {
             self.blocked_depth -= 1;
         }
     }
+
+    // Folded flat, so a deep `when` costs no stack.
+    fn machine_folds_when(&self) -> bool {
+        true
+    }
 }

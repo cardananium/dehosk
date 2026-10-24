@@ -1,5 +1,5 @@
 use crate::pseudo::ast::PBox;
-use crate::pseudo::ast::{PseudoExpr, WhenPattern};
+use crate::pseudo::ast::PseudoExpr;
 use crate::pseudo::constructor::{ConstructorShape, KnownConstructor};
 use crate::pseudo::fold::{ExprFolder, FoldAction};
 use crate::pseudo::var_id::VarId;
@@ -33,9 +33,14 @@ impl ExprFolder for ReplaceVoidMarkers {
 
     // Same reasoning as `pre_expr` above: the old recursion walked a `when`
     // clause's guard/body but never its pattern, so a `__VOID__` sitting
-    // inside a `Literal` pattern must stay untouched.
-    fn fold_pattern(&mut self, pattern: WhenPattern) -> WhenPattern {
-        pattern
+    // inside a `Literal` pattern must stay untouched. Folded flat, so a deep
+    // `when` costs no stack.
+    fn machine_folds_when(&self) -> bool {
+        true
+    }
+
+    fn machine_keeps_pattern_literals(&self) -> bool {
+        true
     }
 }
 

@@ -198,6 +198,11 @@ impl Walker for RewriteCallSites<'_> {
             args: args.into(),
         }
     }
+
+    // Folded flat, so a deep `when` costs no stack.
+    fn machine_folds_when(&self) -> bool {
+        true
+    }
 }
 
 // ===========================================================================

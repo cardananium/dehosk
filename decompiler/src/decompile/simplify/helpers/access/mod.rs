@@ -1,5 +1,5 @@
 use crate::decompile::list_traversal::list_tail_argument;
-use crate::pseudo::ast::{Binder, PseudoExpr, WhenClause, WhenPattern};
+use crate::pseudo::ast::{Binder, PseudoExpr, WhenPattern};
 use crate::pseudo::var_id::{OptionVarIdGet, VarId};
 
 use super::Simplifier;
@@ -205,42 +205,33 @@ fn replace_list_access_by_id(
             self.shadow = self.saved.pop().expect("let shadow");
         }
 
-        // Not on the generic step machine (its clauses need pattern-binder
-        // shadowing), so overridden directly rather than via `fold_clause` —
-        // which would also fold `Literal` patterns.
-        fn fold_when(
-            &mut self,
-            subject: PseudoExpr,
-            subject_name: Option<Binder>,
-            clauses: Vec<WhenClause>,
-        ) -> PseudoExpr {
-            let subject = self.fold(subject);
-            let outer_shadow = self.shadow;
-            let clauses = clauses
-                .into_iter()
-                .map(|c| {
-                    self.shadow = outer_shadow;
-                    if let Some(sn) = &subject_name {
-                        self.shadow =
-                            shadow_access_binder(self.shadow, sn, self.subj_var_name, self.subj_id);
-                    }
-                    self.shadow = shadow_access_pattern(
-                        self.shadow,
-                        &c.pattern,
-                        self.subj_var_name,
-                        self.subj_id,
-                    );
-                    let guard = c.guard.map(|g| self.fold(g));
-                    let body = self.fold(c.body);
-                    WhenClause {
-                        pattern: c.pattern,
-                        guard,
-                        body,
-                    }
-                })
-                .collect();
-            self.shadow = outer_shadow;
-            self.post_when(subject, subject_name, clauses)
+        // Folded flat, the subject-name and pattern-binder shadowing of each
+        // clause opened and closed in the clause hooks, so a deep `when`
+        // costs no stack. Patterns stay unfolded.
+        fn machine_folds_when(&self) -> bool {
+            true
+        }
+
+        fn machine_keeps_pattern_literals(&self) -> bool {
+            true
+        }
+
+        fn machine_scopes_clauses(&self) -> bool {
+            true
+        }
+
+        fn enter_clause(&mut self, subject_name: Option<&Binder>, pattern: &WhenPattern) {
+            self.saved.push(self.shadow);
+            if let Some(sn) = subject_name {
+                self.shadow =
+                    shadow_access_binder(self.shadow, sn, self.subj_var_name, self.subj_id);
+            }
+            self.shadow =
+                shadow_access_pattern(self.shadow, pattern, self.subj_var_name, self.subj_id);
+        }
+
+        fn exit_clause(&mut self, _subject_name: Option<&Binder>, _pattern: &WhenPattern) {
+            self.shadow = self.saved.pop().expect("clause shadow");
         }
     }
 
