@@ -78,19 +78,22 @@ fn collect_all_names(expr: &PseudoExpr, out: &mut HashSet<String>) {
 
 // ===== Analysis =====
 
-struct FuncInfo {
-    params: Vec<Binder>,
-    body: PseudoExpr,
+struct FuncInfo<'a> {
+    params: &'a [Binder],
+    body: &'a PseudoExpr,
 }
 
+/// What [`collect`] records, borrowed from the tree rather than cloned: in a
+/// call nested in its own argument, or a function in a function's body, each
+/// copy would hold the rest of a chain whose length the script chooses.
 #[derive(Default)]
-struct Scan {
+struct Scan<'a> {
     /// `let f = fn(…)` (non-recursive Lambda) → its params + body.
-    funcs: HashMap<VarId, FuncInfo>,
+    funcs: HashMap<VarId, FuncInfo<'a>>,
     /// VarIds reached as anything other than an `Apply` head (value-use).
     value_used: HashSet<VarId>,
-    /// fn id → slot-0..n args at each call site (cloned).
-    call_sites: HashMap<VarId, Vec<Vec<PseudoExpr>>>,
+    /// fn id → slot-0..n args at each call site.
+    call_sites: HashMap<VarId, Vec<&'a [PseudoExpr]>>,
     /// fn ids whose call appears as a `let r = f(…)` value (continuation known).
     let_value_call: HashSet<VarId>,
 }
@@ -135,10 +138,10 @@ fn find_fold(expr: &PseudoExpr) -> Option<Fold> {
         if calls.len() != 1 || calls[0].len() != info.params.len() {
             continue;
         }
-        let args = &calls[0];
+        let args = calls[0];
         for (slot, param) in info.params.iter().enumerate() {
             // Gate 2: the param is used ONLY as a 1-arg application `param(arg)`.
-            let total = count_refs(&info.body, Some(param.id), param.as_str());
+            let total = count_refs(info.body, Some(param.id), param.as_str());
             if total == 0 {
                 continue;
             }
@@ -172,17 +175,14 @@ fn find_fold(expr: &PseudoExpr) -> Option<Fold> {
 /// One-pass enumeration: record let-bound lambdas, value-used ids, call sites,
 /// and which calls are `let r = f(…)` values. A `Var` reached as anything but an
 /// `Apply` head is a value-use (fail-closed enumerability).
-fn collect(expr: &PseudoExpr, scan: &mut Scan) {
-    let mut pending: Vec<&PseudoExpr> = vec![expr];
+fn collect<'a>(expr: &'a PseudoExpr, scan: &mut Scan<'a>) {
+    let mut pending: Vec<&'a PseudoExpr> = vec![expr];
     while let Some(current) = pending.pop() {
         match current {
             PseudoExpr::Apply { function, args } => {
                 let recurse_function =
                     if let PseudoExpr::Var { id: Some(fid), .. } = function.as_ref() {
-                        scan.call_sites
-                            .entry(*fid)
-                            .or_default()
-                            .push((args.clone()).into_vec());
+                        scan.call_sites.entry(*fid).or_default().push(&args[..]);
                         // function head is a CALL, not a value-use — do not scan it.
                         false
                     } else {
@@ -212,8 +212,8 @@ fn collect(expr: &PseudoExpr, scan: &mut Scan) {
                     scan.funcs.insert(
                         *lid,
                         FuncInfo {
-                            params: params.clone(),
-                            body: (**lbody).clone(),
+                            params,
+                            body: lbody,
                         },
                     );
                 }

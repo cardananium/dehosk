@@ -600,7 +600,7 @@ fn is_fields_selector(sel: &FieldSelector) -> bool {
 // body's `[entry, ..]` cons-head, and its `entry.1st` key.
 
 #[derive(Default)]
-struct InterScan {
+struct InterScan<'a> {
     /// canonical rec-fn id → (first-param VarId, the cons-`tail` VarId of its
     /// `when param0 is { [_, ..tail] }` recursion witness).
     recs: HashMap<VarId, (VarId, VarId)>,
@@ -608,8 +608,10 @@ struct InterScan {
     aliases: HashMap<VarId, VarId>,
     /// ids reached as a VALUE (not an `Apply` head) — not enumerable.
     value_used: HashSet<VarId>,
-    /// call-head id → each call's slot-0 argument (cloned).
-    slot0: HashMap<VarId, Vec<PseudoExpr>>,
+    /// call-head id → each call's slot-0 argument. Borrowed, not cloned: in
+    /// `f(f(f(…)))` every argument holds the rest of the chain, and copying
+    /// each would cost memory quadratic in a depth the script chooses.
+    slot0: HashMap<VarId, Vec<&'a PseudoExpr>>,
 }
 
 /// Returns `true` if it pre-bound at least one param (so the caller re-walks).
@@ -635,11 +637,11 @@ fn seed_interproc_params(
         }
         let mut args: Vec<&PseudoExpr> = Vec::new();
         if let Some(s) = scan.slot0.get(canon) {
-            args.extend(s.iter());
+            args.extend(s.iter().copied());
         }
         for r in &alias_ids {
             if let Some(s) = scan.slot0.get(r) {
-                args.extend(s.iter());
+                args.extend(s.iter().copied());
             }
         }
         if args.is_empty() {
@@ -691,10 +693,10 @@ fn seed_interproc_params(
     bound_any
 }
 
-fn scan_calls(expr: &PseudoExpr, scan: &mut InterScan) {
-    let mut work: Vec<&PseudoExpr> = vec![expr];
+fn scan_calls<'a>(expr: &'a PseudoExpr, scan: &mut InterScan<'a>) {
+    let mut work: Vec<&'a PseudoExpr> = vec![expr];
     while let Some(expr) = work.pop() {
-        let mut next: Vec<&PseudoExpr> = Vec::new();
+        let mut next: Vec<&'a PseudoExpr> = Vec::new();
         match expr {
             // `let f = rec fn g(p0, …) { … }` — external callers use `f`, recursive
             // calls use `g`. Canonical = `f`; alias g → f.
@@ -730,7 +732,7 @@ fn scan_calls(expr: &PseudoExpr, scan: &mut InterScan) {
             PseudoExpr::Apply { function, args } => {
                 if let PseudoExpr::Var { id: Some(fid), .. } = function.as_ref() {
                     if let Some(a0) = args.first() {
-                        scan.slot0.entry(*fid).or_default().push(a0.clone());
+                        scan.slot0.entry(*fid).or_default().push(a0);
                     }
                     // function head is a CALL, not a value-use.
                 } else {
