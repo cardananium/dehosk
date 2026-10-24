@@ -18,7 +18,7 @@ pallas-codec = { version = "0.35.0", features = ["num-bigint"] }
 pallas-crypto = "0.35.0"
 pallas-primitives = "0.35.0"
 pallas-traverse = "0.35.0"
-uplc = { git = "file:///home/evgenii/svc/aiken", rev = "d0b883622c59787e21cd7f56c4d14682f3d94bd7" }
+uplc = { git = "file:///home/evgenii/svc/aiken", rev = "4d86266351658f9d8560ecd5d65b33ab1c35ef2c" }
 
 # Shared lint policy (`[lints] workspace = true` in both members).
 # `deny` = probably a bug; CI fails on it. `warn` = a backlog the tree
