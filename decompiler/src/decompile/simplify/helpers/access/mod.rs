@@ -267,25 +267,17 @@ impl Simplifier {
         subj_var_name: &str,
         subj_id: Option<VarId>,
     ) -> (bool, bool) {
-        fn go(
-            expr: &PseudoExpr,
-            subj_var_name: &str,
-            subj_id: Option<VarId>,
-            shadow: AccessShadow,
-        ) -> ListAccessUsage {
-            let usage = ListAccessUsage {
-                has_head: is_head_access_of_target(expr, subj_var_name, subj_id, shadow),
-                has_tail: is_tail_access_of_target(expr, subj_var_name, subj_id, shadow),
-            };
+        // A worklist, not recursion: the tree is as deep as the script
+        // nests. Each node carries the shadowing its binders put on the
+        // target; the search stops once both accesses are found.
+        let mut usage = ListAccessUsage::default();
+        let mut pending: Vec<(&PseudoExpr, AccessShadow)> = vec![(expr, AccessShadow::default())];
+        while let Some((expr, shadow)) = pending.pop() {
+            usage.has_head |= is_head_access_of_target(expr, subj_var_name, subj_id, shadow);
+            usage.has_tail |= is_tail_access_of_target(expr, subj_var_name, subj_id, shadow);
             if usage.has_head && usage.has_tail {
-                return usage;
+                break;
             }
-
-            let merge = |mut usage: ListAccessUsage, other: ListAccessUsage| {
-                usage.has_head |= other.has_head;
-                usage.has_tail |= other.has_tail;
-                usage
-            };
 
             match expr {
                 PseudoExpr::Lambda { params, body } => {
@@ -294,7 +286,7 @@ impl Simplifier {
                         next_shadow =
                             shadow_access_binder(next_shadow, param, subj_var_name, subj_id);
                     }
-                    merge(usage, go(body, subj_var_name, subj_id, next_shadow))
+                    pending.push((body, next_shadow));
                 }
                 PseudoExpr::RecFn { name, params, body } => {
                     let mut next_shadow =
@@ -303,7 +295,7 @@ impl Simplifier {
                         next_shadow =
                             shadow_access_binder(next_shadow, param, subj_var_name, subj_id);
                     }
-                    merge(usage, go(body, subj_var_name, subj_id, next_shadow))
+                    pending.push((body, next_shadow));
                 }
                 PseudoExpr::Let {
                     name,
@@ -311,52 +303,30 @@ impl Simplifier {
                     value,
                     body,
                 } => {
-                    let usage = merge(usage, go(value, subj_var_name, subj_id, shadow));
-                    if usage.has_head && usage.has_tail {
-                        return usage;
-                    }
-                    let next_shadow =
+                    let body_shadow =
                         shadow_access_binding(shadow, name, *id, subj_var_name, subj_id);
-                    merge(usage, go(body, subj_var_name, subj_id, next_shadow))
+                    pending.push((body, body_shadow));
+                    pending.push((value, shadow));
                 }
                 PseudoExpr::Apply { function, args } => {
-                    let mut usage = merge(usage, go(function, subj_var_name, subj_id, shadow));
-                    if usage.has_head && usage.has_tail {
-                        return usage;
-                    }
-                    for arg in args {
-                        usage = merge(usage, go(arg, subj_var_name, subj_id, shadow));
-                        if usage.has_head && usage.has_tail {
-                            break;
-                        }
-                    }
-                    usage
+                    pending.extend(args.iter().rev().map(|arg| (arg, shadow)));
+                    pending.push((function, shadow));
                 }
                 PseudoExpr::If {
                     condition,
                     then_branch,
                     else_branch,
                 } => {
-                    let usage = merge(usage, go(condition, subj_var_name, subj_id, shadow));
-                    if usage.has_head && usage.has_tail {
-                        return usage;
-                    }
-                    let usage = merge(usage, go(then_branch, subj_var_name, subj_id, shadow));
-                    if usage.has_head && usage.has_tail {
-                        return usage;
-                    }
-                    merge(usage, go(else_branch, subj_var_name, subj_id, shadow))
+                    pending.push((else_branch, shadow));
+                    pending.push((then_branch, shadow));
+                    pending.push((condition, shadow));
                 }
                 PseudoExpr::When {
                     subject,
                     subject_name,
                     clauses,
                 } => {
-                    let mut usage = merge(usage, go(subject, subj_var_name, subj_id, shadow));
-                    if usage.has_head && usage.has_tail {
-                        return usage;
-                    }
-                    for clause in clauses {
+                    for clause in clauses.iter().rev() {
                         let mut clause_shadow = shadow;
                         if let Some(subject_name) = subject_name {
                             clause_shadow = shadow_access_binder(
@@ -372,28 +342,16 @@ impl Simplifier {
                             subj_var_name,
                             subj_id,
                         );
+                        pending.push((&clause.body, clause_shadow));
                         if let Some(guard) = &clause.guard {
-                            usage = merge(usage, go(guard, subj_var_name, subj_id, clause_shadow));
-                            if usage.has_head && usage.has_tail {
-                                return usage;
-                            }
-                        }
-                        usage = merge(
-                            usage,
-                            go(&clause.body, subj_var_name, subj_id, clause_shadow),
-                        );
-                        if usage.has_head && usage.has_tail {
-                            break;
+                            pending.push((guard, clause_shadow));
                         }
                     }
-                    usage
+                    pending.push((subject, shadow));
                 }
                 PseudoExpr::BinOp { left, right, .. } => {
-                    let usage = merge(usage, go(left, subj_var_name, subj_id, shadow));
-                    if usage.has_head && usage.has_tail {
-                        return usage;
-                    }
-                    merge(usage, go(right, subj_var_name, subj_id, shadow))
+                    pending.push((right, shadow));
+                    pending.push((left, shadow));
                 }
                 PseudoExpr::UnOp { operand, .. }
                 | PseudoExpr::Force(operand)
@@ -404,68 +362,29 @@ impl Simplifier {
                 | PseudoExpr::IndexAccess {
                     collection: operand,
                     ..
-                } => merge(usage, go(operand, subj_var_name, subj_id, shadow)),
+                } => pending.push((operand, shadow)),
                 PseudoExpr::Trace { message, value } => {
-                    let usage = merge(usage, go(message, subj_var_name, subj_id, shadow));
-                    if usage.has_head && usage.has_tail {
-                        return usage;
-                    }
-                    merge(usage, go(value, subj_var_name, subj_id, shadow))
+                    pending.push((value, shadow));
+                    pending.push((message, shadow));
                 }
-                PseudoExpr::BuiltinCall { args, .. } => {
-                    let mut usage = usage;
-                    for arg in args {
-                        usage = merge(usage, go(arg, subj_var_name, subj_id, shadow));
-                        if usage.has_head && usage.has_tail {
-                            break;
-                        }
-                    }
-                    usage
-                }
-                PseudoExpr::Constr { fields, .. } => {
-                    let mut usage = usage;
-                    for field in fields {
-                        usage = merge(usage, go(field, subj_var_name, subj_id, shadow));
-                        if usage.has_head && usage.has_tail {
-                            break;
-                        }
-                    }
-                    usage
+                PseudoExpr::BuiltinCall { args: items, .. }
+                | PseudoExpr::Constr { fields: items, .. }
+                | PseudoExpr::Tuple(items) => {
+                    pending.extend(items.iter().rev().map(|item| (item, shadow)));
                 }
                 PseudoExpr::List { elements, tail } => {
-                    let mut usage = usage;
-                    for element in elements {
-                        usage = merge(usage, go(element, subj_var_name, subj_id, shadow));
-                        if usage.has_head && usage.has_tail {
-                            return usage;
-                        }
-                    }
                     if let Some(tail) = tail {
-                        usage = merge(usage, go(tail, subj_var_name, subj_id, shadow));
+                        pending.push((tail, shadow));
                     }
-                    usage
+                    pending.extend(elements.iter().rev().map(|element| (element, shadow)));
                 }
                 PseudoExpr::Pair(a, b) => {
-                    let usage = merge(usage, go(a, subj_var_name, subj_id, shadow));
-                    if usage.has_head && usage.has_tail {
-                        return usage;
-                    }
-                    merge(usage, go(b, subj_var_name, subj_id, shadow))
+                    pending.push((b, shadow));
+                    pending.push((a, shadow));
                 }
-                PseudoExpr::Tuple(elements) => {
-                    let mut usage = usage;
-                    for element in elements {
-                        usage = merge(usage, go(element, subj_var_name, subj_id, shadow));
-                        if usage.has_head && usage.has_tail {
-                            break;
-                        }
-                    }
-                    usage
-                }
-                _ => usage,
+                _ => {}
             }
         }
-        let usage = go(expr, subj_var_name, subj_id, AccessShadow::default());
         (usage.has_head, usage.has_tail)
     }
 
