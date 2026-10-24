@@ -637,34 +637,40 @@ impl MidTranslator {
             })
             .collect();
 
-        // Extract binders from Lambda branches
+        // Extract binders from Lambda branches. The body is moved out, not
+        // cloned: it is a whole subtree, and copying it at every `case` costs
+        // time quadratic in a nesting the script chooses.
         for branch in &mut mid_branches {
-            if let MidExpr::Closure {
-                id: closure_id,
-                params,
-                body,
-                ..
-            } = branch.body.clone()
-            {
-                branch.binders = params;
-                let mut extracted_body = body.into_inner();
-                let mut collapsed_uplc_ids = self.provenance.uplc_ids(closure_id).to_vec();
-                // Unwrap cosmetic Thunk from Scott encoding
-                if let MidExpr::Thunk {
-                    id: thunk_id,
-                    body: inner,
+            let body = std::mem::replace(&mut branch.body, MidExpr::Error { id: mid_id });
+            branch.body = match body {
+                MidExpr::Closure {
+                    id: closure_id,
+                    params,
+                    body,
                     ..
-                } = extracted_body
-                {
-                    collapsed_uplc_ids.extend(self.provenance.uplc_ids(thunk_id).iter().copied());
-                    extracted_body = inner.into_inner();
+                } => {
+                    branch.binders = params;
+                    let mut extracted_body = body.into_inner();
+                    let mut collapsed_uplc_ids = self.provenance.uplc_ids(closure_id).to_vec();
+                    // Unwrap cosmetic Thunk from Scott encoding
+                    if let MidExpr::Thunk {
+                        id: thunk_id,
+                        body: inner,
+                        ..
+                    } = extracted_body
+                    {
+                        collapsed_uplc_ids
+                            .extend(self.provenance.uplc_ids(thunk_id).iter().copied());
+                        extracted_body = inner.into_inner();
+                    }
+                    let extracted_body_id = extracted_body.id();
+                    for uplc_id in collapsed_uplc_ids {
+                        self.provenance.absorb_uplc(extracted_body_id, uplc_id);
+                    }
+                    extracted_body
                 }
-                let extracted_body_id = extracted_body.id();
-                for uplc_id in collapsed_uplc_ids {
-                    self.provenance.absorb_uplc(extracted_body_id, uplc_id);
-                }
-                branch.body = extracted_body;
-            }
+                other => other,
+            };
         }
 
         MidExpr::Case {
