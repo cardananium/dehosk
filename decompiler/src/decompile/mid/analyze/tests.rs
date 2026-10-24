@@ -1,5 +1,5 @@
 use super::*;
-use crate::pseudo::mid::expr::{MidExpr, MidLiteral};
+use crate::pseudo::mid::expr::{MBox, MidExpr, MidLiteral};
 use crate::pseudo::mid::expr_id::MidExprId;
 
 fn id(n: u32) -> MidExprId {
@@ -12,11 +12,11 @@ fn test_constant_propagation() {
     let mut expr = MidExpr::Let {
         id: id(0),
         var: x,
-        value: Box::new(MidExpr::Lit {
+        value: MBox::new(MidExpr::Lit {
             id: id(1),
             value: MidLiteral::Integer(42.into()),
         }),
-        body: Box::new(MidExpr::Var { id: id(2), var: x }),
+        body: MBox::new(MidExpr::Var { id: id(2), var: x }),
         use_count: 0,
     };
 
@@ -37,7 +37,7 @@ fn test_constant_propagation() {
 fn test_thunk_classification_cosmetic() {
     let mut expr = MidExpr::Thunk {
         id: id(0),
-        body: Box::new(MidExpr::Lit {
+        body: MBox::new(MidExpr::Lit {
             id: id(1),
             value: MidLiteral::Integer(42.into()),
         }),
@@ -56,13 +56,13 @@ fn test_thunk_classification_cosmetic() {
 fn test_thunk_classification_lazy() {
     let mut expr = MidExpr::Thunk {
         id: id(0),
-        body: Box::new(MidExpr::Apply {
+        body: MBox::new(MidExpr::Apply {
             id: id(1),
-            function: Box::new(MidExpr::Var {
+            function: MBox::new(MidExpr::Var {
                 id: id(2),
                 var: VarId::new(0),
             }),
-            args: vec![],
+            args: vec![].into(),
         }),
         cosmetic: false,
     };
@@ -93,7 +93,8 @@ fn test_constant_fold_addition() {
                 id: id(2),
                 value: MidLiteral::Integer(5.into()),
             },
-        ],
+        ]
+        .into(),
         folded: None,
     };
 
@@ -124,7 +125,8 @@ fn test_constant_fold_equals() {
                 id: id(2),
                 value: MidLiteral::Integer(5.into()),
             },
-        ],
+        ]
+        .into(),
         folded: None,
     };
 
@@ -147,14 +149,14 @@ fn test_run_analysis_integration() {
     let mut expr = MidExpr::Let {
         id: id(0),
         var: x,
-        value: Box::new(MidExpr::Lit {
+        value: MBox::new(MidExpr::Lit {
             id: id(1),
             value: MidLiteral::Integer(10.into()),
         }),
-        body: Box::new(MidExpr::Closure {
+        body: MBox::new(MidExpr::Closure {
             id: id(2),
             params: vec![y],
-            body: Box::new(MidExpr::Var { id: id(3), var: x }),
+            body: MBox::new(MidExpr::Var { id: id(3), var: x }),
             recursive: None,
         }),
         use_count: 0,

@@ -5,7 +5,7 @@ use crate::decompile::{
 };
 use crate::pseudo::ast::{PseudoData, PseudoExpr, PseudoType};
 use crate::pseudo::fold::ExprVisitor;
-use crate::pseudo::mid::expr::MidExpr;
+use crate::pseudo::mid::expr::{MBox, MidExpr};
 use crate::pseudo::mid::expr_id::ProvenanceBuilder;
 use crate::pseudo::var_id::VarInterner;
 use std::collections::HashSet;
@@ -79,18 +79,18 @@ fn test_mir_lower_does_not_guarantee_unique_or_consistent_ref_ids_for_shadowed_l
     let mid = MidExpr::Let {
         id: provenance.fresh_id(),
         var: first,
-        value: Box::new(MidExpr::Lit {
+        value: MBox::new(MidExpr::Lit {
             id: provenance.fresh_id(),
             value: MidLiteral::Integer(1.into()),
         }),
-        body: Box::new(MidExpr::Let {
+        body: MBox::new(MidExpr::Let {
             id: provenance.fresh_id(),
             var: second,
-            value: Box::new(MidExpr::Lit {
+            value: MBox::new(MidExpr::Lit {
                 id: provenance.fresh_id(),
                 value: MidLiteral::Integer(2.into()),
             }),
-            body: Box::new(MidExpr::Builtin {
+            body: MBox::new(MidExpr::Builtin {
                 id: provenance.fresh_id(),
                 fun: DefaultFunction::AddInteger,
                 forces: 0,
@@ -103,7 +103,8 @@ fn test_mir_lower_does_not_guarantee_unique_or_consistent_ref_ids_for_shadowed_l
                         id: provenance.fresh_id(),
                         var: first,
                     },
-                ],
+                ]
+                .into(),
                 folded: None,
             }),
             use_count: 1,
@@ -313,11 +314,11 @@ fn test_mir_lower_propagates_let_binder_type_from_literal_value() {
     let mid = MidExpr::Let {
         id: let_id,
         var: x,
-        value: Box::new(MidExpr::Lit {
+        value: MBox::new(MidExpr::Lit {
             id: value_id,
             value: MidLiteral::Integer(42.into()),
         }),
-        body: Box::new(MidExpr::Var {
+        body: MBox::new(MidExpr::Var {
             id: body_id,
             var: x,
         }),
@@ -371,16 +372,16 @@ fn test_mir_lower_emits_closure_signature_for_literal_returning_fn() {
     let mid = MidExpr::Let {
         id: let_id,
         var: id_fn,
-        value: Box::new(MidExpr::Closure {
+        value: MBox::new(MidExpr::Closure {
             id: closure_id,
             params: vec![p],
-            body: Box::new(MidExpr::Lit {
+            body: MBox::new(MidExpr::Lit {
                 id: closure_body_id,
                 value: MidLiteral::Integer(42.into()),
             }),
             recursive: None,
         }),
-        body: Box::new(MidExpr::Var {
+        body: MBox::new(MidExpr::Var {
             id: body_id,
             var: id_fn,
         }),
@@ -428,31 +429,33 @@ fn test_mir_lower_closure_signature_chains_via_typed_apply_body() {
     let mid = MidExpr::Let {
         id: ids[0],
         var: double,
-        value: Box::new(MidExpr::Closure {
+        value: MBox::new(MidExpr::Closure {
             id: ids[1],
             params: vec![n],
-            body: Box::new(MidExpr::Builtin {
+            body: MBox::new(MidExpr::Builtin {
                 id: ids[2],
                 fun: DefaultFunction::AddInteger,
                 forces: 0,
                 args: vec![
                     MidExpr::Var { id: ids[3], var: n },
                     MidExpr::Var { id: ids[4], var: n },
-                ],
+                ]
+                .into(),
                 folded: None,
             }),
             recursive: None,
         }),
-        body: Box::new(MidExpr::Apply {
+        body: MBox::new(MidExpr::Apply {
             id: ids[5],
-            function: Box::new(MidExpr::Var {
+            function: MBox::new(MidExpr::Var {
                 id: ids[6],
                 var: double,
             }),
             args: vec![MidExpr::Lit {
                 id: ids[7],
                 value: MidLiteral::Integer(3.into()),
-            }],
+            }]
+            .into(),
         }),
         use_count: 1,
     };
@@ -507,25 +510,26 @@ fn test_mir_lower_apply_result_type_from_signature() {
     let mid = MidExpr::Let {
         id: let_id,
         var: id_fn,
-        value: Box::new(MidExpr::Closure {
+        value: MBox::new(MidExpr::Closure {
             id: closure_id,
             params: vec![p],
-            body: Box::new(MidExpr::Lit {
+            body: MBox::new(MidExpr::Lit {
                 id: closure_body_id,
                 value: MidLiteral::Integer(42.into()),
             }),
             recursive: None,
         }),
-        body: Box::new(MidExpr::Apply {
+        body: MBox::new(MidExpr::Apply {
             id: apply_id,
-            function: Box::new(MidExpr::Var {
+            function: MBox::new(MidExpr::Var {
                 id: fn_ref_id,
                 var: id_fn,
             }),
             args: vec![MidExpr::Lit {
                 id: arg_id,
                 value: MidLiteral::Integer(0.into()),
-            }],
+            }]
+            .into(),
         }),
         use_count: 1,
     };
@@ -567,7 +571,7 @@ fn test_mir_lower_polymorphic_builtin_head_list_from_list_arg() {
     let mid = MidExpr::Let {
         id: ids[0],
         var: xs,
-        value: Box::new(MidExpr::Lit {
+        value: MBox::new(MidExpr::Lit {
             id: ids[1],
             value: MidLiteral::List(vec![
                 MidLiteral::Integer(1.into()),
@@ -575,14 +579,15 @@ fn test_mir_lower_polymorphic_builtin_head_list_from_list_arg() {
                 MidLiteral::Integer(3.into()),
             ]),
         }),
-        body: Box::new(MidExpr::Builtin {
+        body: MBox::new(MidExpr::Builtin {
             id: ids[2],
             fun: DefaultFunction::HeadList,
             forces: 1,
             args: vec![MidExpr::Var {
                 id: ids[3],
                 var: xs,
-            }],
+            }]
+            .into(),
             folded: None,
         }),
         use_count: 1,
@@ -626,18 +631,18 @@ fn test_mir_lower_polymorphic_fst_pair_extracts_first_type() {
     let mid = MidExpr::Let {
         id: ids[0],
         var: p,
-        value: Box::new(MidExpr::Lit {
+        value: MBox::new(MidExpr::Lit {
             id: ids[1],
             value: MidLiteral::Pair(
                 Box::new(MidLiteral::Integer(1.into())),
                 Box::new(MidLiteral::Bool(true)),
             ),
         }),
-        body: Box::new(MidExpr::Builtin {
+        body: MBox::new(MidExpr::Builtin {
             id: ids[2],
             fun: DefaultFunction::FstPair,
             forces: 2,
-            args: vec![MidExpr::Var { id: ids[3], var: p }],
+            args: vec![MidExpr::Var { id: ids[3], var: p }].into(),
             folded: None,
         }),
         use_count: 1,
@@ -800,7 +805,7 @@ fn test_lowerer_reprojects_constr_data_initial_lineage_to_real_lowered_snapshot(
                             MidExpr::Closure {
                                 id: lambda_id,
                                 params: vec![lambda_param],
-                                body: Box::new(MidExpr::Var {
+                                body: MBox::new(MidExpr::Var {
                                     id: lambda_body_id,
                                     var: lambda_param,
                                 }),
@@ -810,13 +815,16 @@ fn test_lowerer_reprojects_constr_data_initial_lineage_to_real_lowered_snapshot(
                                 id: nil_id,
                                 value: crate::pseudo::mid::expr::MidLiteral::List(Vec::new()),
                             },
-                        ],
+                        ]
+                        .into(),
                         folded: None,
                     },
-                ],
+                ]
+                .into(),
                 folded: None,
             },
-        ],
+        ]
+        .into(),
         folded: None,
     };
 
@@ -877,7 +885,8 @@ fn test_lowerer_registers_folded_builtin_arg_provenance_on_surviving_literal() {
                 id: arg_b_id,
                 value: crate::pseudo::mid::expr::MidLiteral::Integer(3.into()),
             },
-        ],
+        ]
+        .into(),
         folded: Some(crate::pseudo::mid::expr::MidLiteral::Integer(2.into())),
     };
 
@@ -919,11 +928,11 @@ fn test_lowerer_registers_resolved_force_body_provenance_on_surviving_root() {
 
     let mid = MidExpr::Force {
         id: force_id,
-        body: Box::new(MidExpr::Var {
+        body: MBox::new(MidExpr::Var {
             id: body_var_id,
             var: body_var,
         }),
-        resolved: Some(Box::new(MidExpr::Lit {
+        resolved: Some(MBox::new(MidExpr::Lit {
             id: resolved_id,
             value: crate::pseudo::mid::expr::MidLiteral::Bool(true),
         })),
@@ -1502,27 +1511,28 @@ fn test_lowerer_collects_simplify_hints_without_pseudo_rescan() {
     let expr = MidExpr::Let {
         id: let_outer,
         var: head_alias,
-        value: Box::new(MidExpr::Builtin {
+        value: MBox::new(MidExpr::Builtin {
             id: head_builtin,
             fun: DefaultFunction::HeadList,
             forces: 0,
-            args: vec![],
+            args: vec![].into(),
             folded: None,
         }),
-        body: Box::new(MidExpr::Let {
+        body: MBox::new(MidExpr::Let {
             id: let_inner,
             var: unpack_alias,
-            value: Box::new(MidExpr::Builtin {
+            value: MBox::new(MidExpr::Builtin {
                 id: unpack_builtin,
                 fun: DefaultFunction::UnConstrData,
                 forces: 0,
                 args: vec![MidExpr::Var {
                     id: data_ref,
                     var: data_var,
-                }],
+                }]
+                .into(),
                 folded: None,
             }),
-            body: Box::new(MidExpr::Var {
+            body: MBox::new(MidExpr::Var {
                 id: body_ref,
                 var: unpack_alias,
             }),

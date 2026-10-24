@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use uplc::builtins::DefaultFunction;
 
-use crate::pseudo::mid::expr::MidExpr;
+use crate::pseudo::mid::expr::{MBox, MidExpr};
 use crate::pseudo::mid::expr_id::{ProvenanceBuilder, refresh_mid_ids};
 use crate::pseudo::var_id::VarId;
 
@@ -211,7 +211,7 @@ fn resolve_force_thunks(expr: &mut MidExpr, thunk_bodies: &HashMap<VarId, MidExp
             } = body.as_mut()
             {
                 let inner = std::mem::replace(thunk_body.as_mut(), MidExpr::Error { id });
-                *resolved = Some(Box::new(inner));
+                *resolved = Some(MBox::new(inner));
                 changed = true;
             // Rule 2: Force(Var(v)) where v is a known thunk variable.
             // Inline the thunk body into resolved so the lowerer can use it
@@ -219,7 +219,7 @@ fn resolve_force_thunks(expr: &mut MidExpr, thunk_bodies: &HashMap<VarId, MidExp
             } else if let MidExpr::Var { var, .. } = body.as_ref()
                 && let Some(thunk_body) = thunk_bodies.get(var)
             {
-                *resolved = Some(Box::new(thunk_body.clone()));
+                *resolved = Some(MBox::new(thunk_body.clone()));
                 changed = true;
             }
         }
@@ -309,7 +309,7 @@ fn eliminate_dead_lets(expr: &mut MidExpr, provenance: &mut ProvenanceBuilder) {
         {
             // Dead binding — return just the body
             if let MidExpr::Let { body, value, .. } = node {
-                let body = *body;
+                let body = body.into_inner();
                 let target_id = body.id();
                 provenance.absorb_mid(target_id, id);
                 absorb_mid_subtree(target_id, &value, provenance);
@@ -355,7 +355,7 @@ fn inline_trivial_lets(expr: &mut MidExpr, provenance: &mut ProvenanceBuilder) {
             let target = *var;
             let replacement = value.clone();
             if let MidExpr::Let { body, .. } = node {
-                let result = substitute_var(*body, target, &replacement, provenance);
+                let result = substitute_var(body.into_inner(), target, &replacement, provenance);
                 let target_id = result.id();
                 provenance.absorb_mid(target_id, id);
                 absorb_mid_subtree(target_id, &replacement, provenance);
@@ -398,7 +398,7 @@ fn fold_immediate_apps(expr: &mut MidExpr, provenance: &mut ProvenanceBuilder) {
         let MidExpr::Apply { id, function, args } = node else {
             return Rewritten::Done(node);
         };
-        let function = *function;
+        let function = function.into_inner();
 
         // Hoist Let from Apply function position:
         // Apply(Let(v, val, inner_fn), args) → Let(v, val, Apply(inner_fn, args))
@@ -414,7 +414,7 @@ fn fold_immediate_apps(expr: &mut MidExpr, provenance: &mut ProvenanceBuilder) {
                 id: let_id,
                 var,
                 value,
-                body: Box::new(MidExpr::Apply {
+                body: MBox::new(MidExpr::Apply {
                     id,
                     function: body,
                     args,
@@ -468,8 +468,8 @@ fn fold_immediate_apps(expr: &mut MidExpr, provenance: &mut ProvenanceBuilder) {
                 result = MidExpr::Let {
                     id, // temporary duplicate — refresh_mid_ids fixes at end of precompute
                     var: *param,
-                    value: Box::new(arg.clone()),
-                    body: Box::new(result),
+                    value: MBox::new(arg.clone()),
+                    body: MBox::new(result),
                     use_count: 0,
                 };
             }
@@ -479,7 +479,7 @@ fn fold_immediate_apps(expr: &mut MidExpr, provenance: &mut ProvenanceBuilder) {
 
         Rewritten::Done(MidExpr::Apply {
             id,
-            function: Box::new(function),
+            function: MBox::new(function),
             args,
         })
     });
@@ -552,7 +552,7 @@ fn convert_y_comb(
                             } => {
                                 removed_body_ids.push(inner_id);
                                 real_params.extend(inner_params);
-                                actual_body = *inner_body;
+                                actual_body = inner_body.into_inner();
                             }
                             MidExpr::Thunk {
                                 id: thunk_id,
@@ -560,7 +560,7 @@ fn convert_y_comb(
                                 ..
                             } => {
                                 removed_body_ids.push(thunk_id);
-                                actual_body = *inner;
+                                actual_body = inner.into_inner();
                             }
                             _ => break,
                         }
@@ -572,7 +572,7 @@ fn convert_y_comb(
                     let new_closure = MidExpr::Closure {
                         id: c_id,
                         params: real_params,
-                        body: Box::new(new_body),
+                        body: MBox::new(new_body),
                         recursive: Some(var),
                     };
                     converted.insert(var);
@@ -581,13 +581,13 @@ fn convert_y_comb(
                     }
 
                     // Rewrite call sites: var(var, args) → var(args)
-                    let body = rewrite_call_sites(*body, var, provenance);
+                    let body = rewrite_call_sites(body.into_inner(), var, provenance);
 
                     return MidExpr::Let {
                         id,
                         var,
-                        value: Box::new(new_closure),
-                        body: Box::new(body),
+                        value: MBox::new(new_closure),
+                        body: MBox::new(body),
                         use_count,
                     };
                 }
@@ -669,11 +669,11 @@ fn rewrite_self_calls(
                 provenance.absorb_mid(id, first_arg_id);
                 MidExpr::Apply {
                     id,
-                    function: Box::new(MidExpr::Var {
+                    function: MBox::new(MidExpr::Var {
                         id, // temporary duplicate — refresh_mid_ids fixes
                         var: rec_var,
                     }),
-                    args: real_args,
+                    args: real_args.into(),
                 }
             }
             MidExpr::Var { id, var } if var == self_param => MidExpr::Var { id, var: rec_var },
@@ -721,11 +721,11 @@ fn rewrite_call_sites(
                 }
                 MidExpr::Apply {
                     id,
-                    function: Box::new(MidExpr::Var {
+                    function: MBox::new(MidExpr::Var {
                         id, // temporary duplicate — refresh_mid_ids fixes
                         var: rec_var,
                     }),
-                    args: real_args,
+                    args: real_args.into(),
                 }
             }
             other => other,

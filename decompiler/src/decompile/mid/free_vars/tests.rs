@@ -1,5 +1,5 @@
 use super::*;
-use crate::pseudo::mid::expr::MidExpr;
+use crate::pseudo::mid::expr::{MBox, MidExpr};
 use crate::pseudo::mid::expr_id::MidExprId;
 
 fn id(n: u32) -> MidExprId {
@@ -20,7 +20,7 @@ fn test_free_vars_closure_binds() {
     let expr = MidExpr::Closure {
         id: id(0),
         params: vec![x],
-        body: Box::new(MidExpr::Var { id: id(1), var: x }),
+        body: MBox::new(MidExpr::Var { id: id(1), var: x }),
         recursive: None,
     };
     let fv = free_vars(&expr);
@@ -35,7 +35,7 @@ fn test_free_vars_closure_captures() {
     let expr = MidExpr::Closure {
         id: id(0),
         params: vec![x],
-        body: Box::new(MidExpr::Var { id: id(1), var: y }),
+        body: MBox::new(MidExpr::Var { id: id(1), var: y }),
         recursive: None,
     };
     let fv = free_vars(&expr);

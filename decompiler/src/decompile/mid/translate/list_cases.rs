@@ -78,7 +78,7 @@ impl MidTranslator {
                     scrutinee,
                     mut branches,
                     ..
-                } = *function
+                } = function.into_inner()
                 else {
                     unreachable!("case shape checked above");
                 };

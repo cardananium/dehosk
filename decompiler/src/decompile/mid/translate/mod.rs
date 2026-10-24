@@ -7,7 +7,7 @@
 
 use uplc::ast::{Constant, NamedDeBruijn, Term};
 
-use crate::pseudo::mid::expr::{CaseEncoding, MidBranch, MidExpr, MidLiteral};
+use crate::pseudo::mid::expr::{CaseEncoding, MBox, MVec, MidBranch, MidExpr, MidLiteral};
 use crate::pseudo::mid::expr_id::{MidExprId, ProvenanceBuilder};
 use crate::pseudo::var_id::{VarId, VarInterner};
 
@@ -131,7 +131,7 @@ impl MidTranslator {
                     done.push(MidExpr::Closure {
                         id: mid_id,
                         params,
-                        body: Box::new(body),
+                        body: MBox::new(body),
                         recursive: None, // filled in later
                     });
                 }
@@ -142,8 +142,8 @@ impl MidTranslator {
                     done.push(MidExpr::Let {
                         id: mid_id,
                         var,
-                        value: Box::new(value),
-                        body: Box::new(body),
+                        value: MBox::new(value),
+                        body: MBox::new(body),
                         use_count: 0, // filled in later
                     });
                 }
@@ -161,7 +161,7 @@ impl MidTranslator {
                     let inner = done.pop().expect("delay body");
                     done.push(MidExpr::Thunk {
                         id: mid_id,
-                        body: Box::new(inner),
+                        body: MBox::new(inner),
                         cosmetic: false, // determined later
                     });
                 }
@@ -170,7 +170,7 @@ impl MidTranslator {
                     done.push(MidExpr::Constr {
                         id: mid_id,
                         tag,
-                        fields,
+                        fields: fields.into(),
                     });
                 }
                 Step::FinishFoldedCase {
@@ -387,7 +387,7 @@ impl MidTranslator {
                 id: mid_id,
                 fun: *fun,
                 forces: 0,
-                args: Vec::new(),
+                args: MVec::new(),
                 folded: None,
             }),
 
@@ -542,8 +542,8 @@ impl MidTranslator {
             }
             _ => MidExpr::Apply {
                 id: mid_id,
-                function: Box::new(function),
-                args,
+                function: MBox::new(function),
+                args: args.into(),
             },
         }
     }
@@ -579,14 +579,17 @@ impl MidTranslator {
             ..
         } = inner
         {
-            if let MidExpr::Builtin {
-                id: b_id,
-                fun,
-                forces,
-                mut args,
-                folded,
-            } = *function
-            {
+            if matches!(function.as_ref(), MidExpr::Builtin { .. }) {
+                let MidExpr::Builtin {
+                    id: b_id,
+                    fun,
+                    forces,
+                    mut args,
+                    folded,
+                } = function.into_inner()
+                else {
+                    unreachable!("checked to be a builtin just above");
+                };
                 self.provenance.absorb_mid(b_id, mid_id);
                 args.extend(apply_args);
                 return MidExpr::Builtin {
@@ -600,7 +603,7 @@ impl MidTranslator {
             // Not a builtin — wrap back in Force(Apply(...))
             return MidExpr::Force {
                 id: mid_id,
-                body: Box::new(MidExpr::Apply {
+                body: MBox::new(MidExpr::Apply {
                     id: apply_id,
                     function,
                     args: apply_args,
@@ -611,7 +614,7 @@ impl MidTranslator {
 
         MidExpr::Force {
             id: mid_id,
-            body: Box::new(inner),
+            body: MBox::new(inner),
             resolved: None,
         }
     }
@@ -644,7 +647,7 @@ impl MidTranslator {
             } = branch.body.clone()
             {
                 branch.binders = params;
-                let mut extracted_body = *body;
+                let mut extracted_body = body.into_inner();
                 let mut collapsed_uplc_ids = self.provenance.uplc_ids(closure_id).to_vec();
                 // Unwrap cosmetic Thunk from Scott encoding
                 if let MidExpr::Thunk {
@@ -654,7 +657,7 @@ impl MidTranslator {
                 } = extracted_body
                 {
                     collapsed_uplc_ids.extend(self.provenance.uplc_ids(thunk_id).iter().copied());
-                    extracted_body = *inner;
+                    extracted_body = inner.into_inner();
                 }
                 let extracted_body_id = extracted_body.id();
                 for uplc_id in collapsed_uplc_ids {
@@ -666,7 +669,7 @@ impl MidTranslator {
 
         MidExpr::Case {
             id: mid_id,
-            scrutinee: Box::new(scrutinee),
+            scrutinee: MBox::new(scrutinee),
             branches: mid_branches,
             encoding: CaseEncoding::Native,
         }
@@ -688,7 +691,7 @@ impl MidTranslator {
                 body,
                 ..
             } if params.len() <= args.len() => {
-                let mut result = *body;
+                let mut result = body.into_inner();
                 // Unwrap cosmetic Thunk from Scott/Case encoding
                 let mut unwrapped_thunk_id = None;
                 if let MidExpr::Thunk {
@@ -696,7 +699,7 @@ impl MidTranslator {
                 } = result
                 {
                     unwrapped_thunk_id = Some(thunk_id);
-                    result = *body;
+                    result = body.into_inner();
                 }
 
                 // Split args into bound (matching params) and excess
@@ -712,8 +715,8 @@ impl MidTranslator {
                     result = MidExpr::Let {
                         id: let_id,
                         var: param,
-                        value: Box::new(arg),
-                        body: Box::new(result),
+                        value: MBox::new(arg),
+                        body: MBox::new(result),
                         use_count: 0,
                     };
                     outermost_let_id = Some(let_id);
@@ -732,8 +735,8 @@ impl MidTranslator {
                 if !excess_args.is_empty() {
                     result = MidExpr::Apply {
                         id: mid_id,
-                        function: Box::new(result),
-                        args: excess_args,
+                        function: MBox::new(result),
+                        args: excess_args.into(),
                     };
                 }
 
@@ -743,8 +746,8 @@ impl MidTranslator {
                 // Fallback: regular Apply
                 MidExpr::Apply {
                     id: mid_id,
-                    function: Box::new(other),
-                    args,
+                    function: MBox::new(other),
+                    args: args.into(),
                 }
             }
         }

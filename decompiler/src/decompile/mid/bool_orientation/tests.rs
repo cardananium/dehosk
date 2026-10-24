@@ -1,5 +1,5 @@
 use super::*;
-use crate::pseudo::mid::expr::{MidBranch, MidLiteral};
+use crate::pseudo::mid::expr::{MBox, MidBranch, MidLiteral};
 
 fn id(n: u64) -> MidExprId {
     MidExprId::new(n as u32)
@@ -17,10 +17,10 @@ fn fst_selector(base: u64) -> MidExpr {
     MidExpr::Closure {
         id: id(base),
         params: vec![VarId::new(base as u32 + 1)],
-        body: Box::new(MidExpr::Closure {
+        body: MBox::new(MidExpr::Closure {
             id: id(base + 1),
             params: vec![VarId::new(base as u32 + 2)],
-            body: Box::new(var(base + 2, base as u32 + 1)),
+            body: MBox::new(var(base + 2, base as u32 + 1)),
             recursive: None,
         }),
         recursive: None,
@@ -32,10 +32,10 @@ fn snd_selector(base: u64) -> MidExpr {
     MidExpr::Closure {
         id: id(base),
         params: vec![VarId::new(base as u32 + 1)],
-        body: Box::new(MidExpr::Closure {
+        body: MBox::new(MidExpr::Closure {
             id: id(base + 1),
             params: vec![VarId::new(base as u32 + 2)],
-            body: Box::new(var(base + 2, base as u32 + 2)),
+            body: MBox::new(var(base + 2, base as u32 + 2)),
             recursive: None,
         }),
         recursive: None,
@@ -45,7 +45,7 @@ fn snd_selector(base: u64) -> MidExpr {
 fn thunk(n: u64, body: MidExpr) -> MidExpr {
     MidExpr::Thunk {
         id: id(n),
-        body: Box::new(body),
+        body: MBox::new(body),
         cosmetic: false,
     }
 }
@@ -53,7 +53,7 @@ fn thunk(n: u64, body: MidExpr) -> MidExpr {
 fn scott_bool_case(case_id: u64, scrutinee: MidExpr) -> MidExpr {
     MidExpr::Case {
         id: id(case_id),
-        scrutinee: Box::new(scrutinee),
+        scrutinee: MBox::new(scrutinee),
         branches: vec![
             MidBranch {
                 tag: 0,
@@ -79,12 +79,12 @@ fn scott_bool_case(case_id: u64, scrutinee: MidExpr) -> MidExpr {
 fn if_producer(n: u64, then_branch: MidExpr, else_branch: MidExpr) -> MidExpr {
     MidExpr::If {
         id: id(n),
-        condition: Box::new(MidExpr::Lit {
+        condition: MBox::new(MidExpr::Lit {
             id: id(n + 1),
             value: MidLiteral::Bool(true),
         }),
-        then_branch: Box::new(then_branch),
-        else_branch: Box::new(else_branch),
+        then_branch: MBox::new(then_branch),
+        else_branch: MBox::new(else_branch),
     }
 }
 
@@ -125,14 +125,14 @@ fn var_hops_resolve_through_let_env() {
     let tree = MidExpr::Let {
         id: id(1),
         var: VarId::new(7),
-        value: Box::new(thunk(10, fst_selector(20))),
+        value: MBox::new(thunk(10, fst_selector(20))),
         use_count: 1,
-        body: Box::new(MidExpr::Let {
+        body: MBox::new(MidExpr::Let {
             id: id(2),
             var: VarId::new(8),
-            value: Box::new(thunk(11, snd_selector(40))),
+            value: MBox::new(thunk(11, snd_selector(40))),
             use_count: 1,
-            body: Box::new(case),
+            body: MBox::new(case),
         }),
     };
     let map = analyze_bool_orientations(&tree);
@@ -168,7 +168,7 @@ fn constant_selector_if_is_unwitnessed() {
 fn data_tag_decode_is_true_first() {
     let producer = MidExpr::Case {
         id: id(500),
-        scrutinee: Box::new(var(501, 50)),
+        scrutinee: MBox::new(var(501, 50)),
         branches: vec![
             MidBranch {
                 tag: 0,

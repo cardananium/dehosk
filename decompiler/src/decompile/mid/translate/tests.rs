@@ -446,7 +446,7 @@ fn test_native_case_branch_extraction_absorbs_lambda_and_thunk_into_surviving_bo
     let mid = translator.translate(&program.term);
 
     let branch_body_id = match mid {
-        MidExpr::Closure { body, .. } => match *body {
+        MidExpr::Closure { body, .. } => match body.into_inner() {
             MidExpr::Case { branches, .. } => branches
                 .first()
                 .expect("expected one case branch")

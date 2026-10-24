@@ -1,5 +1,5 @@
 use super::*;
-use crate::pseudo::mid::expr::{MidExpr, MidLiteral};
+use crate::pseudo::mid::expr::{MBox, MidExpr, MidLiteral};
 use crate::pseudo::var_id::VarId;
 
 fn lit(id: MidExprId, value: i64) -> MidExpr {
@@ -22,8 +22,8 @@ fn test_validate_mid_invariants_accepts_well_formed_tree() {
     let expr = MidExpr::Let {
         id: let_id,
         var: VarId::new(0),
-        value: Box::new(lit(value_id, 42)),
-        body: Box::new(MidExpr::Var {
+        value: MBox::new(lit(value_id, 42)),
+        body: MBox::new(MidExpr::Var {
             id: body_id,
             var: VarId::new(0),
         }),
@@ -44,8 +44,8 @@ fn test_validate_mid_invariants_rejects_duplicate_ids() {
     let expr = MidExpr::Let {
         id: let_id,
         var: VarId::new(0),
-        value: Box::new(lit(shared_id, 42)),
-        body: Box::new(MidExpr::Var {
+        value: MBox::new(lit(shared_id, 42)),
+        body: MBox::new(MidExpr::Var {
             id: shared_id,
             var: VarId::new(0),
         }),

@@ -7,10 +7,20 @@
 use num_bigint::BigInt;
 use uplc::builtins::DefaultFunction;
 
+use super::super::pbox::{Nested, Owned, OwnedVec};
 use super::super::var_id::VarId;
 use super::expr_id::MidExprId;
 
+/// A boxed child expression with an iterative destructor.
+pub(crate) type MBox = Owned<MidExpr>;
+/// A list of child expressions with an iterative destructor.
+pub(crate) type MVec = OwnedVec<MidExpr>;
+
 /// Mid-level expression preserving UPLC semantics with analysis annotations.
+///
+/// The children sit in [`MBox`] / [`MVec`], whose destructors are heap walks:
+/// nesting depth is script-controlled, so releasing a tree must not take a
+/// call frame per level.
 #[derive(Debug, Clone)]
 pub(crate) enum MidExpr {
     /// Literal constant value.
@@ -23,7 +33,7 @@ pub(crate) enum MidExpr {
     /// The body is NOT evaluated until forced.
     Thunk {
         id: MidExprId,
-        body: Box<MidExpr>,
+        body: MBox,
         /// If true, this thunk wraps a value-form (Lambda, Lit, Constr)
         /// and can be stripped during lowering without changing semantics.
         cosmetic: bool,
@@ -32,17 +42,17 @@ pub(crate) enum MidExpr {
     /// Force evaluation of a thunk (UPLC Force).
     Force {
         id: MidExprId,
-        body: Box<MidExpr>,
+        body: MBox,
         /// If the inner is known to be a thunk, the resolved
         /// expression. Set during the pre-computation pass.
-        resolved: Option<Box<MidExpr>>,
+        resolved: Option<MBox>,
     },
 
     /// Closure (UPLC Lambda). Captures lexical environment.
     Closure {
         id: MidExprId,
         params: Vec<VarId>,
-        body: Box<MidExpr>,
+        body: MBox,
         /// If this is a recursive function (Y-combinator), the self-reference VarId.
         recursive: Option<VarId>,
     },
@@ -50,16 +60,16 @@ pub(crate) enum MidExpr {
     /// Function application (UPLC Apply).
     Apply {
         id: MidExprId,
-        function: Box<MidExpr>,
-        args: Vec<MidExpr>,
+        function: MBox,
+        args: MVec,
     },
 
     /// Let binding (reconstructed from Apply(Lambda, value)).
     Let {
         id: MidExprId,
         var: VarId,
-        value: Box<MidExpr>,
-        body: Box<MidExpr>,
+        value: MBox,
+        body: MBox,
         /// Number of references to this variable (filled during analysis).
         use_count: u32,
     },
@@ -71,7 +81,7 @@ pub(crate) enum MidExpr {
         /// Number of Force operations consumed (for polymorphic builtins).
         forces: u8,
         /// Arguments accumulated so far.
-        args: Vec<MidExpr>,
+        args: MVec,
         /// If all args are constants, the pre-computed result.
         folded: Option<MidLiteral>,
     },
@@ -80,13 +90,13 @@ pub(crate) enum MidExpr {
     Constr {
         id: MidExprId,
         tag: usize,
-        fields: Vec<MidExpr>,
+        fields: MVec,
     },
 
     /// Pattern match / case analysis.
     Case {
         id: MidExprId,
-        scrutinee: Box<MidExpr>,
+        scrutinee: MBox,
         branches: Vec<MidBranch>,
         /// How this case was encoded in UPLC.
         encoding: CaseEncoding,
@@ -95,9 +105,9 @@ pub(crate) enum MidExpr {
     /// Conditional (from IfThenElse builtin).
     If {
         id: MidExprId,
-        condition: Box<MidExpr>,
-        then_branch: Box<MidExpr>,
-        else_branch: Box<MidExpr>,
+        condition: MBox,
+        then_branch: MBox,
+        else_branch: MBox,
     },
 
     /// Error / fail.
@@ -106,8 +116,8 @@ pub(crate) enum MidExpr {
     /// Trace (debug logging).
     Trace {
         id: MidExprId,
-        message: Box<MidExpr>,
-        body: Box<MidExpr>,
+        message: MBox,
+        body: MBox,
     },
 
     /// Plutus Data literal.
@@ -126,6 +136,23 @@ pub(crate) struct MidBranch {
     pub binders: Vec<VarId>,
     /// Branch body.
     pub body: MidExpr,
+}
+
+/// Releases the body without recursing: a body's own `case` holds more
+/// branches, as many levels deep as the script nests them.
+impl Drop for MidBranch {
+    fn drop(&mut self) {
+        let hole = MidExpr::Error { id: self.body.id() };
+        drop_iteratively(std::mem::replace(&mut self.body, hole));
+    }
+}
+
+/// Hands the containers this node's children so they can release a tree
+/// without recursing. Order matches [`MidExpr::children`].
+impl Nested for MidExpr {
+    fn take_children(&mut self) -> Vec<MidExpr> {
+        MidExpr::take_children(self)
+    }
 }
 
 /// How a case/match was encoded in UPLC.

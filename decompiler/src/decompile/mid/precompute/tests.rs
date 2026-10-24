@@ -20,9 +20,9 @@ fn test_force_thunk_resolution() {
     // Force(Thunk(Lit(42))) → Force with resolved = Lit(42)
     let mut expr = MidExpr::Force {
         id: id(0),
-        body: Box::new(MidExpr::Thunk {
+        body: MBox::new(MidExpr::Thunk {
             id: id(1),
-            body: Box::new(MidExpr::Lit {
+            body: MBox::new(MidExpr::Lit {
                 id: id(2),
                 value: MidLiteral::Integer(42.into()),
             }),
@@ -55,9 +55,10 @@ fn test_inverse_cancellation() {
             id: id(1),
             fun: DefaultFunction::IData,
             forces: 0,
-            args: vec![MidExpr::Var { id: id(2), var: x }],
+            args: vec![MidExpr::Var { id: id(2), var: x }].into(),
             folded: None,
-        }],
+        }]
+        .into(),
         folded: None,
     };
 
@@ -77,11 +78,11 @@ fn test_dead_let_elimination() {
     let expr = MidExpr::Let {
         id: id(0),
         var: x,
-        value: Box::new(MidExpr::Lit {
+        value: MBox::new(MidExpr::Lit {
             id: id(1),
             value: MidLiteral::Integer(42.into()),
         }),
-        body: Box::new(MidExpr::Lit {
+        body: MBox::new(MidExpr::Lit {
             id: id(2),
             value: MidLiteral::Integer(0.into()),
         }),
@@ -107,11 +108,11 @@ fn test_keep_used_let() {
     let expr = MidExpr::Let {
         id: id(0),
         var: x,
-        value: Box::new(MidExpr::Lit {
+        value: MBox::new(MidExpr::Lit {
             id: id(1),
             value: MidLiteral::Integer(42.into()),
         }),
-        body: Box::new(MidExpr::Var { id: id(2), var: x }),
+        body: MBox::new(MidExpr::Var { id: id(2), var: x }),
         use_count: 1,
     };
 
@@ -131,8 +132,8 @@ fn test_keep_side_effectful_dead_let() {
     let expr = MidExpr::Let {
         id: id(0),
         var: x,
-        value: Box::new(MidExpr::Error { id: id(1) }),
-        body: Box::new(MidExpr::Lit {
+        value: MBox::new(MidExpr::Error { id: id(1) }),
+        body: MBox::new(MidExpr::Lit {
             id: id(2),
             value: MidLiteral::Integer(0.into()),
         }),
@@ -159,17 +160,17 @@ fn cleanup_preserves_unconverted_recursive_knot() {
     let mut expr = MidExpr::Let {
         id: id(0),
         var: v,
-        value: Box::new(MidExpr::Closure {
+        value: MBox::new(MidExpr::Closure {
             id: id(1),
             params: vec![v3],
             // body is irrelevant to the knot collapse; keep it minimal.
-            body: Box::new(MidExpr::Var { id: id(2), var: v3 }),
+            body: MBox::new(MidExpr::Var { id: id(2), var: v3 }),
             recursive: Some(v),
         }),
-        body: Box::new(MidExpr::Apply {
+        body: MBox::new(MidExpr::Apply {
             id: id(3),
-            function: Box::new(MidExpr::Var { id: id(4), var: v }),
-            args: vec![MidExpr::Var { id: id(5), var: v }],
+            function: MBox::new(MidExpr::Var { id: id(4), var: v }),
+            args: vec![MidExpr::Var { id: id(5), var: v }].into(),
         }),
         use_count: 2,
     };
@@ -197,16 +198,16 @@ fn cleanup_collapses_converted_recursive_knot() {
     let mut expr = MidExpr::Let {
         id: id(0),
         var: v,
-        value: Box::new(MidExpr::Closure {
+        value: MBox::new(MidExpr::Closure {
             id: id(1),
             params: vec![v3],
-            body: Box::new(MidExpr::Var { id: id(2), var: v3 }),
+            body: MBox::new(MidExpr::Var { id: id(2), var: v3 }),
             recursive: Some(v),
         }),
-        body: Box::new(MidExpr::Apply {
+        body: MBox::new(MidExpr::Apply {
             id: id(3),
-            function: Box::new(MidExpr::Var { id: id(4), var: v }),
-            args: vec![MidExpr::Var { id: id(5), var: v }],
+            function: MBox::new(MidExpr::Var { id: id(4), var: v }),
+            args: vec![MidExpr::Var { id: id(5), var: v }].into(),
         }),
         use_count: 2,
     };
@@ -231,18 +232,19 @@ fn test_run_precompute_refreshes_mid_ids_after_duplication() {
     let mut expr = MidExpr::Let {
         id: id(0),
         var: x,
-        value: Box::new(MidExpr::Lit {
+        value: MBox::new(MidExpr::Lit {
             id: id(1),
             value: MidLiteral::Integer(42.into()),
         }),
-        body: Box::new(MidExpr::Builtin {
+        body: MBox::new(MidExpr::Builtin {
             id: id(2),
             fun: DefaultFunction::AddInteger,
             forces: 0,
             args: vec![
                 MidExpr::Var { id: id(3), var: x },
                 MidExpr::Var { id: id(4), var: x },
-            ],
+            ]
+            .into(),
             folded: None,
         }),
         use_count: 0,
@@ -276,15 +278,16 @@ fn test_inline_trivial_let_transfers_each_use_site_var_provenance_to_fresh_clone
     let expr = MidExpr::Let {
         id: id(0),
         var: x,
-        value: Box::new(MidExpr::Var { id: id(1), var: y }),
-        body: Box::new(MidExpr::Builtin {
+        value: MBox::new(MidExpr::Var { id: id(1), var: y }),
+        body: MBox::new(MidExpr::Builtin {
             id: id(2),
             fun: DefaultFunction::AddInteger,
             forces: 0,
             args: vec![
                 MidExpr::Var { id: id(3), var: x },
                 MidExpr::Var { id: id(4), var: x },
-            ],
+            ]
+            .into(),
             folded: None,
         }),
         use_count: 2,

@@ -31,7 +31,7 @@ fn test_children_lit() {
 fn test_children_apply() {
     let expr = MidExpr::Apply {
         id: id(0),
-        function: Box::new(MidExpr::Var {
+        function: MBox::new(MidExpr::Var {
             id: id(1),
             var: var(0),
         }),
@@ -44,7 +44,8 @@ fn test_children_apply() {
                 id: id(3),
                 value: MidLiteral::Integer(2.into()),
             },
-        ],
+        ]
+        .into(),
     };
     assert_eq!(expr.children().len(), 3);
     assert_eq!(expr.node_count(), 4);
@@ -58,12 +59,12 @@ fn test_node_count_nested() {
     };
     let thunk = MidExpr::Thunk {
         id: id(1),
-        body: Box::new(inner),
+        body: MBox::new(inner),
         cosmetic: true,
     };
     let force = MidExpr::Force {
         id: id(2),
-        body: Box::new(thunk),
+        body: MBox::new(thunk),
         resolved: None,
     };
     assert_eq!(force.node_count(), 3);

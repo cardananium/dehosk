@@ -9,7 +9,7 @@
 use uplc::builtins::DefaultFunction;
 
 use super::fold::rewrite_bottom_up;
-use crate::pseudo::mid::expr::{CaseEncoding, MidBranch, MidExpr};
+use crate::pseudo::mid::expr::{CaseEncoding, MBox, MidBranch, MidExpr};
 use crate::pseudo::mid::expr_id::{MidExprId, ProvenanceBuilder};
 use crate::pseudo::var_id::VarId;
 
@@ -63,9 +63,9 @@ fn try_recognize_if_then_else(expr: &mut MidExpr, provenance: &mut ProvenanceBui
         // if(a, b, False) → And, if(a, True, b) → Or, if(x, False, True) → Not.
         *expr = MidExpr::If {
             id: rewritten_id,
-            condition: Box::new(cond),
-            then_branch: Box::new(then_b),
-            else_branch: Box::new(else_b),
+            condition: MBox::new(cond),
+            then_branch: MBox::new(then_b),
+            else_branch: MBox::new(else_b),
         };
     }
 
@@ -97,9 +97,9 @@ fn try_recognize_if_then_else(expr: &mut MidExpr, provenance: &mut ProvenanceBui
 
         *expr = MidExpr::If {
             id: rewritten_id,
-            condition: Box::new(cond),
-            then_branch: Box::new(then_b),
-            else_branch: Box::new(else_b),
+            condition: MBox::new(cond),
+            then_branch: MBox::new(then_b),
+            else_branch: MBox::new(else_b),
         };
     }
 }
@@ -125,8 +125,8 @@ fn try_recognize_trace(expr: &mut MidExpr, provenance: &mut ProvenanceBuilder) {
         let rewritten_id = provenance.fresh_derived_from(mid_id);
         *expr = MidExpr::Trace {
             id: rewritten_id,
-            message: Box::new(message),
-            body: Box::new(body),
+            message: MBox::new(message),
+            body: MBox::new(body),
         };
     }
 }
@@ -204,7 +204,7 @@ fn try_recognize_choose_list(expr: &mut MidExpr, provenance: &mut ProvenanceBuil
 
     *expr = MidExpr::Case {
         id: rewritten_id,
-        scrutinee: Box::new(list),
+        scrutinee: MBox::new(list),
         branches: vec![
             MidBranch {
                 tag: 0,
@@ -314,7 +314,7 @@ fn try_recognize_choose_data(expr: &mut MidExpr, provenance: &mut ProvenanceBuil
 
     *expr = MidExpr::Case {
         id: rewritten_id,
-        scrutinee: Box::new(data),
+        scrutinee: MBox::new(data),
         branches,
         encoding: CaseEncoding::IfChain,
     };
@@ -524,7 +524,7 @@ fn try_recognize_scott_encoding(expr: &mut MidExpr, provenance: &mut ProvenanceB
 
         *expr = MidExpr::Case {
             id: provenance.fresh_derived_from_many(&[mid_id, *apply_id]),
-            scrutinee: Box::new(scrutinee_expr),
+            scrutinee: MBox::new(scrutinee_expr),
             branches,
             encoding: CaseEncoding::Scott,
         };
@@ -547,7 +547,7 @@ fn extract_scott_branch(
     match expr {
         // Thunk(body) → 0-field constructor
         MidExpr::Thunk { id, body, .. } => {
-            let body = *body;
+            let body = body.into_inner();
             provenance.absorb_mid(body.id(), id);
             (vec![], body)
         }
@@ -556,13 +556,13 @@ fn extract_scott_branch(
             id, params, body, ..
         } => {
             // Unwrap inner Thunk if present: Closure(params, Thunk(body))
-            let body = match *body {
+            let body = match body.into_inner() {
                 MidExpr::Thunk {
                     id: thunk_id,
                     body: inner,
                     ..
                 } => {
-                    let body = *inner;
+                    let body = inner.into_inner();
                     provenance.absorb_mid(body.id(), thunk_id);
                     body
                 }
@@ -596,7 +596,7 @@ fn unwrap_thunk(expr: MidExpr, removed_ids: &mut Vec<MidExprId>) -> MidExpr {
         match current {
             MidExpr::Thunk { id, body, .. } => {
                 removed_ids.push(id);
-                current = *body;
+                current = body.into_inner();
             }
             other => return other,
         }

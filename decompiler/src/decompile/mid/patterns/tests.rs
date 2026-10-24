@@ -38,7 +38,8 @@ fn test_recognize_if_then_else() {
                 id: id(3),
                 value: MidLiteral::Integer(0.into()),
             },
-        ],
+        ]
+        .into(),
         folded: None,
     };
 
@@ -72,7 +73,8 @@ fn test_recognize_if_then_else_allocates_fresh_id_with_provenance() {
                 id: id(3),
                 value: MidLiteral::Bool(false),
             },
-        ],
+        ]
+        .into(),
         folded: None,
     };
 
@@ -110,7 +112,8 @@ fn test_recognize_trace() {
                 id: id(2),
                 var: VarId::new(0),
             },
-        ],
+        ]
+        .into(),
         folded: None,
     };
 
@@ -142,7 +145,8 @@ fn test_recognize_choose_list() {
                 id: id(3),
                 value: MidLiteral::Integer(1.into()),
             },
-        ],
+        ]
+        .into(),
         folded: None,
     };
 
@@ -175,7 +179,7 @@ fn test_recognize_choose_data_extended_arity() {
             },
             MidExpr::Thunk {
                 id: id(2),
-                body: Box::new(MidExpr::Lit {
+                body: MBox::new(MidExpr::Lit {
                     id: id(3),
                     value: MidLiteral::Integer(0.into()),
                 }),
@@ -183,7 +187,7 @@ fn test_recognize_choose_data_extended_arity() {
             },
             MidExpr::Thunk {
                 id: id(4),
-                body: Box::new(MidExpr::Lit {
+                body: MBox::new(MidExpr::Lit {
                     id: id(5),
                     value: MidLiteral::Integer(1.into()),
                 }),
@@ -191,7 +195,7 @@ fn test_recognize_choose_data_extended_arity() {
             },
             MidExpr::Thunk {
                 id: id(6),
-                body: Box::new(MidExpr::Lit {
+                body: MBox::new(MidExpr::Lit {
                     id: id(7),
                     value: MidLiteral::Integer(2.into()),
                 }),
@@ -199,7 +203,7 @@ fn test_recognize_choose_data_extended_arity() {
             },
             MidExpr::Thunk {
                 id: id(8),
-                body: Box::new(MidExpr::Lit {
+                body: MBox::new(MidExpr::Lit {
                     id: id(9),
                     value: MidLiteral::Integer(3.into()),
                 }),
@@ -207,7 +211,7 @@ fn test_recognize_choose_data_extended_arity() {
             },
             MidExpr::Thunk {
                 id: id(10),
-                body: Box::new(MidExpr::Lit {
+                body: MBox::new(MidExpr::Lit {
                     id: id(11),
                     value: MidLiteral::Integer(4.into()),
                 }),
@@ -215,13 +219,14 @@ fn test_recognize_choose_data_extended_arity() {
             },
             MidExpr::Thunk {
                 id: id(12),
-                body: Box::new(MidExpr::Lit {
+                body: MBox::new(MidExpr::Lit {
                     id: id(13),
                     value: MidLiteral::Integer(5.into()),
                 }),
                 cosmetic: false,
             },
-        ],
+        ]
+        .into(),
         folded: None,
     };
 
@@ -265,7 +270,7 @@ fn test_recognize_choose_data_extended_arity() {
 fn test_force_builtin_if_then_else_keeps_root_and_branch_wrapper_provenance_separate() {
     let mut expr = MidExpr::Force {
         id: id(0),
-        body: Box::new(MidExpr::Builtin {
+        body: MBox::new(MidExpr::Builtin {
             id: id(1),
             fun: DefaultFunction::IfThenElse,
             forces: 1,
@@ -276,7 +281,7 @@ fn test_force_builtin_if_then_else_keeps_root_and_branch_wrapper_provenance_sepa
                 },
                 MidExpr::Thunk {
                     id: id(3),
-                    body: Box::new(MidExpr::Lit {
+                    body: MBox::new(MidExpr::Lit {
                         id: id(4),
                         value: MidLiteral::Bool(true),
                     }),
@@ -284,13 +289,14 @@ fn test_force_builtin_if_then_else_keeps_root_and_branch_wrapper_provenance_sepa
                 },
                 MidExpr::Thunk {
                     id: id(5),
-                    body: Box::new(MidExpr::Lit {
+                    body: MBox::new(MidExpr::Lit {
                         id: id(6),
                         value: MidLiteral::Bool(false),
                     }),
                     cosmetic: false,
                 },
-            ],
+            ]
+            .into(),
             folded: None,
         }),
         resolved: None,
@@ -322,11 +328,11 @@ fn test_force_builtin_if_then_else_keeps_root_and_branch_wrapper_provenance_sepa
 fn test_scott_encoding_transfers_apply_and_branch_wrappers_to_surviving_owners() {
     let mut expr = MidExpr::Force {
         id: id(0),
-        body: Box::new(MidExpr::Apply {
+        body: MBox::new(MidExpr::Apply {
             id: id(1),
-            function: Box::new(MidExpr::Force {
+            function: MBox::new(MidExpr::Force {
                 id: id(2),
-                body: Box::new(MidExpr::Var {
+                body: MBox::new(MidExpr::Var {
                     id: id(3),
                     var: VarId::new(0),
                 }),
@@ -335,7 +341,7 @@ fn test_scott_encoding_transfers_apply_and_branch_wrappers_to_surviving_owners()
             args: vec![
                 MidExpr::Thunk {
                     id: id(4),
-                    body: Box::new(MidExpr::Lit {
+                    body: MBox::new(MidExpr::Lit {
                         id: id(5),
                         value: MidLiteral::Integer(0.into()),
                     }),
@@ -344,9 +350,9 @@ fn test_scott_encoding_transfers_apply_and_branch_wrappers_to_surviving_owners()
                 MidExpr::Closure {
                     id: id(6),
                     params: vec![VarId::new(1)],
-                    body: Box::new(MidExpr::Thunk {
+                    body: MBox::new(MidExpr::Thunk {
                         id: id(7),
-                        body: Box::new(MidExpr::Var {
+                        body: MBox::new(MidExpr::Var {
                             id: id(8),
                             var: VarId::new(1),
                         }),
@@ -354,7 +360,8 @@ fn test_scott_encoding_transfers_apply_and_branch_wrappers_to_surviving_owners()
                     }),
                     recursive: None,
                 },
-            ],
+            ]
+            .into(),
         }),
         resolved: None,
     };
@@ -391,33 +398,35 @@ fn test_y_combinator_detection() {
     let expr = MidExpr::Closure {
         id: id(0),
         params: vec![f],
-        body: Box::new(MidExpr::Let {
+        body: MBox::new(MidExpr::Let {
             id: id(1),
             var: VarId::new(2),
-            value: Box::new(MidExpr::Closure {
+            value: MBox::new(MidExpr::Closure {
                 id: id(2),
                 params: vec![x],
-                body: Box::new(MidExpr::Apply {
+                body: MBox::new(MidExpr::Apply {
                     id: id(3),
-                    function: Box::new(MidExpr::Var { id: id(4), var: f }),
+                    function: MBox::new(MidExpr::Var { id: id(4), var: f }),
                     args: vec![MidExpr::Apply {
                         id: id(5),
-                        function: Box::new(MidExpr::Var { id: id(6), var: x }),
-                        args: vec![MidExpr::Var { id: id(7), var: x }],
-                    }],
+                        function: MBox::new(MidExpr::Var { id: id(6), var: x }),
+                        args: vec![MidExpr::Var { id: id(7), var: x }].into(),
+                    }]
+                    .into(),
                 }),
                 recursive: None,
             }),
-            body: Box::new(MidExpr::Apply {
+            body: MBox::new(MidExpr::Apply {
                 id: id(8),
-                function: Box::new(MidExpr::Var {
+                function: MBox::new(MidExpr::Var {
                     id: id(9),
                     var: VarId::new(2),
                 }),
                 args: vec![MidExpr::Var {
                     id: id(10),
                     var: VarId::new(2),
-                }],
+                }]
+                .into(),
             }),
             use_count: 1,
         }),
