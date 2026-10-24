@@ -59,14 +59,13 @@ fn rewrite(expr: PseudoExpr) -> PseudoExpr {
             }
         }
 
-        fn fold_pattern(
-            &mut self,
-            pattern: crate::pseudo::ast::WhenPattern,
-        ) -> crate::pseudo::ast::WhenPattern {
-            // Original never touches a pattern, so this stays the identity
-            // — deliberately not the trait's default, which folds a
-            // `Literal` pattern's expression.
-            pattern
+        // Folded flat, literal patterns left as they are — what this pass's
+        // pattern hook always did — so a deep `when` costs no stack.
+        fn machine_folds_when(&self) -> bool {
+            true
+        }
+        fn machine_keeps_pattern_literals(&self) -> bool {
+            true
         }
     }
 

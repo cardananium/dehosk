@@ -534,12 +534,13 @@ pub(crate) trait ExprFolder {
                 subject_name,
                 clauses,
             } if self.machine_folds_when() => {
+                let keep_literals = self.machine_keeps_pattern_literals();
                 let mut clause_meta = Vec::with_capacity(clauses.len());
                 let mut clause_children: Vec<PseudoExpr> = Vec::new();
                 for clause in clauses {
                     // Same order as `fold_clause`: pattern literal, guard, body.
                     let pattern = match clause.pattern {
-                        WhenPattern::Literal(lit) => {
+                        WhenPattern::Literal(lit) if !keep_literals => {
                             clause_children.push(lit);
                             None
                         }
@@ -745,6 +746,17 @@ pub(crate) trait ExprFolder {
     /// The default is "no" so that forgetting to opt in costs a stack frame,
     /// not correctness. Opting in wrongly is caught by the snapshot corpus.
     fn machine_folds_when(&self) -> bool {
+        false
+    }
+
+    /// With [`Self::machine_folds_when`]: leave each `Literal` pattern's
+    /// expression unfolded.
+    ///
+    /// The flat path skips [`Self::fold_pattern`] altogether, so an
+    /// implementation whose override only kept patterns as they were —
+    /// never folding a literal pattern's expression — says so here instead,
+    /// and then needs no recursive `when` path at all.
+    fn machine_keeps_pattern_literals(&self) -> bool {
         false
     }
 

@@ -21,7 +21,7 @@
 use crate::pseudo::ast::PBox;
 use std::collections::HashMap;
 
-use crate::pseudo::ast::{Binder, PseudoExpr, WhenPattern};
+use crate::pseudo::ast::{Binder, PseudoExpr};
 use crate::pseudo::field_selector::FieldSelector;
 use crate::pseudo::fold::ExprFolder;
 use crate::pseudo::var_id::VarId;
@@ -230,11 +230,13 @@ impl ExprFolder for PackCallRewriter<'_> {
         try_rewrite_apply(expr, self.helpers)
     }
 
-    // `map_children` never recursed into a `when` clause's literal
-    // pattern expression (only subject/guard/body) — match that exactly
-    // rather than the default's descent into `WhenPattern::Literal`.
-    fn fold_pattern(&mut self, pattern: WhenPattern) -> WhenPattern {
-        pattern
+    // Folded flat, literal patterns left as they are — what this pass's
+    // pattern hook always did — so a deep `when` costs no stack.
+    fn machine_folds_when(&self) -> bool {
+        true
+    }
+    fn machine_keeps_pattern_literals(&self) -> bool {
+        true
     }
 }
 

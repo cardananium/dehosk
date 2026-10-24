@@ -17,7 +17,7 @@
 
 use super::let_disambiguation::pattern_binds_name;
 use crate::pseudo::ast::PBox;
-use crate::pseudo::ast::{Binder, PseudoExpr, WhenClause, WhenPattern};
+use crate::pseudo::ast::{Binder, PseudoExpr, WhenClause};
 use crate::pseudo::fold::{ExprFolder, ExprVisitor};
 use crate::pseudo::var_id::VarId;
 
@@ -29,8 +29,13 @@ fn walk(expr: PseudoExpr) -> PseudoExpr {
     struct DropDeadFailLabels;
 
     impl ExprFolder for DropDeadFailLabels {
-        fn fold_pattern(&mut self, pattern: WhenPattern) -> WhenPattern {
-            pattern
+        // Folded flat, literal patterns left as they are — what this pass's
+        // pattern hook always did — so a deep `when` costs no stack.
+        fn machine_folds_when(&self) -> bool {
+            true
+        }
+        fn machine_keeps_pattern_literals(&self) -> bool {
+            true
         }
 
         fn post_let(

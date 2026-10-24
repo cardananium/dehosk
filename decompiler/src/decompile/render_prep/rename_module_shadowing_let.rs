@@ -32,7 +32,7 @@
 use crate::pseudo::ast::PBox;
 use std::collections::{HashMap, HashSet};
 
-use crate::pseudo::ast::{PseudoExpr, WhenPattern};
+use crate::pseudo::ast::PseudoExpr;
 use crate::pseudo::fold::ExprFolder;
 use crate::pseudo::var_id::VarId;
 
@@ -274,8 +274,13 @@ fn rename_let_binders(expr: PseudoExpr, renames: &HashMap<VarId, String>) -> Pse
             }
         }
 
-        fn fold_pattern(&mut self, pattern: WhenPattern) -> WhenPattern {
-            pattern
+        // Folded flat, literal patterns left as they are — what this pass's
+        // pattern hook always did — so a deep `when` costs no stack.
+        fn machine_folds_when(&self) -> bool {
+            true
+        }
+        fn machine_keeps_pattern_literals(&self) -> bool {
+            true
         }
     }
     BinderRenamer { renames }.fold(expr)
