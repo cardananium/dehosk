@@ -837,22 +837,26 @@ fn visit_apply_sites(expr: &PseudoExpr, table: &mut FinalTypeTable, ctx: &mut En
 /// collecting all args in application order
 /// (`Apply(Apply(f, [a]), [b])` → `(f.id, [a, b])`).
 /// Returns `None` if the terminal is not a Var with an id.
+///
+/// The args are borrowed, not cloned: this runs at every `Apply`, and an
+/// arg can be the rest of a spine as deep as the script makes it.
 fn flatten_apply_to_target(
     expr: &PseudoExpr,
-) -> Option<(crate::pseudo::var_id::VarId, Vec<PseudoExpr>)> {
+) -> Option<(crate::pseudo::var_id::VarId, Vec<&PseudoExpr>)> {
     let mut current = expr;
-    let mut all_args: Vec<PseudoExpr> = Vec::new();
+    let mut levels: Vec<&[PseudoExpr]> = Vec::new();
     loop {
         match current {
             PseudoExpr::Apply { function, args } => {
-                // Peeling runs outside-in, so prepend this level's args to
-                // keep the final list in application order.
-                let mut new_args = args.clone();
-                new_args.extend(all_args);
-                all_args = new_args.into_vec();
+                levels.push(args);
                 current = function.as_ref();
             }
-            PseudoExpr::Var { id: Some(vid), .. } => return Some((*vid, all_args)),
+            PseudoExpr::Var { id: Some(vid), .. } => {
+                // Peeling ran outside-in, so the innermost level's args
+                // come first in application order.
+                let all_args = levels.iter().rev().flat_map(|args| args.iter()).collect();
+                return Some((*vid, all_args));
+            }
             _ => return None,
         }
     }
@@ -864,7 +868,7 @@ fn flatten_apply_to_target(
 /// the residual ret-as-Function is left to forward derivation.
 fn refine_function_from_args(
     target_id: crate::pseudo::var_id::VarId,
-    args: &[PseudoExpr],
+    args: &[&PseudoExpr],
     table: &mut FinalTypeTable,
     ctx: &mut EnrichCtx,
 ) {
