@@ -83,11 +83,118 @@ fn value_is_structurally_bool(expr: &PseudoExpr) -> bool {
     )
 }
 
+/// One pending step of [`walk`].
+enum WalkStep {
+    /// Walk this subtree.
+    Visit(PseudoExpr),
+    /// The `let` value is walked and on top of `done`: register the binding
+    /// for the body's scope, then walk the body.
+    LetBody {
+        name: String,
+        id: Option<VarId>,
+        body: PBox,
+    },
+    /// The `let` value and body are on `done`: reassemble the `Let`.
+    LetBuild { name: String, id: Option<VarId> },
+    /// Every other node: its walked children are on `done`; put them back
+    /// into the shell they were taken out of, then try the collapse.
+    Rebuild { shell: PseudoExpr, count: usize },
+}
+
+/// Bottom-up walk: children first, then the When→If collapse at the node.
+/// Let-binding awareness is threaded through `env` so nested Whens can see
+/// outer let scopes.
+///
+/// Runs on a heap stack: nesting depth is script-controlled, and on
+/// `wasm32` the engine's call stack cannot be grown to match. Children are
+/// visited in `map_children` order — a `let` value before its body, a
+/// clause's guard before its body, literal patterns never — and the binding
+/// registers between the value and the body, as a recursive descent would.
 fn walk(expr: PseudoExpr, final_types: &FinalTypeTable, env: &mut LetBoolEnv) -> PseudoExpr {
-    // Recurse first (bottom-up). Let-binding awareness is threaded
-    // through `env` so nested Whens can see outer let scopes.
-    let expr = recurse_children(expr, final_types, env);
-    // Then try the When→If collapse at this node.
+    let mut steps: Vec<WalkStep> = vec![WalkStep::Visit(expr)];
+    let mut done: Vec<PseudoExpr> = Vec::new();
+
+    while let Some(step) = steps.pop() {
+        match step {
+            WalkStep::Visit(PseudoExpr::Let {
+                name,
+                id,
+                value,
+                body,
+            }) => {
+                // Walk the value first (in the OUTER scope).
+                steps.push(WalkStep::LetBody { name, id, body });
+                steps.push(WalkStep::Visit(value.into_inner()));
+            }
+            WalkStep::Visit(other) => {
+                let (shell, kids) = split_children(other);
+                steps.push(WalkStep::Rebuild {
+                    shell,
+                    count: kids.len(),
+                });
+                // Reversed so they pop — and so land on `done` — in order.
+                for kid in kids.into_iter().rev() {
+                    steps.push(WalkStep::Visit(kid));
+                }
+            }
+            WalkStep::LetBody { name, id, body } => {
+                // Register the binding for the body's scope; the walked
+                // value keeps its shape, since `walk` rewrites When→If
+                // only, never BinOp / UnOp.
+                env.enter_binding(id, done.last().expect("let value"));
+                steps.push(WalkStep::LetBuild { name, id });
+                steps.push(WalkStep::Visit(body.into_inner()));
+            }
+            WalkStep::LetBuild { name, id } => {
+                let body = done.pop().expect("let body");
+                let value = done.pop().expect("let value");
+                // No deregistration: a shadowing let inside the body
+                // overwrites the entry, and a valid program never
+                // re-enters the same `VarId` in another scope.
+                done.push(PseudoExpr::Let {
+                    name,
+                    id,
+                    value: PBox::new(value),
+                    body: PBox::new(body),
+                });
+            }
+            WalkStep::Rebuild { shell, count } => {
+                let at = done.len() - count;
+                let kids = done.split_off(at);
+                let rebuilt = join_children(shell, kids);
+                done.push(collapse_bool_when(rebuilt, final_types, env));
+            }
+        }
+    }
+
+    done.pop().expect("walk leaves exactly one result")
+}
+
+/// Split a node into a SHELL — every immediate child replaced by a `Unit`
+/// placeholder — plus those children in `map_children` order.
+fn split_children(expr: PseudoExpr) -> (PseudoExpr, Vec<PseudoExpr>) {
+    let mut kids: Vec<PseudoExpr> = Vec::new();
+    let shell = crate::decompile::render_prep::scope_recurse::map_children(expr, |c| {
+        kids.push(c);
+        PseudoExpr::Unit
+    });
+    (shell, kids)
+}
+
+/// Put walked children back into a shell from [`split_children`].
+fn join_children(shell: PseudoExpr, kids: Vec<PseudoExpr>) -> PseudoExpr {
+    let mut kids = kids.into_iter();
+    crate::decompile::render_prep::scope_recurse::map_children(shell, |_| {
+        kids.next().expect("split_children left one child per slot")
+    })
+}
+
+/// The When→If collapse at one node whose children are already walked.
+fn collapse_bool_when(
+    expr: PseudoExpr,
+    final_types: &FinalTypeTable,
+    env: &LetBoolEnv,
+) -> PseudoExpr {
     match expr {
         PseudoExpr::When {
             subject,
@@ -108,7 +215,7 @@ fn walk(expr: PseudoExpr, final_types: &FinalTypeTable, env: &mut LetBoolEnv) ->
             // clause is `Wildcard` it matches everything and the
             // second-clause body is unreachable, so the Constr arm
             // must come FIRST and the Wildcard arm SECOND.
-            let Some((constr_tag, then_body)) = identify_bool_constr_arm(&clauses[0]) else {
+            let Some(constr_tag) = identify_bool_constr_arm(&clauses[0]) else {
                 return PseudoExpr::When {
                     subject,
                     subject_name,
@@ -123,7 +230,6 @@ fn walk(expr: PseudoExpr, final_types: &FinalTypeTable, env: &mut LetBoolEnv) ->
                     clauses,
                 };
             }
-            let else_body = other.body.clone();
             if !subject_is_bool(&subject, final_types, env) {
                 return PseudoExpr::When {
                     subject,
@@ -131,6 +237,11 @@ fn walk(expr: PseudoExpr, final_types: &FinalTypeTable, env: &mut LetBoolEnv) ->
                     clauses,
                 };
             }
+            // The arms move into the `If`: copying them would cost the
+            // size of the subtree at every collapsed level.
+            let mut arms = clauses.into_iter();
+            let then_body = arms.next().expect("bool arm").body;
+            let else_body = arms.next().expect("wildcard arm").body;
             // Tag 1 → `If { subject, T, E }`; Tag 0 → `If { Not(subject), T, E }`.
             let condition: PBox = match constr_tag {
                 1 => subject,
@@ -150,10 +261,10 @@ fn walk(expr: PseudoExpr, final_types: &FinalTypeTable, env: &mut LetBoolEnv) ->
     }
 }
 
-/// Returns `Some((tag, body))` if the clause has the church-Bool
-/// arm shape — `Constructor { tag: 0|1, fields: [], shape: Unknown
-/// { ... } | Known(True|False) }` with no guard. Otherwise `None`.
-fn identify_bool_constr_arm(clause: &WhenClause) -> Option<(usize, PseudoExpr)> {
+/// Returns `Some(tag)` if the clause has the church-Bool arm shape —
+/// `Constructor { tag: 0|1, fields: [], shape: Unknown { ... } |
+/// Known(True|False) }` with no guard. Otherwise `None`.
+fn identify_bool_constr_arm(clause: &WhenClause) -> Option<usize> {
     if clause.guard.is_some() {
         return None;
     }
@@ -180,7 +291,7 @@ fn identify_bool_constr_arm(clause: &WhenClause) -> Option<(usize, PseudoExpr)> 
     if *tag > 1 {
         return None;
     }
-    Some((*tag, clause.body.clone()))
+    Some(*tag)
 }
 
 /// Returns true when `subject` is provably Bool: structural
@@ -203,175 +314,6 @@ fn var_resolves_to_bool(vid: VarId, final_types: &FinalTypeTable) -> bool {
     final_types
         .type_of_var(vid)
         .is_some_and(|ty| matches!(&*ty, PseudoType::Bool))
-}
-
-fn recurse_children(
-    expr: PseudoExpr,
-    final_types: &FinalTypeTable,
-    env: &mut LetBoolEnv,
-) -> PseudoExpr {
-    match expr {
-        PseudoExpr::Let {
-            name,
-            id,
-            value,
-            body,
-        } => {
-            // Walk the value first (in the OUTER scope).
-            let value = walk(value.into_inner(), final_types, env);
-            // Register the binding for the body's scope; the walked
-            // value keeps its shape, since `walk` rewrites When→If
-            // only, never BinOp / UnOp.
-            env.enter_binding(id, &value);
-            let body = walk(body.into_inner(), final_types, env);
-            // No deregistration: a shadowing let inside the body
-            // overwrites the entry, and a valid program never
-            // re-enters the same `VarId` in another scope.
-            PseudoExpr::Let {
-                name,
-                id,
-                value: PBox::new(value),
-                body: PBox::new(body),
-            }
-        }
-        PseudoExpr::Lambda { params, body } => PseudoExpr::Lambda {
-            params,
-            body: PBox::new(walk(body.into_inner(), final_types, env)),
-        },
-        PseudoExpr::RecFn { name, params, body } => PseudoExpr::RecFn {
-            name,
-            params,
-            body: PBox::new(walk(body.into_inner(), final_types, env)),
-        },
-        PseudoExpr::Apply { function, args } => {
-            let function = PBox::new(walk(function.into_inner(), final_types, env));
-            let mut new_args = Vec::with_capacity(args.len());
-            for a in args {
-                new_args.push(walk(a, final_types, env));
-            }
-            PseudoExpr::Apply {
-                function,
-                args: new_args.into(),
-            }
-        }
-        PseudoExpr::If {
-            condition,
-            then_branch,
-            else_branch,
-        } => PseudoExpr::If {
-            condition: PBox::new(walk(condition.into_inner(), final_types, env)),
-            then_branch: PBox::new(walk(then_branch.into_inner(), final_types, env)),
-            else_branch: PBox::new(walk(else_branch.into_inner(), final_types, env)),
-        },
-        PseudoExpr::When {
-            subject,
-            subject_name,
-            clauses,
-        } => {
-            let subject = PBox::new(walk(subject.into_inner(), final_types, env));
-            let mut new_clauses = Vec::with_capacity(clauses.len());
-            for c in clauses {
-                let guard = c.guard.map(|g| walk(g, final_types, env));
-                let body = walk(c.body, final_types, env);
-                new_clauses.push(WhenClause {
-                    pattern: c.pattern,
-                    guard,
-                    body,
-                });
-            }
-            PseudoExpr::When {
-                subject,
-                subject_name,
-                clauses: new_clauses,
-            }
-        }
-        PseudoExpr::List { elements, tail } => {
-            let mut new_elements = Vec::with_capacity(elements.len());
-            for e in elements {
-                new_elements.push(walk(e, final_types, env));
-            }
-            let new_tail = tail.map(|t| PBox::new(walk(t.into_inner(), final_types, env)));
-            PseudoExpr::List {
-                elements: new_elements.into(),
-                tail: new_tail,
-            }
-        }
-        PseudoExpr::Tuple(items) => {
-            let mut new_items = Vec::with_capacity(items.len());
-            for i in items {
-                new_items.push(walk(i, final_types, env));
-            }
-            PseudoExpr::Tuple(new_items.into())
-        }
-        PseudoExpr::Pair(a, b) => PseudoExpr::Pair(
-            PBox::new(walk(a.into_inner(), final_types, env)),
-            PBox::new(walk(b.into_inner(), final_types, env)),
-        ),
-        PseudoExpr::Constr {
-            type_hint,
-            tag,
-            fields,
-            shape,
-        } => {
-            let mut new_fields = Vec::with_capacity(fields.len());
-            for f in fields {
-                new_fields.push(walk(f, final_types, env));
-            }
-            PseudoExpr::Constr {
-                type_hint,
-                tag,
-                fields: new_fields.into(),
-                shape,
-            }
-        }
-        PseudoExpr::FieldAccess { record, selector } => PseudoExpr::FieldAccess {
-            record: PBox::new(walk(record.into_inner(), final_types, env)),
-            selector,
-        },
-        PseudoExpr::IndexAccess { collection, index } => PseudoExpr::IndexAccess {
-            collection: PBox::new(walk(collection.into_inner(), final_types, env)),
-            index,
-        },
-        PseudoExpr::BinOp { op, left, right } => PseudoExpr::BinOp {
-            op,
-            left: PBox::new(walk(left.into_inner(), final_types, env)),
-            right: PBox::new(walk(right.into_inner(), final_types, env)),
-        },
-        PseudoExpr::UnOp { op, operand } => PseudoExpr::UnOp {
-            op,
-            operand: PBox::new(walk(operand.into_inner(), final_types, env)),
-        },
-        PseudoExpr::BuiltinCall { name, args } => {
-            let mut new_args = Vec::with_capacity(args.len());
-            for a in args {
-                new_args.push(walk(a, final_types, env));
-            }
-            PseudoExpr::BuiltinCall {
-                name,
-                args: new_args.into(),
-            }
-        }
-        PseudoExpr::Delay(inner) => {
-            PseudoExpr::Delay(PBox::new(walk(inner.into_inner(), final_types, env)))
-        }
-        PseudoExpr::Force(inner) => {
-            PseudoExpr::Force(PBox::new(walk(inner.into_inner(), final_types, env)))
-        }
-        PseudoExpr::Trace { message, value } => PseudoExpr::Trace {
-            message: PBox::new(walk(message.into_inner(), final_types, env)),
-            value: PBox::new(walk(value.into_inner(), final_types, env)),
-        },
-        other @ (PseudoExpr::Int(_)
-        | PseudoExpr::ByteArray(_)
-        | PseudoExpr::String(_)
-        | PseudoExpr::Bool(_)
-        | PseudoExpr::Unit
-        | PseudoExpr::Var { .. }
-        | PseudoExpr::Error { .. }
-        | PseudoExpr::Raw { .. }
-        | PseudoExpr::Data(_)
-        | PseudoExpr::HelperSymbol(_)) => other,
-    }
 }
 
 #[cfg(test)]
