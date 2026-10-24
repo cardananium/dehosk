@@ -794,7 +794,52 @@ fn term_uniq_id(term: &Term<NamedDeBruijn>) -> isize {
     }
 }
 
+/// Walks a heap stack: a list or pair constant nests as deep as the script
+/// makes it.
 fn constant_to_literal(constant: &Constant) -> MidLiteral {
+    enum Step<'a> {
+        Visit(&'a Constant),
+        /// Rebuild a list from the last `usize` literals on `done`.
+        List(usize),
+        /// Rebuild a pair from the last two literals on `done`.
+        Pair,
+    }
+
+    let mut steps = vec![Step::Visit(constant)];
+    let mut done: Vec<MidLiteral> = Vec::new();
+    while let Some(step) = steps.pop() {
+        match step {
+            Step::Visit(constant) => match constant {
+                // No surface syntax has an array literal either; its elements
+                // read as a list, which is also what `listToArray` builds one
+                // from.
+                Constant::ProtoList(_, items) | Constant::ProtoArray(_, items) => {
+                    steps.push(Step::List(items.len()));
+                    steps.extend(items.iter().rev().map(|item| Step::Visit(item)));
+                }
+                Constant::ProtoPair(_, _, a, b) => {
+                    steps.push(Step::Pair);
+                    steps.push(Step::Visit(b));
+                    steps.push(Step::Visit(a));
+                }
+                leaf => done.push(leaf_literal(leaf)),
+            },
+            Step::List(count) => {
+                let items = done.split_off(done.len() - count);
+                done.push(MidLiteral::List(items));
+            }
+            Step::Pair => {
+                let b = done.pop().expect("pair second");
+                let a = done.pop().expect("pair first");
+                done.push(MidLiteral::Pair(Box::new(a), Box::new(b)));
+            }
+        }
+    }
+    done.pop().expect("conversion leaves exactly one result")
+}
+
+/// A constant that holds no other constant.
+fn leaf_literal(constant: &Constant) -> MidLiteral {
     match constant {
         Constant::Integer(n) => MidLiteral::Integer(n.clone()),
         Constant::ByteString(b) => MidLiteral::ByteString(b.clone()),
@@ -802,18 +847,9 @@ fn constant_to_literal(constant: &Constant) -> MidLiteral {
         Constant::Bool(b) => MidLiteral::Bool(*b),
         Constant::Unit => MidLiteral::Unit,
         Constant::Data(d) => MidLiteral::Data(Box::new(d.clone())),
-        Constant::ProtoList(_, items) => {
-            MidLiteral::List(items.iter().map(|item| constant_to_literal(item)).collect())
+        Constant::ProtoList(..) | Constant::ProtoArray(..) | Constant::ProtoPair(..) => {
+            unreachable!("compound constants are walked by `constant_to_literal`")
         }
-        // No surface syntax has an array literal either; its elements read
-        // as a list, which is also what `listToArray` builds one from.
-        Constant::ProtoArray(_, items) => {
-            MidLiteral::List(items.iter().map(|item| constant_to_literal(item)).collect())
-        }
-        Constant::ProtoPair(_, _, a, b) => MidLiteral::Pair(
-            Box::new(constant_to_literal(a)),
-            Box::new(constant_to_literal(b)),
-        ),
         // BLS elements: store as opaque markers (no blst dependency in decompiler)
         Constant::Bls12_381G1Element(_) => MidLiteral::Bls12_381G1(vec![]),
         Constant::Bls12_381G2Element(_) => MidLiteral::Bls12_381G2(vec![]),

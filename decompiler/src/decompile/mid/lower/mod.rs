@@ -1480,33 +1480,66 @@ impl<'a> Lowerer<'a> {
 
     /// Map a MidLiteral to its static PseudoType.
     ///
-    /// Compound literals (List / Pair) recurse so the outermost type
-    /// reflects the literal's shape; the children get no entry of their
-    /// own, their MidExprId not being available at this call site.
+    /// Compound literals (List / Pair) descend so the outermost type
+    /// reflects the literal's shape — a list by its first element; the
+    /// children get no entry of their own, their MidExprId not being
+    /// available at this call site. The descent keeps its own stack: a
+    /// literal nests as deep as the script makes it.
     fn literal_type(lit: &MidLiteral) -> std::rc::Rc<crate::pseudo::ast::PseudoType> {
         use crate::pseudo::ast::PseudoType;
         use std::rc::Rc;
-        match lit {
-            MidLiteral::Integer(_) => Rc::new(PseudoType::Int),
-            MidLiteral::ByteString(_) => Rc::new(PseudoType::ByteArray),
-            MidLiteral::String(_) => Rc::new(PseudoType::String),
-            MidLiteral::Bool(_) => Rc::new(PseudoType::Bool),
-            MidLiteral::Unit => Rc::new(PseudoType::Unit),
-            MidLiteral::Data(_) => Rc::new(PseudoType::Data),
-            MidLiteral::List(items) => {
-                let elem = items
-                    .first()
-                    .map(Self::literal_type)
-                    .unwrap_or_else(|| Rc::new(PseudoType::Unknown));
-                Rc::new(PseudoType::List(elem))
-            }
-            MidLiteral::Pair(a, b) => Rc::new(PseudoType::Pair(
-                Self::literal_type(a),
-                Self::literal_type(b),
-            )),
-            MidLiteral::Bls12_381G1(_) => Rc::new(PseudoType::G1Element),
-            MidLiteral::Bls12_381G2(_) => Rc::new(PseudoType::G2Element),
+
+        enum Step<'a> {
+            Visit(&'a MidLiteral),
+            /// Wrap the last type on `done` — the first element's — in `List`.
+            List,
+            /// Pair up the last two types on `done`.
+            Pair,
         }
+
+        let mut steps = vec![Step::Visit(lit)];
+        let mut done: Vec<Rc<PseudoType>> = Vec::new();
+        while let Some(step) = steps.pop() {
+            match step {
+                Step::Visit(lit) => {
+                    let ty = match lit {
+                        MidLiteral::Integer(_) => PseudoType::Int,
+                        MidLiteral::ByteString(_) => PseudoType::ByteArray,
+                        MidLiteral::String(_) => PseudoType::String,
+                        MidLiteral::Bool(_) => PseudoType::Bool,
+                        MidLiteral::Unit => PseudoType::Unit,
+                        MidLiteral::Data(_) => PseudoType::Data,
+                        MidLiteral::List(items) => match items.first() {
+                            Some(first) => {
+                                steps.push(Step::List);
+                                steps.push(Step::Visit(first));
+                                continue;
+                            }
+                            None => PseudoType::List(Rc::new(PseudoType::Unknown)),
+                        },
+                        MidLiteral::Pair(a, b) => {
+                            steps.push(Step::Pair);
+                            steps.push(Step::Visit(b));
+                            steps.push(Step::Visit(a));
+                            continue;
+                        }
+                        MidLiteral::Bls12_381G1(_) => PseudoType::G1Element,
+                        MidLiteral::Bls12_381G2(_) => PseudoType::G2Element,
+                    };
+                    done.push(Rc::new(ty));
+                }
+                Step::List => {
+                    let elem = done.pop().expect("list element type");
+                    done.push(Rc::new(PseudoType::List(elem)));
+                }
+                Step::Pair => {
+                    let second = done.pop().expect("pair second type");
+                    let first = done.pop().expect("pair first type");
+                    done.push(Rc::new(PseudoType::Pair(first, second)));
+                }
+            }
+        }
+        done.pop().expect("one type per literal")
     }
 
     fn seed_simplify_state(

@@ -172,7 +172,10 @@ pub(crate) enum CaseEncoding {
 }
 
 /// Literal values (subset of UPLC Constants).
-#[derive(Debug, Clone, PartialEq)]
+///
+/// `Clone`, `PartialEq`, `Debug` and `Drop` are heap walks — see the `impl`s
+/// below. A list or pair constant nests as deep as the script makes it, so
+/// none of them may recurse; do not derive any of them back.
 pub(crate) enum MidLiteral {
     Integer(BigInt),
     ByteString(Vec<u8>),
@@ -185,6 +188,160 @@ pub(crate) enum MidLiteral {
     /// BLS elements stored as compressed bytes (opaque).
     Bls12_381G1(Vec<u8>),
     Bls12_381G2(Vec<u8>),
+}
+
+impl MidLiteral {
+    /// This literal's direct sub-literals, in order.
+    fn child_refs_into<'a>(&'a self, out: &mut Vec<&'a MidLiteral>) {
+        match self {
+            MidLiteral::List(items) => out.extend(items),
+            MidLiteral::Pair(first, second) => {
+                out.push(first);
+                out.push(second);
+            }
+            _ => {}
+        }
+    }
+
+    /// Move the sub-literals out, in [`Self::child_refs_into`]'s order,
+    /// leaving this node childless.
+    fn take_children(&mut self) -> Vec<MidLiteral> {
+        match self {
+            MidLiteral::List(items) => std::mem::take(items),
+            MidLiteral::Pair(first, second) => vec![
+                std::mem::replace(first.as_mut(), MidLiteral::Unit),
+                std::mem::replace(second.as_mut(), MidLiteral::Unit),
+            ],
+            _ => Vec::new(),
+        }
+    }
+
+    /// A copy of this node alone; `None` for a list or pair, whose copy is
+    /// assembled from its children's.
+    fn clone_leaf(&self) -> Option<MidLiteral> {
+        Some(match self {
+            MidLiteral::Integer(n) => MidLiteral::Integer(n.clone()),
+            MidLiteral::ByteString(bytes) => MidLiteral::ByteString(bytes.clone()),
+            MidLiteral::String(text) => MidLiteral::String(text.clone()),
+            MidLiteral::Bool(b) => MidLiteral::Bool(*b),
+            MidLiteral::Unit => MidLiteral::Unit,
+            MidLiteral::Data(data) => MidLiteral::Data(data.clone()),
+            MidLiteral::Bls12_381G1(bytes) => MidLiteral::Bls12_381G1(bytes.clone()),
+            MidLiteral::Bls12_381G2(bytes) => MidLiteral::Bls12_381G2(bytes.clone()),
+            MidLiteral::List(_) | MidLiteral::Pair(..) => return None,
+        })
+    }
+}
+
+impl Clone for MidLiteral {
+    fn clone(&self) -> Self {
+        enum Step<'a> {
+            Visit(&'a MidLiteral),
+            /// Rebuild this list or pair from the `usize` clones on `done`.
+            Build(&'a MidLiteral, usize),
+        }
+
+        let mut steps = vec![Step::Visit(self)];
+        let mut done: Vec<MidLiteral> = Vec::new();
+        let mut children: Vec<&MidLiteral> = Vec::new();
+        while let Some(step) = steps.pop() {
+            match step {
+                Step::Visit(node) => match node.clone_leaf() {
+                    Some(leaf) => done.push(leaf),
+                    None => {
+                        children.clear();
+                        node.child_refs_into(&mut children);
+                        steps.push(Step::Build(node, children.len()));
+                        // Reversed so they pop — and so land on `done` — in order.
+                        steps.extend(children.iter().rev().map(|child| Step::Visit(child)));
+                    }
+                },
+                Step::Build(node, count) => {
+                    let mut cloned = done.split_off(done.len() - count);
+                    done.push(match node {
+                        MidLiteral::List(_) => MidLiteral::List(cloned),
+                        MidLiteral::Pair(..) => {
+                            let second = cloned.pop().expect("pair second");
+                            let first = cloned.pop().expect("pair first");
+                            MidLiteral::Pair(Box::new(first), Box::new(second))
+                        }
+                        _ => unreachable!("leaves are cloned on visit"),
+                    });
+                }
+            }
+        }
+        done.pop().expect("clone leaves exactly one result")
+    }
+}
+
+impl PartialEq for MidLiteral {
+    fn eq(&self, other: &Self) -> bool {
+        let mut pending = vec![(self, other)];
+        while let Some(pair) = pending.pop() {
+            let same = match pair {
+                (MidLiteral::Integer(a), MidLiteral::Integer(b)) => a == b,
+                (MidLiteral::ByteString(a), MidLiteral::ByteString(b))
+                | (MidLiteral::Bls12_381G1(a), MidLiteral::Bls12_381G1(b))
+                | (MidLiteral::Bls12_381G2(a), MidLiteral::Bls12_381G2(b)) => a == b,
+                (MidLiteral::String(a), MidLiteral::String(b)) => a == b,
+                (MidLiteral::Bool(a), MidLiteral::Bool(b)) => a == b,
+                (MidLiteral::Unit, MidLiteral::Unit) => true,
+                (MidLiteral::Data(a), MidLiteral::Data(b)) => a == b,
+                (MidLiteral::List(a), MidLiteral::List(b)) => {
+                    pending.extend(a.iter().zip(b));
+                    a.len() == b.len()
+                }
+                (MidLiteral::Pair(first_a, second_a), MidLiteral::Pair(first_b, second_b)) => {
+                    pending.push((second_a, second_b));
+                    pending.push((first_a, first_b));
+                    true
+                }
+                _ => false,
+            };
+            if !same {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+impl crate::pseudo::debug_walk::DebugLayers for MidLiteral {
+    fn layer<'a>(&'a self, out: &mut crate::pseudo::debug_walk::Layer<'a, Self>) {
+        use crate::pseudo::debug_walk::Field;
+        match self {
+            MidLiteral::Integer(n) => out.tuple("Integer", &[Field::Leaf(n)]),
+            MidLiteral::ByteString(bytes) => out.tuple("ByteString", &[Field::Leaf(bytes)]),
+            MidLiteral::String(text) => out.tuple("String", &[Field::Leaf(text)]),
+            MidLiteral::Bool(b) => out.tuple("Bool", &[Field::Leaf(b)]),
+            MidLiteral::Unit => out.unit("Unit"),
+            MidLiteral::Data(data) => out.tuple("Data", &[Field::Leaf(data)]),
+            MidLiteral::List(items) => out.tuple("List", &[Field::Nodes(items)]),
+            MidLiteral::Pair(first, second) => {
+                out.tuple("Pair", &[Field::Node(first), Field::Node(second)])
+            }
+            MidLiteral::Bls12_381G1(bytes) => out.tuple("Bls12_381G1", &[Field::Leaf(bytes)]),
+            MidLiteral::Bls12_381G2(bytes) => out.tuple("Bls12_381G2", &[Field::Leaf(bytes)]),
+        }
+    }
+}
+
+impl std::fmt::Debug for MidLiteral {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        crate::pseudo::debug_walk::write(self, f)
+    }
+}
+
+/// Releases the literal without recursing: each node is emptied before it
+/// goes out of scope, so the implicit drop at the end of the loop body only
+/// ever frees a childless node.
+impl Drop for MidLiteral {
+    fn drop(&mut self) {
+        let mut pending = self.take_children();
+        while let Some(mut node) = pending.pop() {
+            pending.append(&mut node.take_children());
+        }
+    }
 }
 
 // ===== MidExpr accessors =====
