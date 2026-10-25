@@ -20,6 +20,7 @@
 //! further lambda parameter is the thunk's, so it is dropped together with the
 //! `unit` application. The case is then marked [`CaseEncoding::BuiltinList`].
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 use uplc::builtins::DefaultFunction;
@@ -125,6 +126,15 @@ fn is_unit_args(args: &[MidExpr]) -> bool {
         || matches!(args, [MidExpr::Lit { value: MidLiteral::Unit, .. }])
 }
 
+/// One belief the fixpoint can drop.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Belief {
+    /// The variable is in [`Ctx::lists`].
+    List(VarId),
+    /// The closure is in [`Ctx::returns_list`].
+    ReturnsList(VarId),
+}
+
 /// What the fixpoint currently believes.
 #[derive(Default)]
 struct Ctx {
@@ -132,6 +142,9 @@ struct Ctx {
     lists: HashSet<VarId>,
     /// Non-escaping closures whose result is a builtin list.
     returns_list: HashSet<VarId>,
+    /// While set, every belief a check consults is recorded here, so the
+    /// fixpoint knows which checks a dropped belief can change.
+    reads: RefCell<Option<Vec<Belief>>>,
     /// `g` of `let g = f(f)` to `f`.
     alias_of: HashMap<VarId, VarId>,
     /// Parameter count of each non-escaping closure.
@@ -161,6 +174,24 @@ fn yields_list(fun: DefaultFunction) -> bool {
 }
 
 impl Ctx {
+    fn believes(&self, belief: Belief) -> bool {
+        if let Some(reads) = self.reads.borrow_mut().as_mut() {
+            reads.push(belief);
+        }
+        match belief {
+            Belief::List(var) => self.lists.contains(&var),
+            Belief::ReturnsList(closure) => self.returns_list.contains(&closure),
+        }
+    }
+
+    /// Drop `belief`; whether it was held.
+    fn drop_belief(&mut self, belief: Belief) -> bool {
+        match belief {
+            Belief::List(var) => self.lists.remove(&var),
+            Belief::ReturnsList(closure) => self.returns_list.remove(&closure),
+        }
+    }
+
     /// The closure a call through `head` reaches, and how many leading
     /// parameters that call leaves unsupplied.
     fn callee_of(&self, head: VarId) -> Option<(VarId, usize)> {
@@ -174,7 +205,7 @@ impl Ctx {
 /// Whether `expr` is certainly a builtin list.
 fn in_list(expr: &MidExpr, ctx: &Ctx) -> bool {
     match expr {
-        MidExpr::Var { var, .. } => ctx.lists.contains(var),
+        MidExpr::Var { var, .. } => ctx.believes(Belief::List(*var)),
         MidExpr::Lit {
             value: MidLiteral::List(_),
             ..
@@ -199,7 +230,7 @@ fn in_list(expr: &MidExpr, ctx: &Ctx) -> bool {
                                 && is_constr_pair(&args[0], ctx)))
                 })
                     || ctx.callee_of(*var).is_some_and(|(f, shift)| {
-                        ctx.returns_list.contains(&f) && ctx.arity[&f] == args.len() + shift
+                        ctx.believes(Belief::ReturnsList(f)) && ctx.arity[&f] == args.len() + shift
                     })
             }
             _ => false,
@@ -449,55 +480,109 @@ fn list_variables(root: &MidExpr) -> Ctx {
         }
     }
     ctx.lists.extend(ctx.pair_fields.iter().copied());
-    loop {
-        let mut doomed: Vec<VarId> = Vec::new();
-        let mut doomed_closures: Vec<VarId> = Vec::new();
-        for (var, value) in &facts.lets {
-            if ctx.lists.contains(var) && !in_list(value, &ctx) {
-                doomed.push(*var);
-            }
+
+    // Every check a belief rests on. A check only ever fails as beliefs are
+    // dropped, so dropping exactly what fails until nothing does reaches the
+    // same greatest fixpoint as re-running every check after each round —
+    // and re-checks only what a dropped belief could change. Rounds would
+    // cost the number of beliefs per dropped one: a chain of `let`s each
+    // resting on the next drops one per round.
+    enum Check<'f> {
+        /// `let var = value` keeps `var` a list while `value` is one.
+        Let(VarId, &'f MidExpr),
+        /// A closure's parameter stays a list while every call passes one.
+        Param {
+            closure: VarId,
+            index: usize,
+            param: VarId,
+        },
+        /// A closure keeps returning a list while every way out is one.
+        Returns(VarId),
+        /// A case's tails stay lists while its scrutinee is one.
+        Tails(&'f MidExpr, &'f [MidBranch]),
+    }
+    let mut checks: Vec<Check<'_>> = Vec::new();
+    for (var, value) in &facts.lets {
+        checks.push(Check::Let(*var, value));
+    }
+    for (name, callee) in &facts.callees {
+        for (index, param) in callee.params.iter().enumerate().skip(1) {
+            checks.push(Check::Param {
+                closure: *name,
+                index,
+                param: *param,
+            });
         }
-        for (name, callee) in &facts.callees {
-            let sites = facts.calls.get(name).map(Vec::as_slice).unwrap_or(&[]);
-            for (index, param) in callee.params.iter().enumerate().skip(1) {
-                if !ctx.lists.contains(param) {
-                    continue;
-                }
-                let supported = sites.iter().all(|(shift, args)| {
+        checks.push(Check::Returns(*name));
+    }
+    for (scrutinee, branches) in &facts.cases {
+        if branches.len() == 2 && !is_constr_pair(scrutinee, &ctx) {
+            checks.push(Check::Tails(scrutinee, branches));
+        }
+    }
+
+    // belief → the checks that consulted it.
+    let mut dependents: HashMap<Belief, Vec<usize>> = HashMap::new();
+    let mut pending: Vec<usize> = (0..checks.len()).rev().collect();
+    let mut is_pending = vec![true; checks.len()];
+    while let Some(index) = pending.pop() {
+        is_pending[index] = false;
+        let rests_on: Vec<Belief> = match &checks[index] {
+            Check::Let(var, _) | Check::Param { param: var, .. } => vec![Belief::List(*var)],
+            Check::Returns(name) => vec![Belief::ReturnsList(*name)],
+            Check::Tails(_, branches) => branches
+                .iter()
+                .filter_map(|b| b.binders.get(1).map(|tail| Belief::List(*tail)))
+                .collect(),
+        };
+        let held = rests_on.iter().any(|belief| match belief {
+            Belief::List(var) => ctx.lists.contains(var),
+            Belief::ReturnsList(name) => ctx.returns_list.contains(name),
+        });
+        if !held {
+            continue;
+        }
+
+        *ctx.reads.borrow_mut() = Some(Vec::new());
+        let holds = match &checks[index] {
+            Check::Let(_, value) => in_list(value, &ctx),
+            Check::Param { closure, index, .. } => {
+                let sites = facts.calls.get(closure).map(Vec::as_slice).unwrap_or(&[]);
+                sites.iter().all(|(shift, args)| {
                     index
                         .checked_sub(*shift)
                         .and_then(|i| args.get(i))
                         .is_some_and(|a| in_list(a, &ctx))
-                });
-                if !supported {
-                    doomed.push(*param);
+                })
+            }
+            Check::Returns(name) => {
+                let callee = &facts.callees[name];
+                closure_returns_list(
+                    Some(*name),
+                    callee.params.first().copied(),
+                    callee.body,
+                    &ctx,
+                )
+            }
+            Check::Tails(scrutinee, _) => in_list(scrutinee, &ctx),
+        };
+        let reads = ctx.reads.borrow_mut().take().unwrap_or_default();
+        for belief in reads {
+            dependents.entry(belief).or_default().push(index);
+        }
+
+        if !holds {
+            for belief in rests_on {
+                if ctx.drop_belief(belief) {
+                    for dependent in dependents.remove(&belief).unwrap_or_default() {
+                        if !is_pending[dependent] {
+                            is_pending[dependent] = true;
+                            pending.push(dependent);
+                        }
+                    }
                 }
             }
-            if ctx.returns_list.contains(name)
-                && !closure_returns_list(Some(*name), callee.params.first().copied(), callee.body, &ctx)
-            {
-                doomed_closures.push(*name);
-            }
-        }
-        for (scrutinee, branches) in &facts.cases {
-            if in_list(scrutinee, &ctx) || branches.len() != 2 || is_constr_pair(scrutinee, &ctx) {
-                continue;
-            }
-            for b in *branches {
-                if let Some(tail) = b.binders.get(1) {
-                    doomed.push(*tail);
-                }
-            }
-        }
-        let before = ctx.lists.len() + ctx.returns_list.len();
-        for var in doomed {
-            ctx.lists.remove(&var);
-        }
-        for name in doomed_closures {
-            ctx.returns_list.remove(&name);
-        }
-        if ctx.lists.len() + ctx.returns_list.len() == before {
-            return ctx;
         }
     }
+    ctx
 }
