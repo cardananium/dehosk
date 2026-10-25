@@ -41,3 +41,14 @@ collapsible_if = "allow"
 # `DecompileOptions` has ~25 fields: `let mut o = default(); o.x = ..` beats
 # a literal restating the other 24.
 field_reassign_with_default = "allow"
+
+# PlutusData from pallas's stack-safe branch: its decode, encode, clone,
+# comparison and drop are iterative, so a Data constant nested as deep as a
+# script allows cannot overflow the call stack. The uplc fork builds against
+# the same revision; a local checkout until the branch is pushed.
+[patch.crates-io]
+pallas-addresses = { git = "file:///home/evgenii/svc/pallas", rev = "437295c63d1846a50692129655205ed2182c54f3" }
+pallas-codec = { git = "file:///home/evgenii/svc/pallas", rev = "437295c63d1846a50692129655205ed2182c54f3" }
+pallas-crypto = { git = "file:///home/evgenii/svc/pallas", rev = "437295c63d1846a50692129655205ed2182c54f3" }
+pallas-primitives = { git = "file:///home/evgenii/svc/pallas", rev = "437295c63d1846a50692129655205ed2182c54f3" }
+pallas-traverse = { git = "file:///home/evgenii/svc/pallas", rev = "437295c63d1846a50692129655205ed2182c54f3" }

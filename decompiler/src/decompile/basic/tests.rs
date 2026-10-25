@@ -44,8 +44,8 @@ fn the_index_is_the_one_the_machine_reads() {
             };
             // Built from a real `Data::constr` so `fields` is what the
             // encoder makes; only `tag` and `any_constructor` are varied.
-            let mut node = match uplc::ast::Data::constr(0, Vec::new()) {
-                uplc::PlutusData::Constr(c) => c,
+            let mut node = match &uplc::ast::Data::constr(0, Vec::new()) {
+                uplc::PlutusData::Constr(c) => c.clone(),
                 other => panic!("not a constructor: {other:?}"),
             };
             node.tag = tag;
