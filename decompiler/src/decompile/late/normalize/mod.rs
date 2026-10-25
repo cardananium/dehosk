@@ -38,7 +38,10 @@ use self::constructor_field_access::{
 };
 pub(crate) use self::display_polish_layer::run_display_polish_layer;
 pub(crate) use self::forward_let_dependencies::repair_forward_let_dependencies;
-use self::option::like_detection::{collect_option_like_function_names, is_option_like_value};
+use self::option::like_detection::{
+    OptionLikeNeed, OptionLikeNode, collect_option_like_function_names, if_need, let_need,
+    need_holds, option_like_need, option_like_node, when_need,
+};
 use self::option::pattern_naming::{fill_option_wildcard_pattern, rename_option_pattern};
 use self::option::payload_access::replace_subject_payload_access;
 use self::option::payload_binder_recovery::recover_missing_option_payload_binders;
@@ -996,6 +999,7 @@ pub(crate) fn rename_option_like_patterns(
             option_like_subject: bool,
             option_like_subject_id: Option<VarId>,
             clauses: Vec<WhenClause>,
+            clause_needs: Vec<OptionLikeNeed>,
         }
 
         enum Task {
@@ -1030,6 +1034,7 @@ pub(crate) fn rename_option_like_patterns(
             ClauseDone {
                 pattern: WhenPattern,
                 body: PseudoExpr,
+                body_need: OptionLikeNeed,
                 has_guard: bool,
             },
             WhenPost,
@@ -1073,16 +1078,76 @@ pub(crate) fn rename_option_like_patterns(
             },
         }
 
+        impl Task {
+            /// How many children a task that rebuilds an ordinary node takes
+            /// off `done`: such a node is option-like or not on its own,
+            /// whatever its children are.
+            fn plain_children(&self) -> Option<usize> {
+                match self {
+                    Task::Apply { argc } => Some(argc + 1),
+                    Task::BuiltinCall { argc, .. } => Some(*argc),
+                    Task::List { count, has_tail } => Some(count + usize::from(*has_tail)),
+                    Task::Tuple { count } => Some(*count),
+                    Task::Trace | Task::Pair | Task::BinOp { .. } => Some(2),
+                    Task::Lambda { .. }
+                    | Task::RecFn { .. }
+                    | Task::Delay
+                    | Task::Force
+                    | Task::FieldAccess { .. }
+                    | Task::IndexAccess { .. }
+                    | Task::UnOp { .. } => Some(1),
+                    _ => None,
+                }
+            }
+        }
+
         fn take(done: &mut Vec<PseudoExpr>, n: usize) -> Vec<PseudoExpr> {
             let at = done.len() - n;
             done.split_off(at)
         }
 
+        /// A rebuilt node's need from its children's, in source order — a
+        /// `let`'s value and body, an `if`'s branches, a `when`'s clause
+        /// bodies. Anything else is folded afresh.
+        fn node_need(
+            expr: &PseudoExpr,
+            children: &[OptionLikeNeed],
+            option_like_functions: &HashSet<String>,
+            option_like_vars: &[HashSet<String>],
+        ) -> OptionLikeNeed {
+            match (
+                option_like_node(expr, option_like_functions, option_like_vars),
+                children,
+            ) {
+                (OptionLikeNode::Leaf(need), _) => need,
+                (OptionLikeNode::Let { .. }, &[value, body]) => let_need(value, body),
+                (
+                    OptionLikeNode::If {
+                        then_none_like,
+                        else_none_like,
+                        ..
+                    },
+                    &[then_branch, else_branch],
+                ) => if_need(then_branch, else_branch, then_none_like, else_none_like),
+                (OptionLikeNode::When { has_none, clauses }, bodies)
+                    if bodies.len() == clauses.len() =>
+                {
+                    when_need(has_none, bodies.iter().copied())
+                }
+                _ => option_like_need(expr, option_like_functions, option_like_vars),
+            }
+        }
+
         let mut tasks: Vec<Task> = vec![Task::Enter(expr)];
         let mut done: Vec<PseudoExpr> = Vec::new();
+        // Each `done` entry's option-like need, so a `let` value or a `when`
+        // subject is classified from its children's answers instead of a
+        // walk over all of it at every level.
+        let mut needs: Vec<OptionLikeNeed> = Vec::new();
         let mut when_frames: Vec<WhenFrame> = Vec::new();
 
         while let Some(task) = tasks.pop() {
+            let plain_children = task.plain_children();
             match task {
                 Task::Enter(expr) => match expr {
                     PseudoExpr::Let {
@@ -1196,12 +1261,20 @@ pub(crate) fn rename_option_like_patterns(
                         tasks.push(Task::UnOp { op });
                         tasks.push(Task::Enter(operand.into_inner()));
                     }
-                    other => done.push(other),
+                    other => {
+                        needs.push(node_need(
+                            &other,
+                            &[],
+                            option_like_functions,
+                            option_like_vars,
+                        ));
+                        done.push(other);
+                    }
                 },
                 Task::LetBody { name, id, body } => {
-                    let value = done.last().expect("let value");
+                    let value_need = *needs.last().expect("let value need");
                     let mut scope = HashSet::new();
-                    if is_option_like_value(value, option_like_functions, option_like_vars) {
+                    if need_holds(value_need, option_like_vars.len()) {
                         scope.insert(name.clone());
                     }
                     option_like_vars.push(scope);
@@ -1211,21 +1284,30 @@ pub(crate) fn rename_option_like_patterns(
                 Task::LetPost { name, id } => {
                     let body = done.pop().expect("let body");
                     let value = done.pop().expect("let value");
+                    let body_need = needs.pop().expect("let body need");
+                    let value_need = needs.pop().expect("let value need");
                     option_like_vars.pop();
-                    done.push(PseudoExpr::Let {
+                    let expr = PseudoExpr::Let {
                         name,
                         id,
                         value: PBox::new(value),
                         body: PBox::new(body),
-                    });
+                    };
+                    needs.push(node_need(
+                        &expr,
+                        &[value_need, body_need],
+                        option_like_functions,
+                        option_like_vars,
+                    ));
+                    done.push(expr);
                 }
                 Task::WhenClauses {
                     subject_name,
                     clauses,
                 } => {
                     let subject = done.pop().expect("when subject");
-                    let option_like_subject =
-                        is_option_like_value(&subject, option_like_functions, option_like_vars);
+                    let subject_need = needs.pop().expect("when subject need");
+                    let option_like_subject = need_holds(subject_need, option_like_vars.len());
                     let option_like_subject_id: Option<VarId> = subject_name
                         .as_ref()
                         .and_then(|binder| binder.id.get())
@@ -1239,6 +1321,7 @@ pub(crate) fn rename_option_like_patterns(
                         option_like_subject,
                         option_like_subject_id,
                         clauses: Vec::new(),
+                        clause_needs: Vec::new(),
                     });
                     tasks.push(Task::WhenPost);
                     for clause in clauses.into_iter().rev() {
@@ -1261,6 +1344,7 @@ pub(crate) fn rename_option_like_patterns(
                 }
                 Task::ClauseGuard { pattern, guard } => {
                     let mut body = done.pop().expect("clause body");
+                    let mut body_need = needs.pop().expect("clause body need");
                     let option_like_subject =
                         when_frames.last().expect("when frame").option_like_subject;
                     if option_like_subject
@@ -1277,11 +1361,13 @@ pub(crate) fn rename_option_like_patterns(
                         && is_bool_false_like(&body)
                     {
                         body = make_standard_option_none();
+                        body_need = node_need(&body, &[], option_like_functions, option_like_vars);
                     }
                     let has_guard = guard.is_some();
                     tasks.push(Task::ClauseDone {
                         pattern,
                         body,
+                        body_need,
                         has_guard,
                     });
                     if let Some(guard) = guard {
@@ -1291,9 +1377,13 @@ pub(crate) fn rename_option_like_patterns(
                 Task::ClauseDone {
                     pattern,
                     mut body,
+                    mut body_need,
                     has_guard,
                 } => {
-                    let mut guard = has_guard.then(|| done.pop().expect("clause guard"));
+                    let mut guard = has_guard.then(|| {
+                        needs.pop().expect("clause guard need");
+                        done.pop().expect("clause guard")
+                    });
                     let frame = when_frames.last().expect("when frame");
                     let option_like_subject = frame.option_like_subject;
                     let option_like_subject_id = frame.option_like_subject_id;
@@ -1314,6 +1404,10 @@ pub(crate) fn rename_option_like_patterns(
                             let (rewritten_body, _) =
                                 replace_subject_payload_access(body, Some(subject_id), &fields[0]);
                             body = rewritten_body;
+                            // Its `Var`s looked up at this depth answer every
+                            // ancestor, whose scopes are a prefix of these.
+                            body_need =
+                                option_like_need(&body, option_like_functions, option_like_vars);
                             if let Some(guard_expr) = guard.take() {
                                 let (rewritten_guard, _) = replace_subject_payload_access(
                                     guard_expr,
@@ -1324,15 +1418,13 @@ pub(crate) fn rename_option_like_patterns(
                             }
                         }
                     }
-                    when_frames
-                        .last_mut()
-                        .expect("when frame")
-                        .clauses
-                        .push(WhenClause {
-                            pattern,
-                            guard,
-                            body,
-                        });
+                    let frame = when_frames.last_mut().expect("when frame");
+                    frame.clauses.push(WhenClause {
+                        pattern,
+                        guard,
+                        body,
+                    });
+                    frame.clause_needs.push(body_need);
                 }
                 Task::WhenPost => {
                     let frame = when_frames.pop().expect("when frame");
@@ -1340,21 +1432,38 @@ pub(crate) fn rename_option_like_patterns(
                     if frame.option_like_subject {
                         fill_option_wildcard_pattern(&mut clauses);
                     }
-                    done.push(PseudoExpr::When {
+                    let expr = PseudoExpr::When {
                         subject: PBox::new(frame.subject),
                         subject_name: frame.subject_name,
                         clauses: clauses.into(),
-                    });
+                    };
+                    needs.push(node_need(
+                        &expr,
+                        &frame.clause_needs,
+                        option_like_functions,
+                        option_like_vars,
+                    ));
+                    done.push(expr);
                 }
                 Task::If => {
                     let else_branch = done.pop().expect("if else");
                     let then_branch = done.pop().expect("if then");
                     let condition = done.pop().expect("if condition");
-                    done.push(PseudoExpr::If {
+                    let else_need = needs.pop().expect("if else need");
+                    let then_need = needs.pop().expect("if then need");
+                    needs.pop().expect("if condition need");
+                    let expr = PseudoExpr::If {
                         condition: PBox::new(condition),
                         then_branch: PBox::new(then_branch),
                         else_branch: PBox::new(else_branch),
-                    });
+                    };
+                    needs.push(node_need(
+                        &expr,
+                        &[then_need, else_need],
+                        option_like_functions,
+                        option_like_vars,
+                    ));
+                    done.push(expr);
                 }
                 Task::Apply { argc } => {
                     let mut args = take(&mut done, argc);
@@ -1461,6 +1570,17 @@ pub(crate) fn rename_option_like_patterns(
                     });
                 }
             }
+            if let Some(children) = plain_children {
+                needs.truncate(needs.len() - children);
+                let expr = done.last().expect("rebuilt node");
+                needs.push(node_need(
+                    expr,
+                    &[],
+                    option_like_functions,
+                    option_like_vars,
+                ));
+            }
+            debug_assert_eq!(needs.len(), done.len(), "one need per finished node");
         }
 
         debug_assert_eq!(done.len(), 1, "the rewrite machine must leave one result");

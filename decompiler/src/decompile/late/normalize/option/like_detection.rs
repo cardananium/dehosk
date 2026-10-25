@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use crate::decompile::constructor_data::{
     is_bool_false_like, is_standard_option_none_candidate, is_standard_option_some_candidate,
 };
-use crate::pseudo::ast::PseudoExpr;
+use crate::pseudo::ast::{PseudoExpr, WhenClause};
 use crate::pseudo::constructor::{ConstructorShape, KnownConstructor};
 
 fn expr_contains_named_option(expr: &PseudoExpr) -> bool {
@@ -238,136 +238,237 @@ pub(in crate::decompile::late::normalize) fn collect_option_like_function_names(
     }
 }
 
-/// One job on [`is_option_like_value`]'s stack. `Post` holds everything the
-/// arm needs that is NOT a child answer — the non-recursive `None`-shape
-/// probes run on the way down.
-enum OptStep<'a> {
-    Visit(&'a PseudoExpr),
-    Post(OptPost),
+/// How many option-like scopes a value needs to be option-like, counted from
+/// the outermost: it is option-like under a scope stack of length `k` exactly
+/// when the need is `Some(t)` with `t <= k`. `Some(0)` means always, `None`
+/// never. A scope only ever turns a `Var`'s answer on, and every combinator
+/// below is an `||`/`&&` over those answers, so one threshold answers every
+/// prefix of the stack — which lets a walk that pushes and pops scopes compute
+/// each node's answer once, bottom-up, and ask it at any ancestor.
+pub(in crate::decompile::late::normalize) type OptionLikeNeed = Option<usize>;
+
+/// Whether a value with this need is option-like under `scopes` scopes.
+pub(in crate::decompile::late::normalize) fn need_holds(
+    need: OptionLikeNeed,
+    scopes: usize,
+) -> bool {
+    need.is_some_and(|threshold| threshold <= scopes)
 }
 
-enum OptPost {
-    /// `value_answer || body_answer`.
-    Let,
+/// `a || b`.
+fn either(a: OptionLikeNeed, b: OptionLikeNeed) -> OptionLikeNeed {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, None) => a,
+        (None, b) => b,
+    }
+}
+
+/// `a && b`.
+fn both(a: OptionLikeNeed, b: OptionLikeNeed) -> OptionLikeNeed {
+    Some(a?.max(b?))
+}
+
+/// One node of the option-like fold: either answered on its own, or the
+/// children whose answers it combines.
+pub(in crate::decompile::late::normalize) enum OptionLikeNode<'a> {
+    Leaf(OptionLikeNeed),
+    /// `value || body`.
+    Let {
+        value: &'a PseudoExpr,
+        body: &'a PseudoExpr,
+    },
     /// The two branch answers plus each branch's `None`-shape probe.
+    If {
+        then_branch: &'a PseudoExpr,
+        else_branch: &'a PseudoExpr,
+        then_none_like: bool,
+        else_none_like: bool,
+    },
+    /// `has_none` is decided on the spot; the clause bodies supply
+    /// `has_option_branch`.
+    When {
+        has_none: bool,
+        clauses: &'a [WhenClause],
+    },
+}
+
+/// Classify one node. The arms keep their original order — the two `other if
+/// …` probes still shadow `Let`/`If`/`When`. A `Var` needs the outermost scope
+/// that holds its name.
+pub(in crate::decompile::late::normalize) fn option_like_node<'a>(
+    expr: &'a PseudoExpr,
+    option_like_functions: &HashSet<String>,
+    option_like_vars: &[HashSet<String>],
+) -> OptionLikeNode<'a> {
+    match expr {
+        PseudoExpr::Constr {
+            shape:
+                ConstructorShape::Known(KnownConstructor::Some)
+                | ConstructorShape::Known(KnownConstructor::None),
+            ..
+        } => OptionLikeNode::Leaf(Some(0)),
+        other if is_standard_option_none_candidate(other) || is_bool_false_like(other) => {
+            OptionLikeNode::Leaf(Some(0))
+        }
+        other if is_standard_option_some_candidate(other) => OptionLikeNode::Leaf(Some(0)),
+        PseudoExpr::Var { name, .. } => OptionLikeNode::Leaf(
+            option_like_vars
+                .iter()
+                .position(|scope| scope.contains(name))
+                .map(|outermost| outermost + 1),
+        ),
+        PseudoExpr::Apply { function, .. } => {
+            let option_like = match function.as_ref() {
+                PseudoExpr::Var { name, .. } => option_like_functions.contains(name),
+                PseudoExpr::RecFn { name, .. } => {
+                    option_like_functions.contains(name.name.as_str())
+                }
+                _ => false,
+            };
+            OptionLikeNode::Leaf(option_like.then_some(0))
+        }
+        PseudoExpr::Let { value, body, .. } => OptionLikeNode::Let { value, body },
+        PseudoExpr::If {
+            then_branch,
+            else_branch,
+            ..
+        } => OptionLikeNode::If {
+            then_branch,
+            else_branch,
+            then_none_like: is_standard_option_none_candidate(then_branch)
+                || is_bool_false_like(then_branch),
+            else_none_like: is_standard_option_none_candidate(else_branch)
+                || is_bool_false_like(else_branch),
+        },
+        PseudoExpr::When { clauses, .. } => OptionLikeNode::When {
+            has_none: clauses.iter().any(|clause| {
+                is_standard_option_none_candidate(&clause.body) || is_bool_false_like(&clause.body)
+            }),
+            clauses,
+        },
+        _ => OptionLikeNode::Leaf(None),
+    }
+}
+
+pub(in crate::decompile::late::normalize) fn let_need(
+    value: OptionLikeNeed,
+    body: OptionLikeNeed,
+) -> OptionLikeNeed {
+    either(value, body)
+}
+
+pub(in crate::decompile::late::normalize) fn if_need(
+    then_branch: OptionLikeNeed,
+    else_branch: OptionLikeNeed,
+    then_none_like: bool,
+    else_none_like: bool,
+) -> OptionLikeNeed {
+    let has_none = either(
+        if then_none_like { then_branch } else { None },
+        if else_none_like { else_branch } else { None },
+    );
+    let has_option_branch = either(then_branch, else_branch);
+    both(has_none, has_option_branch)
+}
+
+pub(in crate::decompile::late::normalize) fn when_need(
+    has_none: bool,
+    bodies: impl IntoIterator<Item = OptionLikeNeed>,
+) -> OptionLikeNeed {
+    let has_option_branch = bodies.into_iter().fold(None, either);
+    if has_none { has_option_branch } else { None }
+}
+
+/// One job on [`option_like_need`]'s stack.
+enum OptStep<'a> {
+    Visit(&'a PseudoExpr),
+    Let,
     If {
         then_none_like: bool,
         else_none_like: bool,
     },
-    /// `has_none` is decided without recursion; the clause bodies supply
-    /// `has_option_branch`.
-    When { has_none: bool, clause_count: usize },
+    When {
+        has_none: bool,
+        clause_count: usize,
+    },
 }
 
-/// A bottom-up boolean fold: each node's answer is combined from its
-/// children's answers, popped off `answers` in the order the children were
-/// pushed (REVERSE, so they pop in source order). The arms keep their
-/// original order — the two `other if …` probes still shadow `Let`/`If`/
-/// `When` — and every combinator is a side-effect-free `||`/`&&` over pure
-/// predicates, so evaluating both operands instead of short-circuiting
-/// changes nothing but the work done (strictly less here: the recursive
-/// `If` arm re-evaluated each branch twice).
-pub(in crate::decompile::late::normalize) fn is_option_like_value(
+/// The need of a whole value, folded bottom-up: each node's need is combined
+/// from its children's, popped off `needs` in the order the children were
+/// pushed (REVERSE, so they pop in source order). Every `Var` is looked up in
+/// `option_like_vars` as given, so the answer holds for that stack and every
+/// prefix of it.
+pub(in crate::decompile::late::normalize) fn option_like_need(
     expr: &PseudoExpr,
     option_like_functions: &HashSet<String>,
     option_like_vars: &[HashSet<String>],
-) -> bool {
+) -> OptionLikeNeed {
     let mut steps: Vec<OptStep<'_>> = vec![OptStep::Visit(expr)];
-    let mut answers: Vec<bool> = Vec::new();
+    let mut needs: Vec<OptionLikeNeed> = Vec::new();
 
     while let Some(step) = steps.pop() {
         match step {
-            OptStep::Visit(expr) => match expr {
-                PseudoExpr::Constr {
-                    shape:
-                        ConstructorShape::Known(KnownConstructor::Some)
-                        | ConstructorShape::Known(KnownConstructor::None),
-                    ..
-                } => answers.push(true),
-                other if is_standard_option_none_candidate(other) || is_bool_false_like(other) => {
-                    answers.push(true)
-                }
-                other if is_standard_option_some_candidate(other) => answers.push(true),
-                PseudoExpr::Var { name, .. } => answers.push(
-                    option_like_vars
-                        .iter()
-                        .rev()
-                        .any(|scope| scope.contains(name)),
-                ),
-                PseudoExpr::Apply { function, .. } => answers.push(match function.as_ref() {
-                    PseudoExpr::Var { name, .. } => option_like_functions.contains(name),
-                    PseudoExpr::RecFn { name, .. } => {
-                        option_like_functions.contains(name.name.as_str())
+            OptStep::Visit(expr) => {
+                match option_like_node(expr, option_like_functions, option_like_vars) {
+                    OptionLikeNode::Leaf(need) => needs.push(need),
+                    OptionLikeNode::Let { value, body } => {
+                        steps.push(OptStep::Let);
+                        steps.push(OptStep::Visit(body));
+                        steps.push(OptStep::Visit(value));
                     }
-                    _ => false,
-                }),
-                PseudoExpr::Let { value, body, .. } => {
-                    steps.push(OptStep::Post(OptPost::Let));
-                    steps.push(OptStep::Visit(body));
-                    steps.push(OptStep::Visit(value));
-                }
-                PseudoExpr::If {
-                    then_branch,
-                    else_branch,
-                    ..
-                } => {
-                    steps.push(OptStep::Post(OptPost::If {
-                        then_none_like: is_standard_option_none_candidate(then_branch)
-                            || is_bool_false_like(then_branch),
-                        else_none_like: is_standard_option_none_candidate(else_branch)
-                            || is_bool_false_like(else_branch),
-                    }));
-                    steps.push(OptStep::Visit(else_branch));
-                    steps.push(OptStep::Visit(then_branch));
-                }
-                PseudoExpr::When { clauses, .. } => {
-                    let has_none = clauses.iter().any(|clause| {
-                        is_standard_option_none_candidate(&clause.body)
-                            || is_bool_false_like(&clause.body)
-                    });
-                    steps.push(OptStep::Post(OptPost::When {
-                        has_none,
-                        clause_count: clauses.len(),
-                    }));
-                    for clause in clauses.iter().rev() {
-                        steps.push(OptStep::Visit(&clause.body));
-                    }
-                }
-                _ => answers.push(false),
-            },
-            OptStep::Post(post) => {
-                let answer = match post {
-                    OptPost::Let => {
-                        let body = answers.pop().expect("let body answer");
-                        let value = answers.pop().expect("let value answer");
-                        value || body
-                    }
-                    OptPost::If {
+                    OptionLikeNode::If {
+                        then_branch,
+                        else_branch,
                         then_none_like,
                         else_none_like,
                     } => {
-                        let else_branch = answers.pop().expect("if else answer");
-                        let then_branch = answers.pop().expect("if then answer");
-                        let has_none =
-                            then_branch && then_none_like || else_branch && else_none_like;
-                        let has_option_branch = then_branch || else_branch;
-                        has_none && has_option_branch
+                        steps.push(OptStep::If {
+                            then_none_like,
+                            else_none_like,
+                        });
+                        steps.push(OptStep::Visit(else_branch));
+                        steps.push(OptStep::Visit(then_branch));
                     }
-                    OptPost::When {
-                        has_none,
-                        clause_count,
-                    } => {
-                        let at = answers.len() - clause_count;
-                        let has_option_branch = answers.split_off(at).into_iter().any(|a| a);
-                        has_none && has_option_branch
+                    OptionLikeNode::When { has_none, clauses } => {
+                        steps.push(OptStep::When {
+                            has_none,
+                            clause_count: clauses.len(),
+                        });
+                        for clause in clauses.iter().rev() {
+                            steps.push(OptStep::Visit(&clause.body));
+                        }
                     }
-                };
-                answers.push(answer);
+                }
+            }
+            OptStep::Let => {
+                let body = needs.pop().expect("let body need");
+                let value = needs.pop().expect("let value need");
+                needs.push(let_need(value, body));
+            }
+            OptStep::If {
+                then_none_like,
+                else_none_like,
+            } => {
+                let else_branch = needs.pop().expect("if else need");
+                let then_branch = needs.pop().expect("if then need");
+                needs.push(if_need(
+                    then_branch,
+                    else_branch,
+                    then_none_like,
+                    else_none_like,
+                ));
+            }
+            OptStep::When {
+                has_none,
+                clause_count,
+            } => {
+                let at = needs.len() - clause_count;
+                let bodies = needs.split_off(at);
+                needs.push(when_need(has_none, bodies));
             }
         }
     }
 
-    answers
-        .pop()
-        .expect("is_option_like_value leaves one answer")
+    needs.pop().expect("option_like_need leaves one need")
 }
