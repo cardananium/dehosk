@@ -433,11 +433,10 @@ impl ExprFolder for HelperValueHoister {
             return canonical;
         }
 
-        if let Some(lifted) =
-            try_hoist_helper_from_body(name.clone(), id, value.clone(), body.clone())
-        {
-            return lifted;
-        }
+        let (name, id, value, body) = match try_hoist_helper_from_body(name, id, value, body) {
+            Ok(lifted) => return lifted,
+            Err(parts) => parts,
+        };
 
         let id_concrete = id.unwrap_or_else(VarId::fresh_compat_placeholder);
         let (lifted_from_value, value) = peel_leading_lets(value, |binding, kept_targets| {

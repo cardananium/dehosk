@@ -52,12 +52,22 @@ pub(super) fn is_helper_binding_value(expr: &PseudoExpr) -> bool {
     matches!(expr, PseudoExpr::Lambda { .. } | PseudoExpr::RecFn { .. })
 }
 
+/// The parts of a `let` [`try_hoist_helper_from_body`] handed back
+/// untouched: name, id, value, body.
+pub(super) type LetParts = (String, Option<VarId>, PseudoExpr, PseudoExpr);
+
+/// Lift the helper bound first in the body of `let outer = outer_value`
+/// above `outer`, when that keeps every reference in scope.
+///
+/// Takes the `let` apart by value and gives the parts back unchanged when it
+/// does not apply: the body is the rest of a chain as long as the script
+/// makes it, so copying it per `let` would cost the square of the chain.
 pub(super) fn try_hoist_helper_from_body(
     outer_name: String,
     outer_id: Option<VarId>,
     outer_value: PseudoExpr,
     outer_body: PseudoExpr,
-) -> Option<PseudoExpr> {
+) -> Result<PseudoExpr, LetParts> {
     let PseudoExpr::Let {
         name: inner_name,
         id: inner_id,
@@ -65,7 +75,21 @@ pub(super) fn try_hoist_helper_from_body(
         body: inner_body,
     } = outer_body
     else {
-        return None;
+        return Err((outer_name, outer_id, outer_value, outer_body));
+    };
+    // What the caller gets back when the lift does not apply.
+    let decline = |outer_name, outer_value, inner_name, inner_value, inner_body| {
+        Err((
+            outer_name,
+            outer_id,
+            outer_value,
+            PseudoExpr::Let {
+                name: inner_name,
+                id: inner_id,
+                value: inner_value,
+                body: inner_body,
+            },
+        ))
     };
 
     // `.get()` on an `Option<VarId>` reduces a compat-placeholder id
@@ -78,19 +102,19 @@ pub(super) fn try_hoist_helper_from_body(
     if !is_helper_binding_value(inner_value.as_ref())
         || var_is_referenced_id_aware(&outer_value, inner_id_concrete, &inner_name)
     {
-        return None;
+        return decline(outer_name, outer_value, inner_name, inner_value, inner_body);
     }
 
     let outer_binder = Binder::new(outer_name.clone(), outer_id_concrete);
 
     if !var_is_referenced_id_aware(inner_value.as_ref(), outer_id_concrete, &outer_name) {
         if is_helper_binding_value(&outer_value) {
-            return None;
+            return decline(outer_name, outer_value, inner_name, inner_value, inner_body);
         }
         if !helper_value_is_closed(inner_value.as_ref()) {
-            return None;
+            return decline(outer_name, outer_value, inner_name, inner_value, inner_body);
         }
-        return Some(PseudoExpr::Let {
+        return Ok(PseudoExpr::Let {
             name: inner_name,
             id: inner_id,
             value: inner_value,
@@ -103,34 +127,42 @@ pub(super) fn try_hoist_helper_from_body(
         });
     }
 
+    let applies = match inner_value.as_ref() {
+        PseudoExpr::RecFn {
+            name: rec_name,
+            params,
+            body: rec_body,
+        } => {
+            rec_name == &inner_name
+                && helper_value_free_vars_within(
+                    inner_value.as_ref(),
+                    &[BindingTarget {
+                        name: outer_name.clone(),
+                        id: outer_id_concrete,
+                    }],
+                )
+                && !helper_body_binds_name(rec_body, &outer_name)
+                && !helper_body_binds_name(inner_body.as_ref(), &outer_name)
+                && helper_is_direct_call_only(
+                    inner_body.as_ref(),
+                    &inner_name,
+                    inner_id_concrete,
+                    params.len(),
+                )
+        }
+        _ => false,
+    };
+    if !applies {
+        return decline(outer_name, outer_value, inner_name, inner_value, inner_body);
+    }
     let PseudoExpr::RecFn {
         name: rec_name,
         params,
         body: rec_body,
     } = inner_value.as_ref()
     else {
-        return None;
+        unreachable!("checked to be a rec fn above");
     };
-
-    if rec_name != &inner_name
-        || !helper_value_free_vars_within(
-            inner_value.as_ref(),
-            &[BindingTarget {
-                name: outer_name.clone(),
-                id: outer_id_concrete,
-            }],
-        )
-        || helper_body_binds_name(rec_body, &outer_name)
-        || helper_body_binds_name(inner_body.as_ref(), &outer_name)
-        || !helper_is_direct_call_only(
-            inner_body.as_ref(),
-            &inner_name,
-            inner_id_concrete,
-            params.len(),
-        )
-    {
-        return None;
-    }
 
     let helper_capture_param = Binder::new(outer_name.clone(), VarId::fresh_binding());
     struct RetargetCaptureVarId<'a> {
@@ -205,7 +237,7 @@ pub(super) fn try_hoist_helper_from_body(
         )],
     );
 
-    Some(PseudoExpr::Let {
+    Ok(PseudoExpr::Let {
         name: inner_name,
         id: inner_id,
         value: PBox::new(lifted_helper),
