@@ -19,15 +19,13 @@ pub(super) struct MapRenamer<'a> {
 }
 
 impl<'a> ExprFolder for MapRenamer<'a> {
-    fn fold_clause(&mut self, clause: WhenClause) -> WhenClause {
-        let pattern = self.rename_pattern(clause.pattern);
-        let guard = clause.guard.map(|g| self.fold(g));
-        let body = self.fold(clause.body);
-        WhenClause {
-            pattern,
-            guard,
-            body,
-        }
+    // Folded flat, so a `when` nested as deep as the script makes it does
+    // not recurse once per level: the machine folds a literal pattern's
+    // payload, and `post_when` renames the other patterns' binders. Renaming
+    // only reads the maps, so doing it after the guard and body changes
+    // nothing.
+    fn machine_folds_when(&self) -> bool {
+        true
     }
 
     fn post_var(&mut self, name: String, id: Option<VarId>) -> PseudoExpr {
@@ -136,7 +134,13 @@ impl<'a> ExprFolder for MapRenamer<'a> {
         PseudoExpr::When {
             subject: PBox::new(subject),
             subject_name: subject_name.map(|binder| self.renamed_binder(binder)),
-            clauses,
+            clauses: clauses
+                .into_iter()
+                .map(|clause| WhenClause {
+                    pattern: self.rename_pattern(clause.pattern),
+                    ..clause
+                })
+                .collect(),
         }
     }
 
@@ -194,7 +198,8 @@ impl MapRenamer<'_> {
             }
             WhenPattern::Var(name) => WhenPattern::Var(self.renamed_binder(name)),
             WhenPattern::Wildcard => WhenPattern::Wildcard,
-            WhenPattern::Literal(expr) => WhenPattern::Literal(self.fold(expr)),
+            // The fold machine has already folded the payload.
+            WhenPattern::Literal(expr) => WhenPattern::Literal(expr),
         }
     }
 }

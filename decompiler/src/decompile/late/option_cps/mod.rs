@@ -1,5 +1,5 @@
 use crate::pseudo::ast::PBox;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::decompile::constructor_data::{
     is_standard_option_none_candidate, is_standard_option_some_candidate,
@@ -112,7 +112,12 @@ fn try_rewrite_option_cps_apply_with_reserved(
 }
 
 struct OptionCpsLateRewriter {
-    option_like_bindings: Vec<HashSet<VarId>>,
+    /// How many enclosing `let`s bind each id to an option-like function.
+    /// A count rather than a set per `let`, so asking is one probe instead
+    /// of a walk over every enclosing `let` — as many as the script nests.
+    option_like_ids: HashMap<VarId, usize>,
+    /// Per enclosing `let`, the id it counted in `option_like_ids`.
+    option_like_lets: Vec<Option<VarId>>,
     used_let_names: HashSet<String>,
 }
 
@@ -120,7 +125,8 @@ impl OptionCpsLateRewriter {
     fn rewrite(expr: PseudoExpr) -> PseudoExpr {
         let used_let_names = collect_let_names(&expr);
         Self {
-            option_like_bindings: vec![HashSet::new()],
+            option_like_ids: HashMap::new(),
+            option_like_lets: Vec::new(),
             used_let_names,
         }
         .rewrite_expr(expr)
@@ -131,10 +137,7 @@ impl OptionCpsLateRewriter {
     }
 
     fn is_option_like_binding(&self, id: VarId) -> bool {
-        self.option_like_bindings
-            .iter()
-            .rev()
-            .any(|scope| scope.contains(&id))
+        self.option_like_ids.contains_key(&id)
     }
 
     fn is_option_like_fn_value(&self, expr: &PseudoExpr) -> bool {
@@ -219,6 +222,16 @@ impl OptionCpsLateRewriter {
 }
 
 impl ExprFolder for OptionCpsLateRewriter {
+    // Folded flat, so a `when` nested as deep as the script makes it does
+    // not recurse once per level; patterns are kept as they are.
+    fn machine_folds_when(&self) -> bool {
+        true
+    }
+
+    fn machine_keeps_pattern_literals(&self) -> bool {
+        true
+    }
+
     // Runs before the value is folded: insert the binder name into
     // `used_let_names` before walking `value`.
     fn pre_let(
@@ -234,18 +247,23 @@ impl ExprFolder for OptionCpsLateRewriter {
 
     fn enter_let(&mut self, name: &str, id: &Option<VarId>, value: &PseudoExpr) -> String {
         let option_like_value = self.is_option_like_fn_value(value);
-        self.option_like_bindings.push(HashSet::new());
-        if option_like_value && let Some(id_val) = id {
-            self.option_like_bindings
-                .last_mut()
-                .expect("pushed scope")
-                .insert(*id_val);
+        let counted = if option_like_value { *id } else { None };
+        if let Some(id_val) = counted {
+            *self.option_like_ids.entry(id_val).or_default() += 1;
         }
+        self.option_like_lets.push(counted);
         name.to_string()
     }
 
     fn exit_let(&mut self, _name: &str) {
-        self.option_like_bindings.pop();
+        if let Some(Some(id_val)) = self.option_like_lets.pop()
+            && let Some(count) = self.option_like_ids.get_mut(&id_val)
+        {
+            *count -= 1;
+            if *count == 0 {
+                self.option_like_ids.remove(&id_val);
+            }
+        }
     }
 
     fn post_apply(&mut self, function: PseudoExpr, args: Vec<PseudoExpr>) -> PseudoExpr {
@@ -254,20 +272,22 @@ impl ExprFolder for OptionCpsLateRewriter {
                 &function,
                 PseudoExpr::Var { id: Some(var_id), .. } if self.is_option_like_binding(*var_id)
             );
-        try_rewrite_option_cps_apply_with_reserved(
-            function.clone(),
-            args.clone(),
-            option_like_callee,
-            Some(&mut self.used_let_names),
-        )
-        .unwrap_or(PseudoExpr::Apply {
+        // Copying the call only to have it handed back would cost every
+        // apply its whole subtree; ask first.
+        if may_rewrite_option_cps_apply(&function, &args, option_like_callee)
+            && let Some(rewritten) = try_rewrite_option_cps_apply_with_reserved(
+                function.clone(),
+                args.clone(),
+                option_like_callee,
+                Some(&mut self.used_let_names),
+            )
+        {
+            return rewritten;
+        }
+        PseudoExpr::Apply {
             function: PBox::new(function),
             args: args.into(),
-        })
-    }
-
-    fn fold_pattern(&mut self, pattern: WhenPattern) -> WhenPattern {
-        pattern
+        }
     }
 }
 
