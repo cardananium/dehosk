@@ -609,3 +609,37 @@ fn deep_pseudo_data_never_recurses() {
         .join()
         .expect("deep data must not overflow the stack");
 }
+
+/// A type is as deep as the value it was read off; equality and the
+/// destructor walk a heap stack.
+#[test]
+fn deep_types_compare_and_release_without_recursing() {
+    const DEPTH: usize = 200_000;
+    let handle = std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(|| {
+            let nest = |leaf: PseudoType| {
+                let mut ty = leaf;
+                for level in 0..DEPTH {
+                    let inner = Rc::new(ty);
+                    ty = match level % 3 {
+                        0 => PseudoType::List(inner),
+                        1 => PseudoType::Result(Rc::new(PseudoType::Unit), inner),
+                        _ => PseudoType::Function {
+                            params: vec![inner],
+                            ret: Rc::new(PseudoType::Unknown),
+                        },
+                    };
+                }
+                ty
+            };
+            let a = nest(PseudoType::Int);
+            assert!(a == nest(PseudoType::Int));
+            assert!(a != nest(PseudoType::Bool));
+            assert!(a != nest(PseudoType::Named("Int".to_string())));
+        })
+        .expect("spawn");
+    handle
+        .join()
+        .expect("deep types must not overflow the stack");
+}

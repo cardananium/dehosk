@@ -164,7 +164,7 @@ fn empty_list_constructors_return_list_of_unknown() {
         BuiltinId::NewPairs,
     ];
     for variant in ctors {
-        match variant.monomorphic_return_type() {
+        match variant.monomorphic_return_type().as_ref() {
             Some(PseudoType::List(inner)) => assert!(
                 matches!(inner.as_ref(), PseudoType::Unknown),
                 "{variant:?} must return List(Unknown), got List({inner:?})"

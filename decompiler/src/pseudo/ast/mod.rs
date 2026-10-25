@@ -968,7 +968,11 @@ impl UnaryOp {
 }
 
 /// Pseudo-type representing inferred types.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// A type is as deep as the value it was read off — a list constant nested
+/// 20,000 deep has a 20,000-deep `List<List<…>>` type — so `PartialEq` and
+/// `Drop` are heap walks; see the `impl`s below.
+#[derive(Debug, Clone, Eq)]
 pub(crate) enum PseudoType {
     /// Integer type.
     Int,
@@ -1009,6 +1013,141 @@ pub(crate) enum PseudoType {
     Unknown,
     /// Type variable (for polymorphic functions).
     Var(String),
+}
+
+impl PseudoType {
+    /// Whether this type holds other types (so releasing it could recurse).
+    fn has_children(&self) -> bool {
+        match self {
+            PseudoType::List(_)
+            | PseudoType::Option(_)
+            | PseudoType::Pair(..)
+            | PseudoType::Result(..)
+            | PseudoType::Function { .. } => true,
+            PseudoType::Tuple(items) => !items.is_empty(),
+            _ => false,
+        }
+    }
+
+    /// Move out every child this value alone owns and that holds types of its
+    /// own, leaving a shared placeholder in its slot. Children that are shared
+    /// or childless stay: dropping them cannot recurse.
+    fn take_deep_children(&mut self, out: &mut Vec<PseudoType>) {
+        fn take(slot: &mut Rc<PseudoType>, out: &mut Vec<PseudoType>) {
+            if Rc::strong_count(slot) == 1 && Rc::weak_count(slot) == 0 && slot.has_children() {
+                let placeholder = EMPTIED_TYPE
+                    .try_with(Rc::clone)
+                    .unwrap_or_else(|_| Rc::new(PseudoType::Unknown));
+                if let Ok(child) = Rc::try_unwrap(std::mem::replace(slot, placeholder)) {
+                    out.push(child);
+                }
+            }
+        }
+        match self {
+            PseudoType::List(inner) | PseudoType::Option(inner) => take(inner, out),
+            PseudoType::Pair(first, second) | PseudoType::Result(first, second) => {
+                take(first, out);
+                take(second, out);
+            }
+            PseudoType::Tuple(items) => items.iter_mut().for_each(|item| take(item, out)),
+            PseudoType::Function { params, ret } => {
+                params.iter_mut().for_each(|param| take(param, out));
+                take(ret, out);
+            }
+            _ => {}
+        }
+    }
+}
+
+thread_local! {
+    /// What an emptied child slot points at while its owner is released.
+    static EMPTIED_TYPE: Rc<PseudoType> = Rc::new(PseudoType::Unknown);
+}
+
+/// Releases the type without recursing: each level is emptied before it is
+/// dropped, so the implicit drop at the end of the loop body never walks
+/// further than one level.
+impl Drop for PseudoType {
+    fn drop(&mut self) {
+        let mut pending = Vec::new();
+        self.take_deep_children(&mut pending);
+        while let Some(mut ty) = pending.pop() {
+            ty.take_deep_children(&mut pending);
+        }
+    }
+}
+
+/// The derive's answer on a heap stack. As in `Rc`'s own equality for an
+/// `Eq` type, a child shared by both sides is equal without being walked.
+impl PartialEq for PseudoType {
+    fn eq(&self, other: &Self) -> bool {
+        fn push<'a>(
+            pending: &mut Vec<(&'a PseudoType, &'a PseudoType)>,
+            a: &'a Rc<PseudoType>,
+            b: &'a Rc<PseudoType>,
+        ) {
+            if !Rc::ptr_eq(a, b) {
+                pending.push((a, b));
+            }
+        }
+
+        let mut pending: Vec<(&PseudoType, &PseudoType)> = Vec::new();
+        let mut pair = (self, other);
+        loop {
+            match pair {
+                (PseudoType::List(a), PseudoType::List(b))
+                | (PseudoType::Option(a), PseudoType::Option(b)) => push(&mut pending, a, b),
+                (PseudoType::Pair(a1, b1), PseudoType::Pair(a2, b2))
+                | (PseudoType::Result(a1, b1), PseudoType::Result(a2, b2)) => {
+                    push(&mut pending, a1, a2);
+                    push(&mut pending, b1, b2);
+                }
+                (PseudoType::Tuple(a), PseudoType::Tuple(b)) => {
+                    if a.len() != b.len() {
+                        return false;
+                    }
+                    for (x, y) in a.iter().zip(b) {
+                        push(&mut pending, x, y);
+                    }
+                }
+                (
+                    PseudoType::Function {
+                        params: p1,
+                        ret: r1,
+                    },
+                    PseudoType::Function {
+                        params: p2,
+                        ret: r2,
+                    },
+                ) => {
+                    if p1.len() != p2.len() {
+                        return false;
+                    }
+                    for (x, y) in p1.iter().zip(p2) {
+                        push(&mut pending, x, y);
+                    }
+                    push(&mut pending, r1, r2);
+                }
+                (PseudoType::Named(a), PseudoType::Named(b))
+                | (PseudoType::Var(a), PseudoType::Var(b)) => {
+                    if a != b {
+                        return false;
+                    }
+                }
+                // Every other variant carries nothing: equal exactly when it
+                // is the same variant.
+                (a, b) => {
+                    if std::mem::discriminant(a) != std::mem::discriminant(b) {
+                        return false;
+                    }
+                }
+            }
+            match pending.pop() {
+                Some(next) => pair = next,
+                None => return true,
+            }
+        }
+    }
 }
 
 /// Explicit result of type recovery.
