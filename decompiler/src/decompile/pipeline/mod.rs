@@ -583,7 +583,14 @@ where
         // falling back to the frozen MIR env when no solve fired.
         validate_type_invariants(&expr, final_types_slot.as_ref(), type_env.as_ref())?;
     }
-    if let Some(source_map) = mir_source_map.as_mut() {
+    // The lineage projection is only read by runs that collect snapshots
+    // (debug bundle, stepping bridge); without them it projects nothing yet
+    // still prepared the whole tree for render once more — seconds on a
+    // large script.
+    if let Some(source_map) = mir_source_map
+        .as_mut()
+        .filter(|_| executor.collects_snapshots())
+    {
         // Two chained projections. `wrap_validator_entry_for_render` shifted
         // the node-id path hash of everything under the entry lambda, so the
         // second projection cannot re-find the first's nodes by id: it is
