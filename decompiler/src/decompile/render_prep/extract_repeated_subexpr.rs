@@ -360,7 +360,40 @@ fn extract_from(body: PseudoExpr, abort_only: bool, walk: &mut Walk) -> PseudoEx
 /// quadratic in the body's depth, and a script picks its depth: 32 KiB of
 /// flat nests tens of thousands of constructors.
 pub(super) struct Facts {
-    of: HashMap<*const PseudoExpr, NodeFacts>,
+    of: FactsMap,
+}
+
+type FactsMap = HashMap<*const PseudoExpr, NodeFacts, std::hash::BuildHasherDefault<FastHasher>>;
+
+/// A multiply-rotate hasher for the facts' keys (node addresses) and shape
+/// hashes. Nothing here needs collision resistance — equal shapes are always
+/// confirmed by the signature itself — and SipHash per node was most of the
+/// cost of folding facts for a real script.
+#[derive(Default)]
+pub(super) struct FastHasher(u64);
+
+impl Hasher for FastHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        for chunk in bytes.chunks(8) {
+            let mut word = [0u8; 8];
+            word[..chunk.len()].copy_from_slice(chunk);
+            self.write_u64(u64::from_le_bytes(word));
+        }
+    }
+
+    fn write_u64(&mut self, n: u64) {
+        self.0 = (self.0.rotate_left(5) ^ n).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
+
+    fn write_usize(&mut self, n: usize) {
+        self.write_u64(n as u64);
+    }
+
+    fn finish(&self) -> u64 {
+        // Node addresses are aligned, so their low bits carry nothing: fold
+        // the well-mixed high bits down to where the table looks.
+        self.0 ^ (self.0 >> 29)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -397,20 +430,20 @@ impl NodeFacts {
 
 impl Facts {
     pub(super) fn of(root: &PseudoExpr) -> Self {
-        let mut of: HashMap<*const PseudoExpr, NodeFacts> = HashMap::new();
+        let mut of = FactsMap::default();
         // Post-order over every child, pattern literals included: a node is
         // folded once all of its children are.
         let mut pending: Vec<(&PseudoExpr, bool)> = vec![(root, false)];
         let mut kids: Vec<&PseudoExpr> = Vec::new();
         while let Some((node, expanded)) = pending.pop() {
+            kids.clear();
+            node.child_refs_into(&mut kids);
             if expanded {
-                let facts = NodeFacts::fold(node, &of);
+                let facts = NodeFacts::fold(node, &kids, &of);
                 of.insert(node as *const PseudoExpr, facts);
                 continue;
             }
             pending.push((node, true));
-            kids.clear();
-            node.child_refs_into(&mut kids);
             pending.extend(kids.iter().map(|kid| (*kid, false)));
         }
         Facts { of }
@@ -422,27 +455,37 @@ impl Facts {
 }
 
 impl NodeFacts {
-    /// The node's facts from its children's, which `of` already holds.
-    fn fold(node: &PseudoExpr, of: &HashMap<*const PseudoExpr, NodeFacts>) -> NodeFacts {
+    /// The node's facts from its children's (`all`, pattern literals
+    /// included), which `of` already holds.
+    fn fold(node: &PseudoExpr, all: &[&PseudoExpr], of: &FactsMap) -> NodeFacts {
         let get = |child: &PseudoExpr| of[&(child as *const PseudoExpr)];
-        let mut all: Vec<&PseudoExpr> = Vec::new();
-        node.child_refs_into(&mut all);
 
-        let size = 1 + scope_children(node)
-            .into_iter()
-            .map(|child| get(child).size)
-            .sum::<usize>();
+        // The size leaves pattern literals out, as `scope_children` does.
+        let mut size = 1 + all.iter().map(|child| get(child).size).sum::<usize>();
+        if let PseudoExpr::When { clauses, .. } = node {
+            for clause in clauses {
+                if let crate::pseudo::ast::WhenPattern::Literal(lit) = &clause.pattern {
+                    size -= get(lit).size;
+                }
+            }
+        }
         let effect = is_trace_node(node)
             || matches!(node, PseudoExpr::Error { message: Some(_) })
             || all.iter().any(|child| get(child).effect);
         let bare_abort = matches!(node, PseudoExpr::Error { message: None })
             || all.iter().any(|child| get(child).bare_abort);
+        // Through the eager children only (see `eager_children`).
         let eager_abort = match node {
             PseudoExpr::Error { .. } => true,
-            PseudoExpr::Let { value, body, .. } => get(value).eager_abort || get(body).eager_abort,
-            other => eager_children(other)
-                .into_iter()
-                .any(|child| get(child).eager_abort),
+            PseudoExpr::If { condition, .. } => get(condition).eager_abort,
+            PseudoExpr::When { subject, .. } => get(subject).eager_abort,
+            PseudoExpr::BinOp {
+                op: BinaryOp::And | BinaryOp::Or,
+                left,
+                ..
+            } => get(left).eager_abort,
+            PseudoExpr::Delay(_) | PseudoExpr::Lambda { .. } | PseudoExpr::RecFn { .. } => false,
+            _ => all.iter().any(|child| get(child).eager_abort),
         };
         // BuiltinCall with only literal args — extracting just adds a
         // let with no readability gain.
@@ -466,9 +509,9 @@ impl NodeFacts {
         // the sequential-reordering case.
         let extractable = extractable_kind(node) && !effect && !literal_call && size >= 5;
 
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        let mut hasher = FastHasher::default();
         hash_own_shape(node, &mut hasher);
-        for child in &all {
+        for child in all {
             get(child).shape.hash(&mut hasher);
         }
         NodeFacts {
