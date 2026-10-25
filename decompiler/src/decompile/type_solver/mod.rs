@@ -59,10 +59,70 @@ fn pattern_binders(pattern: &WhenPattern) -> Vec<crate::pseudo::ast::Binder> {
 
 // Constraint generation: assign type variables + generate constraints in one pass
 
+/// The child [`expr_type_var`] moves to from a node without allocating,
+/// constraining or binding anything.
+fn pure_descent_step(expr: &PseudoExpr) -> Option<&PseudoExpr> {
+    match expr {
+        // Then-branch type; the else branch is constrained equal.
+        PseudoExpr::If { then_branch, .. } => Some(then_branch),
+        // Type of when = type of first non-error clause body
+        PseudoExpr::When { clauses, .. } => clauses
+            .iter()
+            .map(|clause| &clause.body)
+            .find(|body| !matches!(body, PseudoExpr::Error { .. })),
+        PseudoExpr::Trace { value, .. } => Some(value),
+        _ => None,
+    }
+}
+
+/// Where a run of [`pure_descent_step`]s starting at a node ends.
+///
+/// [`expr_type_var`] follows such a run from every ancestor that asks for a
+/// child's type, so on an `if` nested in its own then-branch, or a `when` in
+/// its first clause, each run would be walked once per level of a nesting
+/// the script chooses. The steps have no side effects, so jumping straight
+/// to a run's end is exact, and each node's end is found once.
+#[derive(Default)]
+struct DescentEnds<'a> {
+    ends: std::collections::HashMap<*const PseudoExpr, &'a PseudoExpr>,
+}
+
+impl<'a> DescentEnds<'a> {
+    fn end_of(&mut self, start: &'a PseudoExpr) -> &'a PseudoExpr {
+        let mut walked: Vec<*const PseudoExpr> = Vec::new();
+        let mut current = start;
+        let end = loop {
+            if let Some(end) = self.ends.get(&std::ptr::from_ref(current)) {
+                break *end;
+            }
+            match pure_descent_step(current) {
+                Some(next) => {
+                    walked.push(current);
+                    current = next;
+                }
+                None => break current,
+            }
+        };
+        for node in walked {
+            self.ends.insert(node, end);
+        }
+        end
+    }
+}
+
 /// Infer a type variable for an arbitrary expression.
 /// For Var/Let nodes returns their named var. For other expressions
 /// returns a fresh var constrained to the expression's obvious type.
-fn expr_type_var(expr: &PseudoExpr, solver: &mut TypeSolver, env: &LexicalEnv) -> TypeVarId {
+///
+/// The bindings of the `let`s it descends through are pushed onto `env`
+/// and popped again before it returns, rather than onto a copy of the
+/// whole scope: the scope can be as deep as the program.
+fn expr_type_var<'a>(
+    expr: &'a PseudoExpr,
+    solver: &mut TypeSolver,
+    env: &mut LexicalEnv,
+    ends: &mut DescentEnds<'a>,
+) -> TypeVarId {
     // Constr::Some/Cons and List each wrap a single non-tail recursive
     // call whose result feeds only a fresh-var + constrain_eq (or is
     // discarded); the wrapper always returns its own pre-allocated `tv`.
@@ -73,16 +133,18 @@ fn expr_type_var(expr: &PseudoExpr, solver: &mut TypeSolver, env: &LexicalEnv) -
 
     let mut stack: Vec<Frame> = Vec::new();
     let mut cur_expr = expr;
-    let mut cur_env: std::borrow::Cow<LexicalEnv> = std::borrow::Cow::Borrowed(env);
+    let mut pushed_bindings = 0usize;
 
     let leaf_value: TypeVarId = 'descend: loop {
+        if pure_descent_step(cur_expr).is_some() {
+            cur_expr = ends.end_of(cur_expr);
+        }
         let value = match cur_expr {
-            PseudoExpr::Var { name, id, .. } => {
-                solver.resolve_binding_in_env(name, id.get(), &cur_env)
-            }
+            PseudoExpr::Var { name, id, .. } => solver.resolve_binding_in_env(name, id.get(), env),
             PseudoExpr::Let { name, id, body, .. } => {
                 let binding_key = let_binding_key(*id);
-                cur_env.to_mut().push(name.clone(), binding_key);
+                env.push(name.clone(), binding_key);
+                pushed_bindings += 1;
                 cur_expr = body;
                 continue 'descend;
             }
@@ -187,11 +249,6 @@ fn expr_type_var(expr: &PseudoExpr, solver: &mut TypeSolver, env: &LexicalEnv) -
                 }
                 tv
             }
-            // Then-branch type; the else branch is constrained equal.
-            PseudoExpr::If { then_branch, .. } => {
-                cur_expr = then_branch;
-                continue 'descend;
-            }
             PseudoExpr::FieldAccess { selector, .. } => {
                 let tv = solver.fresh();
                 match selector.as_pretty_name() {
@@ -220,26 +277,9 @@ fn expr_type_var(expr: &PseudoExpr, solver: &mut TypeSolver, env: &LexicalEnv) -
                 }
                 tv
             }
-            PseudoExpr::When { clauses, .. } => {
-                // Type of when = type of first non-error clause body
-                let matched = clauses
-                    .iter()
-                    .map(|clause| &clause.body)
-                    .find(|body| !matches!(body, PseudoExpr::Error { .. }));
-                match matched {
-                    Some(body) => {
-                        cur_expr = body;
-                        continue 'descend;
-                    }
-                    None => solver.fresh(),
-                }
-            }
-            PseudoExpr::Trace {
-                value: trace_value, ..
-            } => {
-                cur_expr = trace_value;
-                continue 'descend;
-            }
+            // Only a `when` with no live clause gets here; a live one is a
+            // descent step.
+            PseudoExpr::When { .. } => solver.fresh(),
             PseudoExpr::List { elements, .. } => {
                 let tv = solver.fresh();
                 match elements.first() {
@@ -296,6 +336,9 @@ fn expr_type_var(expr: &PseudoExpr, solver: &mut TypeSolver, env: &LexicalEnv) -
             }
             Frame::Discard { tv } => tv,
         };
+    }
+    for _ in 0..pushed_bindings {
+        env.pop();
     }
     value
 }
@@ -409,6 +452,7 @@ fn generate_constraints(expr: &PseudoExpr, solver: &mut TypeSolver, env: &mut Le
 
     let mut stack: Vec<Step<'_>> = vec![visit(expr)];
     let mut body_tvs_stack: Vec<Vec<TypeVarId>> = Vec::new();
+    let mut ends = DescentEnds::default();
 
     while let Some(step) = stack.pop() {
         match step {
@@ -420,7 +464,7 @@ fn generate_constraints(expr: &PseudoExpr, solver: &mut TypeSolver, env: &mut Le
             }
             Step::WhenBodyTv { body } => {
                 if !matches!(body, PseudoExpr::Error { .. }) {
-                    let tv = expr_type_var(body, solver, env);
+                    let tv = expr_type_var(body, solver, env, &mut ends);
                     if let Some(body_tvs) = body_tvs_stack.last_mut() {
                         body_tvs.push(tv);
                     }
@@ -647,7 +691,7 @@ fn generate_constraints(expr: &PseudoExpr, solver: &mut TypeSolver, env: &mut Le
                         }
                     }
                     WhenPattern::Literal(lit) => {
-                        let lit_tv = expr_type_var(lit, solver, env);
+                        let lit_tv = expr_type_var(lit, solver, env, &mut ends);
                         solver.constrain_eq(subject_tv, lit_tv);
                         literal = Some(lit);
                     }
@@ -681,13 +725,13 @@ fn generate_constraints(expr: &PseudoExpr, solver: &mut TypeSolver, env: &mut Le
                     // A plain Var condition may be Data checked by constructor tag, so
                     // only inherently-boolean conditions are constrained to Bool.
                     if is_inherently_bool(condition) {
-                        let cond_tv = expr_type_var(condition, solver, env);
+                        let cond_tv = expr_type_var(condition, solver, env, &mut ends);
                         solver.constrain_known(cond_tv, PseudoType::Bool);
                     }
 
                     // Both branches share a type unless one is Error.
-                    let then_tv = expr_type_var(then_branch, solver, env);
-                    let else_tv = expr_type_var(else_branch, solver, env);
+                    let then_tv = expr_type_var(then_branch, solver, env, &mut ends);
+                    let else_tv = expr_type_var(else_branch, solver, env, &mut ends);
                     if !matches!(then_branch.as_ref(), PseudoExpr::Error { .. })
                         && !matches!(else_branch.as_ref(), PseudoExpr::Error { .. })
                     {
@@ -701,8 +745,8 @@ fn generate_constraints(expr: &PseudoExpr, solver: &mut TypeSolver, env: &mut Le
                 }
 
                 PseudoExpr::BinOp { op, left, right } => {
-                    let left_tv = expr_type_var(left, solver, env);
-                    let right_tv = expr_type_var(right, solver, env);
+                    let left_tv = expr_type_var(left, solver, env, &mut ends);
+                    let right_tv = expr_type_var(right, solver, env, &mut ends);
 
                     match op {
                         BinaryOp::Add
@@ -741,7 +785,7 @@ fn generate_constraints(expr: &PseudoExpr, solver: &mut TypeSolver, env: &mut Le
                 }
 
                 PseudoExpr::UnOp { op, operand } => {
-                    let operand_tv = expr_type_var(operand, solver, env);
+                    let operand_tv = expr_type_var(operand, solver, env, &mut ends);
                     match op {
                         UnaryOp::Not => solver.constrain_known(operand_tv, PseudoType::Bool),
                         UnaryOp::Negate => solver.constrain_known(operand_tv, PseudoType::Int),
@@ -759,7 +803,7 @@ fn generate_constraints(expr: &PseudoExpr, solver: &mut TypeSolver, env: &mut Le
                 } => {
                     let binding_key = let_binding_key(*id);
                     let name_tv = solver.var_for_binding_key(binding_key.clone());
-                    let value_tv = expr_type_var(value, solver, env);
+                    let value_tv = expr_type_var(value, solver, env, &mut ends);
                     solver.constrain_eq(name_tv, value_tv);
 
                     // The binding lands between the two descents: the body must
@@ -778,7 +822,7 @@ fn generate_constraints(expr: &PseudoExpr, solver: &mut TypeSolver, env: &mut Le
                     subject_name,
                     clauses,
                 } => {
-                    let subject_tv = expr_type_var(subject, solver, env);
+                    let subject_tv = expr_type_var(subject, solver, env, &mut ends);
                     if let Some(subject_name) = subject_name {
                         let subject_name_tv = solver.var_for_var_id(subject_name.id);
                         solver.constrain_eq(subject_name_tv, subject_tv);
@@ -800,11 +844,11 @@ fn generate_constraints(expr: &PseudoExpr, solver: &mut TypeSolver, env: &mut Le
                     // Build a refined type from the field types and constrain the
                     // constructor's own type variable — Let bindings unify with it.
 
-                    let constr_tv = expr_type_var(expr, solver, env);
+                    let constr_tv = expr_type_var(expr, solver, env, &mut ends);
 
                     match shape.as_known() {
                         Some(KnownConstructor::Some) => {
-                            let inner_tv = expr_type_var(&fields[0], solver, env);
+                            let inner_tv = expr_type_var(&fields[0], solver, env, &mut ends);
                             // Build Option(typeof(field)) and constrain the constr to it.
                             let inner_resolved = solver.find(inner_tv);
                             let inner_type = match inner_resolved {
@@ -817,7 +861,7 @@ fn generate_constraints(expr: &PseudoExpr, solver: &mut TypeSolver, env: &mut Le
                             );
                         }
                         Some(KnownConstructor::Ok) => {
-                            let inner_tv = expr_type_var(&fields[0], solver, env);
+                            let inner_tv = expr_type_var(&fields[0], solver, env, &mut ends);
                             let inner_resolved = solver.find(inner_tv);
                             let ok_type = match inner_resolved {
                                 TypeExpr::Known(t) => t,
@@ -830,7 +874,7 @@ fn generate_constraints(expr: &PseudoExpr, solver: &mut TypeSolver, env: &mut Le
                             );
                         }
                         Some(KnownConstructor::Error) => {
-                            let inner_tv = expr_type_var(&fields[0], solver, env);
+                            let inner_tv = expr_type_var(&fields[0], solver, env, &mut ends);
                             let inner_resolved = solver.find(inner_tv);
                             let err_type = match inner_resolved {
                                 TypeExpr::Known(t) => t,
@@ -843,8 +887,8 @@ fn generate_constraints(expr: &PseudoExpr, solver: &mut TypeSolver, env: &mut Le
                             );
                         }
                         Some(KnownConstructor::Pair) => {
-                            let a_tv = expr_type_var(&fields[0], solver, env);
-                            let b_tv = expr_type_var(&fields[1], solver, env);
+                            let a_tv = expr_type_var(&fields[0], solver, env, &mut ends);
+                            let b_tv = expr_type_var(&fields[1], solver, env, &mut ends);
                             let a_resolved = solver.find(a_tv);
                             let b_resolved = solver.find(b_tv);
                             let fst_type = match a_resolved {
@@ -878,7 +922,7 @@ fn generate_constraints(expr: &PseudoExpr, solver: &mut TypeSolver, env: &mut Le
                             );
                         }
                         Some(KnownConstructor::Cons) => {
-                            let head_tv = expr_type_var(&fields[0], solver, env);
+                            let head_tv = expr_type_var(&fields[0], solver, env, &mut ends);
                             let head_resolved = solver.find(head_tv);
                             let head_type = match head_resolved {
                                 TypeExpr::Known(t) => t,
@@ -912,7 +956,7 @@ fn generate_constraints(expr: &PseudoExpr, solver: &mut TypeSolver, env: &mut Le
                             BuiltinId::ListIsEmpty | BuiltinId::ListHead | BuiltinId::ListTail
                                 if n >= 1 =>
                             {
-                                let arg_tv = expr_type_var(&args[0], solver, env);
+                                let arg_tv = expr_type_var(&args[0], solver, env, &mut ends);
                                 solver.constrain_known(
                                     arg_tv,
                                     PseudoType::List(Rc::new(PseudoType::Unknown)),
@@ -930,26 +974,26 @@ fn generate_constraints(expr: &PseudoExpr, solver: &mut TypeSolver, env: &mut Le
                             | BuiltinId::DataUnConstr
                                 if n >= 1 =>
                             {
-                                let arg_tv = expr_type_var(&args[0], solver, env);
+                                let arg_tv = expr_type_var(&args[0], solver, env, &mut ends);
                                 solver.constrain_known(arg_tv, PseudoType::Data);
                             }
                             BuiltinId::DataInt | BuiltinId::IntToData if n >= 1 => {
-                                let arg_tv = expr_type_var(&args[0], solver, env);
+                                let arg_tv = expr_type_var(&args[0], solver, env, &mut ends);
                                 solver.constrain_known(arg_tv, PseudoType::Int);
                             }
                             BuiltinId::DataByteArray | BuiltinId::ByteArrayToData if n >= 1 => {
-                                let arg_tv = expr_type_var(&args[0], solver, env);
+                                let arg_tv = expr_type_var(&args[0], solver, env, &mut ends);
                                 solver.constrain_known(arg_tv, PseudoType::ByteArray);
                             }
                             BuiltinId::DataList | BuiltinId::ListToData if n >= 1 => {
-                                let arg_tv = expr_type_var(&args[0], solver, env);
+                                let arg_tv = expr_type_var(&args[0], solver, env, &mut ends);
                                 solver.constrain_known(
                                     arg_tv,
                                     PseudoType::List(Rc::new(PseudoType::Data)),
                                 );
                             }
                             BuiltinId::DataMap | BuiltinId::MapToData if n >= 1 => {
-                                let arg_tv = expr_type_var(&args[0], solver, env);
+                                let arg_tv = expr_type_var(&args[0], solver, env, &mut ends);
                                 solver.constrain_known(
                                     arg_tv,
                                     PseudoType::List(Rc::new(PseudoType::Pair(
@@ -959,10 +1003,10 @@ fn generate_constraints(expr: &PseudoExpr, solver: &mut TypeSolver, env: &mut Le
                                 );
                             }
                             BuiltinId::DataConstr if n >= 2 => {
-                                let tag_tv = expr_type_var(&args[0], solver, env);
+                                let tag_tv = expr_type_var(&args[0], solver, env, &mut ends);
                                 solver.constrain_known(tag_tv, PseudoType::Int);
 
-                                let fields_tv = expr_type_var(&args[1], solver, env);
+                                let fields_tv = expr_type_var(&args[1], solver, env, &mut ends);
                                 solver.constrain_known(
                                     fields_tv,
                                     PseudoType::List(Rc::new(PseudoType::Data)),
@@ -1017,7 +1061,7 @@ fn generate_constraints(expr: &PseudoExpr, solver: &mut TypeSolver, env: &mut Le
                 PseudoExpr::FieldAccess {
                     record, selector, ..
                 } => {
-                    let record_tv = expr_type_var(record, solver, env);
+                    let record_tv = expr_type_var(record, solver, env, &mut ends);
                     match selector.as_pretty_name() {
                         "fields" | "tag" => {
                             solver.constrain_known(record_tv, PseudoType::Data);
@@ -1042,7 +1086,7 @@ fn generate_constraints(expr: &PseudoExpr, solver: &mut TypeSolver, env: &mut Le
                     stack.push(visit(record));
                 }
                 PseudoExpr::IndexAccess { collection, .. } => {
-                    let collection_tv = expr_type_var(collection, solver, env);
+                    let collection_tv = expr_type_var(collection, solver, env, &mut ends);
                     solver.constrain_known(
                         collection_tv,
                         PseudoType::List(Rc::new(PseudoType::Unknown)),

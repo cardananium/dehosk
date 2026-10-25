@@ -5,7 +5,7 @@ use crate::pseudo::constructor::KnownConstructor;
 use crate::pseudo::var_id::VarId;
 
 use super::core::{BindingKey, LexicalEnv, TypeExpr, TypeSolver, TypeVarId};
-use super::{expr_type_var, let_binding_key, pattern_binders};
+use super::{DescentEnds, expr_type_var, let_binding_key, pattern_binders};
 
 /// Second constraint generation pass. With forward constraints from types
 /// and usage in place, propagate backward from fields to containers.
@@ -42,6 +42,7 @@ pub(super) fn generate_backward_constraints(
     }
 
     let mut steps: Vec<Step<'_>> = vec![Step::Visit(expr)];
+    let mut ends = DescentEnds::default();
     while let Some(step) = steps.pop() {
         let expr = match step {
             Step::Visit(expr) => expr,
@@ -96,7 +97,7 @@ pub(super) fn generate_backward_constraints(
                 subject_name,
                 clauses,
             } => {
-                let subject_tv = expr_type_var(subject, solver, env);
+                let subject_tv = expr_type_var(subject, solver, env, &mut ends);
 
                 if let Some(subject_name) = subject_name {
                     let subject_name_tv = solver.var_for_var_id(subject_name.id);
@@ -184,7 +185,7 @@ pub(super) fn generate_backward_constraints(
             PseudoExpr::FieldAccess {
                 record, selector, ..
             } => {
-                let record_tv = expr_type_var(record, solver, env);
+                let record_tv = expr_type_var(record, solver, env, &mut ends);
                 match selector.as_pretty_name() {
                     "fields" | "tag" => {
                         solver.constrain_known(record_tv, PseudoType::Data);
