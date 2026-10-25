@@ -46,6 +46,18 @@ impl Simplifier {
         old_id: Option<VarId>,
         new_name: &str,
     ) -> PseudoExpr {
+        Self::rename_var_binding_owned(expr.clone(), old_name, old_id, new_name)
+    }
+
+    /// [`Self::rename_var_binding`] for a caller that is done with `expr`:
+    /// renames it in place of a copy, so the old tree is neither cloned nor
+    /// dropped whole.
+    pub(crate) fn rename_var_binding_owned(
+        expr: PseudoExpr,
+        old_name: &str,
+        old_id: Option<VarId>,
+        new_name: &str,
+    ) -> PseudoExpr {
         RenameBindingFolder {
             old_name,
             old_id,
@@ -54,7 +66,7 @@ impl Simplifier {
             blocked_depth: 0,
             clause_blocks: Vec::new(),
         }
-        .fold(expr.clone())
+        .fold(expr)
     }
 
     /// Alias-substitution variant that also rewrites the `Var` id. Use for

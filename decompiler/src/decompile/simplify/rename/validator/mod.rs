@@ -410,8 +410,8 @@ fn rename_callable_params(
         if let Some(new_name) = target
             && old.as_str() != new_name
         {
-            renamed_body = Simplifier::rename_var_binding(
-                &renamed_body,
+            renamed_body = Simplifier::rename_var_binding_owned(
+                renamed_body,
                 old.as_str(),
                 Some(old.var_id()),
                 new_name,
@@ -436,8 +436,8 @@ fn rename_callable_params(
     for (old, target) in params.iter().zip(plan.iter()) {
         if target.is_none() && is_protected_validator_param_name(old.as_str()) {
             let generic = format!("v_{}", old.var_id().as_u32());
-            renamed_body = Simplifier::rename_var_binding(
-                &renamed_body,
+            renamed_body = Simplifier::rename_var_binding_owned(
+                renamed_body,
                 old.as_str(),
                 Some(old.var_id()),
                 &generic,
