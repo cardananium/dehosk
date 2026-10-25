@@ -701,38 +701,36 @@ impl ExprFolder for IntOperatorHelperRewriter {
         }
     }
 
-    fn fold_when(
-        &mut self,
-        subject: PseudoExpr,
-        subject_name: Option<Binder>,
-        clauses: Vec<WhenClause>,
-    ) -> PseudoExpr {
-        let subject = self.fold(subject);
+    // Folded flat — patterns left as they are, each clause's scope opened
+    // and closed by the machine — so a deep `when` costs no stack.
+    fn machine_folds_when(&self) -> bool {
+        true
+    }
+    fn machine_keeps_pattern_literals(&self) -> bool {
+        true
+    }
+    fn machine_scopes_clauses(&self) -> bool {
+        true
+    }
+
+    // The subject binder shadows in every clause, and a clause's pattern
+    // shadows the helpers it rebinds.
+    fn enter_clause(&mut self, subject_name: Option<&Binder>, pattern: &WhenPattern) {
         self.push_scope();
-        if let Some(subject_name) = &subject_name {
+        if let Some(subject_name) = subject_name {
             self.shadow_name(subject_name.name.as_str());
         }
-        let clauses = clauses
-            .into_iter()
-            .map(|clause| {
-                self.push_scope();
-                for helper_name in self.active_helper_names() {
-                    if pattern_binds_var(&clause.pattern, &helper_name) {
-                        self.shadow_name(&helper_name);
-                    }
-                }
-                let guard = clause.guard.map(|guard| self.fold(guard));
-                let body = self.fold(clause.body);
-                self.pop_scope();
-                WhenClause {
-                    pattern: clause.pattern,
-                    guard,
-                    body,
-                }
-            })
-            .collect();
+        self.push_scope();
+        for helper_name in self.active_helper_names() {
+            if pattern_binds_var(pattern, &helper_name) {
+                self.shadow_name(&helper_name);
+            }
+        }
+    }
+
+    fn exit_clause(&mut self, _subject_name: Option<&Binder>, _pattern: &WhenPattern) {
         self.pop_scope();
-        self.post_when(subject, subject_name, clauses)
+        self.pop_scope();
     }
 }
 

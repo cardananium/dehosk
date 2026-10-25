@@ -100,35 +100,32 @@ impl ExprFolder for RetargetFolder {
         self.stack.pop();
     }
 
-    fn fold_when(
-        &mut self,
-        subject: PseudoExpr,
-        subject_name: Option<Binder>,
-        clauses: Vec<WhenClause>,
-    ) -> PseudoExpr {
-        let subject = self.fold(subject);
-        let pushed_subject = subject_name.is_some();
-        if let Some(sn) = &subject_name {
+    // Folded flat — patterns left as they are, each clause's frames pushed
+    // and popped by the machine — so a deep `when` costs no stack.
+    fn machine_folds_when(&self) -> bool {
+        true
+    }
+    fn machine_keeps_pattern_literals(&self) -> bool {
+        true
+    }
+    fn machine_scopes_clauses(&self) -> bool {
+        true
+    }
+
+    // The subject binder's frame sits under each clause's pattern frame.
+    fn enter_clause(&mut self, subject_name: Option<&Binder>, pattern: &WhenPattern) {
+        if let Some(sn) = subject_name {
             self.stack.push(HashMap::new());
             bind(&mut self.stack, sn.as_str(), sn.var_id());
         }
-        let clauses = clauses.into_iter().map(|c| self.fold_clause(c)).collect();
-        if pushed_subject {
-            self.stack.pop();
-        }
-        self.post_when(subject, subject_name, clauses)
+        self.stack.push(HashMap::new());
+        bind_pattern(pattern, &mut self.stack);
     }
 
-    fn fold_clause(&mut self, clause: WhenClause) -> WhenClause {
-        self.stack.push(HashMap::new());
-        bind_pattern(&clause.pattern, &mut self.stack);
-        let guard = clause.guard.map(|g| self.fold(g));
-        let body = self.fold(clause.body);
+    fn exit_clause(&mut self, subject_name: Option<&Binder>, _pattern: &WhenPattern) {
         self.stack.pop();
-        WhenClause {
-            pattern: clause.pattern,
-            guard,
-            body,
+        if subject_name.is_some() {
+            self.stack.pop();
         }
     }
 }
