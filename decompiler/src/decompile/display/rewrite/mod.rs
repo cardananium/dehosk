@@ -10,13 +10,13 @@ use super::super::helper::hoist::{
     pattern_binds_var, peel_leading_lets, var_is_referenced_id_aware, wrap_lifted_lets,
 };
 use super::super::late::display_structural::{
-    try_inline_when_adapter_let, try_normalize_sorted_assoc_lookup_if,
+    LetParts, try_inline_when_adapter_let, try_normalize_sorted_assoc_lookup_if,
     try_reorder_inverted_if_arg_lets, try_repair_self_referenced_let,
 };
 use super::super::late::list_alias::{
     extract_nullary_list_prepend_alias_value, rewrite_list_prepend_alias_uses,
 };
-use super::super::late::option_cps::try_rewrite_option_cps_apply;
+use super::super::late::option_cps::{may_rewrite_option_cps_apply, try_rewrite_option_cps_apply};
 use super::super::naming::{
     extract_comparison_binop, extract_data_int_binop, is_generic_name, is_temporary_helper_name,
 };
@@ -751,8 +751,9 @@ impl ExprFolder for LateDisplayRewriter {
             args_out.push(arg);
         }
 
-        if let Some(rewritten) =
-            try_rewrite_option_cps_apply(function.clone(), args_out.clone(), false)
+        if may_rewrite_option_cps_apply(&function, &args_out, false)
+            && let Some(rewritten) =
+                try_rewrite_option_cps_apply(function.clone(), args_out.clone(), false)
         {
             return wrap_lifted_lets(lifted, rewritten);
         }
@@ -773,35 +774,38 @@ impl ExprFolder for LateDisplayRewriter {
         value: PseudoExpr,
         body: PseudoExpr,
     ) -> PseudoExpr {
-        if let Some(rewritten) =
-            try_inline_when_adapter_let(name.clone(), value.clone(), body.clone())
-        {
-            return rewritten;
-        }
+        // Each rewrite takes the `let` by value and hands it back untouched
+        // when it does not apply: the body is the rest of a chain as long as
+        // the script makes it, too long to copy once per `let`.
+        let (name, value, body) = match try_inline_when_adapter_let(name, value, body) {
+            Ok(rewritten) => return rewritten,
+            Err(parts) => parts,
+        };
 
-        if let Some(rewritten) = try_reorder_inverted_if_arg_lets(
-            name.clone(),
+        let (name, value, body) = match try_reorder_inverted_if_arg_lets(
+            name,
             id.unwrap_or_else(VarId::fresh_compat_placeholder),
-            value.clone(),
-            body.clone(),
+            value,
+            body,
         ) {
-            return rewritten;
-        }
+            Ok(rewritten) => return rewritten,
+            Err(parts) => parts,
+        };
 
-        if let Some(rewritten) = try_repair_self_referenced_let(
-            name.clone(),
+        let (name, value, body) = match try_repair_self_referenced_let(
+            name,
             id.unwrap_or_else(VarId::fresh_compat_placeholder),
-            value.clone(),
-            body.clone(),
+            value,
+            body,
         ) {
-            return rewritten;
-        }
+            Ok(rewritten) => return rewritten,
+            Err(parts) => parts,
+        };
 
-        if let Some(rewritten) =
-            try_rewrite_list_prepend_alias_let(name.clone(), id, value.clone(), body.clone())
-        {
-            return rewritten;
-        }
+        let (name, value, body) = match try_rewrite_list_prepend_alias_let(name, id, value, body) {
+            Ok(rewritten) => return rewritten,
+            Err(parts) => parts,
+        };
 
         PseudoExpr::Let {
             name,
@@ -818,16 +822,15 @@ impl ExprFolder for LateDisplayRewriter {
         else_branch: PseudoExpr,
     ) -> PseudoExpr {
         let (lifted, condition) = peel_leading_lets(condition, |_, _| true);
-        let rewritten = try_normalize_sorted_assoc_lookup_if(
-            condition.clone(),
-            then_branch.clone(),
-            else_branch.clone(),
-        )
-        .unwrap_or(PseudoExpr::If {
-            condition: PBox::new(condition),
-            then_branch: PBox::new(then_branch),
-            else_branch: PBox::new(else_branch),
-        });
+        let rewritten =
+            match try_normalize_sorted_assoc_lookup_if(condition, then_branch, else_branch) {
+                Ok(rewritten) => rewritten,
+                Err((condition, then_branch, else_branch)) => PseudoExpr::If {
+                    condition: PBox::new(condition),
+                    then_branch: PBox::new(then_branch),
+                    else_branch: PBox::new(else_branch),
+                },
+            };
 
         wrap_lifted_lets(lifted, rewritten)
     }
@@ -870,17 +873,20 @@ fn try_rewrite_list_prepend_alias_let(
     let_id: Option<VarId>,
     let_value: PseudoExpr,
     let_body: PseudoExpr,
-) -> Option<PseudoExpr> {
-    extract_nullary_list_prepend_alias_value(&let_value)?;
-
-    let id_concrete = let_id?;
+) -> Result<PseudoExpr, LetParts> {
+    if extract_nullary_list_prepend_alias_value(&let_value).is_none() {
+        return Err((let_name, let_value, let_body));
+    }
+    let Some(id_concrete) = let_id else {
+        return Err((let_name, let_value, let_body));
+    };
     let rewritten_body = rewrite_list_prepend_alias_uses(let_body, &let_name, id_concrete);
 
     if !var_is_referenced_id_aware(&rewritten_body, id_concrete, &let_name) {
-        return Some(rewritten_body);
+        return Ok(rewritten_body);
     }
 
-    Some(PseudoExpr::Let {
+    Ok(PseudoExpr::Let {
         name: let_name,
         id: let_id,
         value: PBox::new(let_value),

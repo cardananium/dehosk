@@ -25,13 +25,24 @@ pub(crate) fn try_rewrite_option_cps_apply(
     try_rewrite_option_cps_apply_with_reserved(function, args, option_like_callee, None)
 }
 
+/// Whether [`try_rewrite_option_cps_apply`] can rewrite a call to
+/// `function` with `args` at all — cheap, so a caller holding the call need
+/// not copy it for every apply only to have it handed back.
+pub(crate) fn may_rewrite_option_cps_apply(
+    function: &PseudoExpr,
+    args: &[PseudoExpr],
+    option_like_callee: bool,
+) -> bool {
+    args.len() >= 3 && (function_returns_option(function) || option_like_callee)
+}
+
 fn try_rewrite_option_cps_apply_with_reserved(
     function: PseudoExpr,
     args: Vec<PseudoExpr>,
     option_like_callee: bool,
     reserved_let_names: Option<&mut HashSet<String>>,
 ) -> Option<PseudoExpr> {
-    if args.len() < 3 || !(function_returns_option(&function) || option_like_callee) {
+    if !may_rewrite_option_cps_apply(&function, &args, option_like_callee) {
         return None;
     }
 

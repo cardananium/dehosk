@@ -71,7 +71,7 @@ fn test_try_repair_self_referenced_let_ignores_same_name_different_id() {
     );
 
     assert!(
-        repaired.is_none(),
+        repaired.is_err(),
         "same-name ref with different VarId must not count as self-reference"
     );
 }
@@ -99,7 +99,7 @@ fn test_try_reorder_inverted_if_arg_lets_ignores_same_name_different_id_capture(
     );
 
     assert!(
-        reordered.is_none(),
+        reordered.is_err(),
         "reorder must not fire when only a different-id same-name ref appears in the inner if"
     );
 }
