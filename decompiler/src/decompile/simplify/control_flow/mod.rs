@@ -434,31 +434,32 @@ impl Simplifier {
         // Remove arity checks: `expect [] = expr` (single empty-list clause +
         // error fallback), compiler-generated assertions that a list/fields is
         // exhausted. Skip a subject containing an explicit Error — the rewrite
-        // would silently discard an intentional failure.
-        if !Self::contains_explicit_error(&simplified_subject) {
-            let mut non_error_clause = None;
-            let mut multiple_non_error_clauses = false;
-            for clause in &clauses {
-                if matches!(clause.body, PseudoExpr::Error { .. }) {
-                    continue;
-                }
-                if non_error_clause.is_some() {
-                    multiple_non_error_clauses = true;
-                    break;
-                }
-                non_error_clause = Some(clause);
+        // would silently discard an intentional failure. That scan covers the
+        // whole subject, so it runs last: a chain of `when`s nested in their
+        // subjects would otherwise rescan the rest of the chain at every level.
+        let mut non_error_clause = None;
+        let mut multiple_non_error_clauses = false;
+        for clause in &clauses {
+            if matches!(clause.body, PseudoExpr::Error { .. }) {
+                continue;
             }
-            if !multiple_non_error_clauses
-                && let Some(clause) = non_error_clause
-                && let WhenPattern::List {
-                    elements,
-                    tail: None,
-                } = &clause.pattern
-                && elements.is_empty()
-                && clause.guard.is_none()
-            {
-                return Step::refold(clause.body.clone());
+            if non_error_clause.is_some() {
+                multiple_non_error_clauses = true;
+                break;
             }
+            non_error_clause = Some(clause);
+        }
+        if !multiple_non_error_clauses
+            && let Some(clause) = non_error_clause
+            && let WhenPattern::List {
+                elements,
+                tail: None,
+            } = &clause.pattern
+            && elements.is_empty()
+            && clause.guard.is_none()
+            && !Self::contains_explicit_error(&simplified_subject)
+        {
+            return Step::refold(clause.body.clone());
         }
 
         // Sum-type context subject (`purpose`/`script_info`) enables
@@ -937,9 +938,9 @@ impl Simplifier {
         // reference pattern-bound variables, e.g.
         // `when x is { True -> expr; False -> expr; _ -> error } → expr`.
         // Skip if the subject has an explicit Error — that failure is intentional.
-        if !Self::contains_explicit_error(&simplified_subject)
-            && outcome_summary.non_fail_count >= 2
+        if outcome_summary.non_fail_count >= 2
             && outcome_summary.all_non_fail_same
+            && !Self::contains_explicit_error(&simplified_subject)
         {
             let first_body = outcome_summary
                 .first_non_fail_body
