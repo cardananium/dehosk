@@ -5,7 +5,7 @@ use crate::pseudo::ast::{Binder, PseudoExpr, WhenClause, WhenPattern};
 use crate::pseudo::fold::{ExprFolder, ExprVisitor};
 use crate::pseudo::var_id::VarId;
 
-use super::{rename_compat_var_in_expr, rename_var_use_by_id_in_expr};
+use super::rename_compat_var_in_expr;
 
 #[cfg(test)]
 pub(crate) fn debug_disambiguate_shadowed_lets(expr: &PseudoExpr) -> PseudoExpr {
@@ -321,28 +321,6 @@ fn expr_contains_var_name(expr: &PseudoExpr, target: &str) -> bool {
     visitor.found
 }
 
-fn expr_contains_var_id(expr: &PseudoExpr, target: VarId) -> bool {
-    struct ContainsVarIdVisitor {
-        target: VarId,
-        found: bool,
-    }
-
-    impl ExprVisitor for ContainsVarIdVisitor {
-        fn visit_var(&mut self, _name: &str, id: &Option<VarId>) {
-            if *id == Some(self.target) {
-                self.found = true;
-            }
-        }
-    }
-
-    let mut visitor = ContainsVarIdVisitor {
-        target,
-        found: false,
-    };
-    visitor.walk(expr);
-    visitor.found
-}
-
 /// Names bound to a FUNCTION anywhere in `expr` — every `rec fn` name plus
 /// every `let` whose value is a `Lambda`/`RecFn`. A parameter or pattern
 /// binder sharing one of these names shadows a callable, so its uses read as
@@ -367,6 +345,91 @@ fn collect_function_names(expr: &PseudoExpr) -> HashSet<String> {
     };
     collector.walk(expr);
     collector.names
+}
+
+/// Where things are in the tree [`disambiguate_rec`] walks, by node number
+/// in its walk order (a node, then its [`children`](super::scope_recurse::children)
+/// in order). Renaming by id leaves the tree's shape alone and a by-name
+/// rename only copies a subtree as it is, so the numbers hold for the whole
+/// walk.
+struct WalkIndex {
+    /// One past the last node number of each node's subtree.
+    end: Vec<usize>,
+    /// The node numbers of each id's references, ascending. A reference in a
+    /// literal pattern counts as the `when`'s.
+    id_refs: HashMap<VarId, Vec<usize>>,
+}
+
+impl WalkIndex {
+    fn of(expr: &PseudoExpr) -> Self {
+        enum Step<'a> {
+            Enter(&'a PseudoExpr),
+            Close(usize),
+        }
+        let mut end: Vec<usize> = Vec::new();
+        let mut id_refs: HashMap<VarId, Vec<usize>> = HashMap::new();
+        let mut steps = vec![Step::Enter(expr)];
+        while let Some(step) = steps.pop() {
+            match step {
+                Step::Close(at) => end[at] = end.len(),
+                Step::Enter(node) => {
+                    let at = end.len();
+                    end.push(0);
+                    if let PseudoExpr::Var { id: Some(id), .. } = node {
+                        id_refs.entry(*id).or_default().push(at);
+                    }
+                    if let PseudoExpr::When { clauses, .. } = node {
+                        for clause in clauses {
+                            if let WhenPattern::Literal(lit) = &clause.pattern {
+                                for id in var_ids(lit) {
+                                    id_refs.entry(id).or_default().push(at);
+                                }
+                            }
+                        }
+                    }
+                    steps.push(Step::Close(at));
+                    for child in super::scope_recurse::children(node).into_iter().rev() {
+                        steps.push(Step::Enter(child));
+                    }
+                }
+            }
+        }
+        WalkIndex { end, id_refs }
+    }
+}
+
+/// Whether a sorted list of node numbers has one in `from..to`.
+fn occurs_between(at: Option<&Vec<usize>>, from: usize, to: usize) -> bool {
+    at.is_some_and(|at| {
+        let first = at.partition_point(|n| *n < from);
+        first < at.len() && at[first] < to
+    })
+}
+
+/// Every variable reference's name in `expr`, literal patterns included.
+fn var_names(expr: &PseudoExpr) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut pending: Vec<&PseudoExpr> = vec![expr];
+    while let Some(node) = pending.pop() {
+        if let PseudoExpr::Var { name, .. } = node {
+            out.push(name.clone());
+        }
+        node.child_refs_into(&mut pending);
+    }
+    out
+}
+
+/// Every variable reference's id in `expr`, literal patterns included.
+fn var_ids(expr: &PseudoExpr) -> Vec<VarId> {
+    let mut out = Vec::new();
+    let mut pending: Vec<&PseudoExpr> = vec![expr];
+    while let Some(node) = pending.pop() {
+        if let PseudoExpr::Var { id: Some(id), .. } = node {
+            out.push(*id);
+        }
+        node.child_refs_into(&mut pending);
+    }
+    out
 }
 
 fn make_unique_name(base: &str, suffix: usize) -> String {
@@ -406,12 +469,43 @@ fn disambiguate_rec(
     in_scope: &mut HashSet<String>,
     fn_names: &HashSet<String>,
 ) -> PseudoExpr {
+    // Renaming a binder used to rewrite its whole body (a cloned walk) and
+    // asking whether a value mentions a name used to walk the value — once
+    // per binder, so chains of them cost time quadratic in a depth the
+    // script chooses. Uses renamed by id now take their new name as the walk
+    // meets them, and the walk keeps an index of where each name and id
+    // occurs, so those questions are answered by a lookup.
+    let index = WalkIndex::of(&expr);
+    // Number of the next node the walk enters: its position in `index`.
+    let mut counter = 0usize;
+    // Every variable name the walk has emitted, by node number.
+    let mut emitted: HashMap<String, Vec<usize>> = HashMap::new();
+    // Binders renamed by id whose scope is still being walked, innermost
+    // last.
+    let mut id_renames: Vec<(VarId, String)> = Vec::new();
+    let renamed = |id_renames: &[(VarId, String)], id: VarId| {
+        id_renames
+            .iter()
+            .rev()
+            .find_map(|(vid, name)| (*vid == id).then(|| name.clone()))
+    };
+
     let mut steps: Vec<DisStep> = vec![DisStep::Visit(expr)];
     let mut done: Vec<PseudoExpr> = Vec::new();
 
     while let Some(step) = steps.pop() {
         match step {
-            DisStep::Visit(expr) => match expr {
+            DisStep::Visit(expr) => {
+                let at = counter;
+                counter += 1;
+                match expr {
+                PseudoExpr::Var { name, id } => {
+                    let name = id
+                        .and_then(|id| renamed(&id_renames, id))
+                        .unwrap_or(name);
+                    emitted.entry(name.clone()).or_default().push(at);
+                    done.push(PseudoExpr::Var { name, id });
+                }
                 PseudoExpr::Let {
                     name,
                     id,
@@ -420,13 +514,14 @@ fn disambiguate_rec(
                 } => {
                     // The value is disambiguated in the ENCLOSING scope; the
                     // binder only goes in afterwards, in `LetMid`.
-                    steps.push(DisStep::LetMid { name, id, body });
+                    steps.push(DisStep::LetMid { name, id, body, at });
                     steps.push(DisStep::Visit(value.into_inner()));
                 }
                 PseudoExpr::Lambda { params, body } => {
                     let mut added = Vec::new();
                     let mut new_params = params.clone();
-                    let mut renamed_body = body.into_inner();
+                    let renamed_body = body.into_inner();
+                    let renames_before = id_renames.len();
                     for (i, p) in params.iter().enumerate() {
                         // A bare `_` param is a wildcard: it cannot be referenced,
                         // so it never collides — suffixing it would mint
@@ -443,8 +538,7 @@ fn disambiguate_rec(
                                 *count += 1;
                                 new_name = make_unique_name(p, *count);
                             }
-                            renamed_body =
-                                rename_var_use_by_id_in_expr(&renamed_body, p.id, &new_name);
+                            id_renames.push((p.id, new_name.clone()));
                             for candidate in new_params.iter_mut().skip(i + 1) {
                                 if *candidate == *p {
                                     *candidate = candidate.renamed(new_name.clone());
@@ -461,6 +555,7 @@ fn disambiguate_rec(
                     steps.push(DisStep::Post(DisPost::Lambda {
                         params: new_params,
                         added,
+                        renames: id_renames.len() - renames_before,
                     }));
                     steps.push(DisStep::Visit(renamed_body));
                 }
@@ -471,7 +566,8 @@ fn disambiguate_rec(
                         added.push(name.to_string());
                     }
                     let mut new_params = params.clone();
-                    let mut renamed_body = body.into_inner();
+                    let renamed_body = body.into_inner();
+                    let renames_before = id_renames.len();
                     let mut seen_param_names = HashSet::from([name.to_string()]);
                     for (i, p) in params.iter().enumerate() {
                         // Rename a param that collides with a sibling param or a
@@ -496,8 +592,7 @@ fn disambiguate_rec(
                                 *count += 1;
                                 new_p = make_unique_name(p.as_str(), *count);
                             }
-                            renamed_body =
-                                rename_var_use_by_id_in_expr(&renamed_body, p.id, &new_p);
+                            id_renames.push((p.id, new_p.clone()));
                             for candidate in new_params.iter_mut().skip(i + 1) {
                                 if *candidate == *p {
                                     *candidate = p.renamed(new_p.clone());
@@ -519,6 +614,7 @@ fn disambiguate_rec(
                         name,
                         params: new_params,
                         added,
+                        renames: id_renames.len() - renames_before,
                     }));
                     steps.push(DisStep::Visit(renamed_body));
                 }
@@ -527,6 +623,22 @@ fn disambiguate_rec(
                     subject_name,
                     clauses,
                 } => {
+                    // A subject binder renamed by id is a use of it too.
+                    let subject_name = subject_name.map(|binder| {
+                        match renamed(&id_renames, binder.id) {
+                            Some(new_name) => binder.renamed(new_name),
+                            None => binder,
+                        }
+                    });
+                    // Literal patterns are not walked (nor ever renamed),
+                    // but their variables are mentions all the same.
+                    for clause in &clauses {
+                        if let WhenPattern::Literal(lit) = &clause.pattern {
+                            for name in var_names(lit) {
+                                emitted.entry(name).or_default().push(at);
+                            }
+                        }
+                    }
                     // No scope change of its own: subject, then each clause's
                     // guard and body, all in the enclosing scope.
                     let mut clause_meta = Vec::with_capacity(clauses.len());
@@ -558,12 +670,19 @@ fn disambiguate_rec(
                     }
                     Err(leaf) => done.push(leaf),
                 },
-            },
+                }
+            }
             // Ran after the let VALUE and before the let BODY: everything
             // between `let new_value = disambiguate_rec(&value, ..)` and
             // `let new_body = disambiguate_rec(&body_to_process, ..)`.
-            DisStep::LetMid { name, id, body } => {
+            DisStep::LetMid { name, id, body, at } => {
                 let new_value = done.last().expect("let value");
+                // The value's nodes are numbered `at + 1 .. counter`; the
+                // body's start at `counter` and end with the `let`'s own.
+                let value_mentions = |display_name: &str| {
+                    occurs_between(emitted.get(display_name), at + 1, counter)
+                        && expr_contains_var_name(new_value, display_name)
+                };
                 let mut display_name = if in_scope.contains(&name) {
                     let count = name_counts.entry(name.clone()).or_insert(1);
                     *count += 1;
@@ -575,7 +694,7 @@ fn disambiguate_rec(
                 // A binding whose VALUE already mentions the chosen display
                 // name would read as self-reference; step the suffix until it
                 // does not — except for the deliberate inverted-rec shape.
-                while expr_contains_var_name(new_value, &display_name)
+                while value_mentions(&display_name)
                     && !is_intentional_inverted_rec_let(&display_name, new_value, body.as_ref())
                 {
                     let count = name_counts.entry(name.clone()).or_insert(1);
@@ -584,9 +703,15 @@ fn disambiguate_rec(
                 }
                 let was_in_scope = in_scope.contains(&name);
                 in_scope.insert(name.clone());
+                let body_end = index.end[at];
+                let mut renamed_by_id = false;
                 let body_to_process = if display_name != name {
-                    if let Some(real_id) = id.filter(|vid| expr_contains_var_id(&body, *vid)) {
-                        rename_var_use_by_id_in_expr(&body, real_id, &display_name)
+                    if let Some(real_id) =
+                        id.filter(|vid| occurs_between(index.id_refs.get(vid), counter, body_end))
+                    {
+                        id_renames.push((real_id, display_name.clone()));
+                        renamed_by_id = true;
+                        body.into_inner()
                     } else {
                         rename_compat_var_in_expr(&body, &name, &display_name)
                     }
@@ -598,6 +723,7 @@ fn disambiguate_rec(
                     display_name,
                     id,
                     was_in_scope,
+                    renamed_by_id,
                 }));
                 steps.push(DisStep::Visit(body_to_process));
             }
@@ -608,7 +734,11 @@ fn disambiguate_rec(
                         display_name,
                         id,
                         was_in_scope,
+                        renamed_by_id,
                     } => {
+                        if renamed_by_id {
+                            id_renames.pop();
+                        }
                         let new_body = done.pop().expect("let body");
                         let new_value = done.pop().expect("let value");
                         if !was_in_scope {
@@ -621,7 +751,12 @@ fn disambiguate_rec(
                             body: PBox::new(new_body),
                         }
                     }
-                    DisPost::Lambda { params, added } => {
+                    DisPost::Lambda {
+                        params,
+                        added,
+                        renames,
+                    } => {
+                        id_renames.truncate(id_renames.len() - renames);
                         let new_body = done.pop().expect("lambda body");
                         for p in &added {
                             in_scope.remove(p);
@@ -635,7 +770,9 @@ fn disambiguate_rec(
                         name,
                         params,
                         added,
+                        renames,
                     } => {
+                        id_renames.truncate(id_renames.len() - renames);
                         let new_body = done.pop().expect("recfn body");
                         for p in &added {
                             in_scope.remove(p);
@@ -689,6 +826,8 @@ enum DisStep {
         name: String,
         id: Option<VarId>,
         body: PBox,
+        /// The `let`'s node number.
+        at: usize,
     },
     Post(DisPost),
 }
@@ -700,15 +839,20 @@ enum DisPost {
         display_name: String,
         id: Option<VarId>,
         was_in_scope: bool,
+        /// Its uses were being renamed by id, which ends with the body.
+        renamed_by_id: bool,
     },
     Lambda {
         params: Vec<Binder>,
         added: Vec<String>,
+        /// Params renamed by id, whose renames end with the body.
+        renames: usize,
     },
     RecFn {
         name: Binder,
         params: Vec<Binder>,
         added: Vec<String>,
+        renames: usize,
     },
     When {
         subject_name: Option<Binder>,
