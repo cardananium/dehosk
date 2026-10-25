@@ -24,7 +24,7 @@ pub(crate) trait Nested: Sized {
 ///
 /// Each node is emptied before it goes out of scope, so the implicit drop at
 /// the end of the loop body only ever frees a childless node.
-fn release_all<T: Nested>(mut stack: Vec<T>) {
+pub(crate) fn release_all<T: Nested>(mut stack: Vec<T>) {
     while let Some(mut node) = stack.pop() {
         stack.append(&mut node.take_children());
     }

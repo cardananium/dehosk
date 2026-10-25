@@ -50,7 +50,8 @@ fn test_improve_variable_names_ignores_same_name_different_id_get_at_tail_ref() 
                             }),
                         },
                     ),
-                ],
+                ]
+                .into(),
             }),
         }),
         body: PBox::new(PseudoExpr::Apply {

@@ -671,7 +671,7 @@ impl DanglingResolver {
                         done.push(Rebuilt::Expr(PseudoExpr::When {
                             subject: PBox::new(subject),
                             subject_name,
-                            clauses,
+                            clauses: clauses.into(),
                         }));
                     }
                     Post::If => {

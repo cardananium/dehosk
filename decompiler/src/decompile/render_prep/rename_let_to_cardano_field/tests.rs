@@ -55,7 +55,8 @@ fn renames_synthetic_let_to_governance_action() {
                 pattern: WhenPattern::Wildcard,
                 guard: None,
                 body: PseudoExpr::Error { message: None },
-            }],
+            }]
+            .into(),
         },
     );
     let out = run_v3(expr);

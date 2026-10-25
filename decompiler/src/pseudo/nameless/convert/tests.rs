@@ -114,7 +114,8 @@ fn round_trip_when_with_constructor_pattern() {
                 name: "x".to_string(),
                 id: Some(payload),
             },
-        }],
+        }]
+        .into(),
     };
     let (nameless, table) = pseudo_to_nameless(&expr);
     let raised = nameless_to_pseudo(&nameless, &table);

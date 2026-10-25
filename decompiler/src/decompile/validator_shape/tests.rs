@@ -418,7 +418,8 @@ fn detect_dispatch_unknown_shape_refused() {
                 guard: None,
                 body: PseudoExpr::Unit,
             },
-        ],
+        ]
+        .into(),
     };
     let result = detect_dispatch(&when);
     assert_eq!(result, PurposeDispatch::None);
@@ -513,7 +514,8 @@ fn detect_dispatch_refuses_two_unknown_arms_without_known_anchor() {
                 guard: None,
                 body: PseudoExpr::Unit,
             },
-        ],
+        ]
+        .into(),
     };
     let result = detect_dispatch(&when);
     assert_eq!(

@@ -116,7 +116,8 @@ fn trace_inside_when_literal_pattern_is_detected() {
                 }),
                 guard: None,
                 body: var("x", 1),
-            }],
+            }]
+            .into(),
         }),
     };
     assert!(
@@ -135,7 +136,8 @@ fn binder_referenced_only_in_when_literal_pattern_is_not_dead() {
             pattern: WhenPattern::Literal(var("match_subject_44", 44)),
             guard: None,
             body: PseudoExpr::Unit,
-        }],
+        }]
+        .into(),
     };
     assert!(contains_var_id(&body, VarId::new(44)));
     assert!(contains_var_name(&body, "match_subject_44"));

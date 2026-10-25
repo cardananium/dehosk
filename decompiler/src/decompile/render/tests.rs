@@ -629,11 +629,13 @@ fn test_clause_local_binder_does_not_capture_renamed_let_value() {
                         pattern: WhenPattern::Wildcard,
                         guard: None,
                         body: PseudoExpr::int(0),
-                    }],
+                    }]
+                    .into(),
                 },
                 PseudoExpr::var("l2"),
             ),
-        }],
+        }]
+        .into(),
     };
 
     let output = expr.to_pretty();
@@ -953,7 +955,8 @@ fn test_inline_when_adapter_let_in_lambda_body() {
                     PseudoExpr::var("head"),
                 ),
                 WhenClause::new(WhenPattern::wildcard(), PseudoExpr::error()),
-            ],
+            ]
+            .into(),
         },
         PseudoExpr::lambda(
             vec!["arg".to_string()],
@@ -1004,7 +1007,8 @@ fn expect_or_fail_flag_preserves_dropped_fail_message() {
                 WhenPattern::wildcard(),
                 PseudoExpr::error_with_message("boom"),
             ),
-        ],
+        ]
+        .into(),
     };
 
     // Default (flag off): expect sugar fires but drops the fail message.
@@ -1052,7 +1056,8 @@ fn expect_or_fail_uses_catch_all_fail_message_not_pattern_specific() {
                 PseudoExpr::var("v"),
             ),
             WhenClause::new(WhenPattern::wildcard(), PseudoExpr::error_with_message("D")),
-        ],
+        ]
+        .into(),
     };
 
     let out = when.to_pretty_with_config(PrettyConfig {
@@ -1086,7 +1091,8 @@ fn expect_or_fail_preserves_sole_complement_fail_message() {
                 WhenPattern::constructor(ConstructorShape::unknown_data(1, 0), vec![]),
                 PseudoExpr::error_with_message("nope"),
             ),
-        ],
+        ]
+        .into(),
     };
 
     let out = when.to_pretty_with_config(PrettyConfig {
@@ -1116,7 +1122,8 @@ fn expect_or_fail_preserves_empty_string_fail_message() {
                 PseudoExpr::var("v"),
             ),
             WhenClause::new(WhenPattern::wildcard(), PseudoExpr::error_with_message("")),
-        ],
+        ]
+        .into(),
     };
 
     let out = when.to_pretty_with_config(PrettyConfig {
@@ -1148,7 +1155,8 @@ fn expect_or_fail_omits_clause_when_fail_arm_has_no_message() {
                 PseudoExpr::var("head"),
             ),
             WhenClause::new(WhenPattern::wildcard(), PseudoExpr::error()),
-        ],
+        ]
+        .into(),
     };
 
     let out = when.to_pretty_with_config(PrettyConfig {
@@ -1171,7 +1179,8 @@ fn test_when_adapter_not_inlined_when_subject_var_used_in_clause_body() {
             clauses: vec![WhenClause::new(
                 WhenPattern::wildcard(),
                 PseudoExpr::var("x"),
-            )],
+            )]
+            .into(),
         },
         PseudoExpr::lambda(
             vec!["arg".to_string()],
@@ -2211,7 +2220,7 @@ fn value_is_definitely_not_function_discriminates() {
         PBox::new(v.clone())
     )));
     assert!(not_fn(&PseudoExpr::Tuple(
-        (vec![v.clone(), v.clone()]).into()
+        vec![v.clone(), v.clone()].into()
     )));
     assert!(not_fn(&PseudoExpr::List {
         elements: vec![].into(),
@@ -2480,7 +2489,8 @@ fn test_when_data_constr_pattern_emits_wildcards_for_zero_bound_fields() {
                 PseudoExpr::var("y"),
             ),
             WhenClause::new(WhenPattern::wildcard(), PseudoExpr::error()),
-        ],
+        ]
+        .into(),
     };
 
     let out = PrettyPrinter::new()
@@ -2510,7 +2520,8 @@ fn test_when_data_constr_pattern_emits_wildcards_for_zero_bound_fields() {
                     Some(data_hint.clone()),
                 ),
                 PseudoExpr::var("y"),
-            )],
+            )]
+            .into(),
         };
         let out = PrettyPrinter::new().with_registry(reg).print(&single_arm);
         assert!(
@@ -2546,7 +2557,8 @@ fn user_adt_named_constr_no_data_hint_keeps_shape_arity() {
                 PseudoExpr::var("y"),
             ),
             WhenClause::new(WhenPattern::wildcard(), PseudoExpr::error()),
-        ],
+        ]
+        .into(),
     };
     let out = PrettyPrinter::new()
         .with_registry(registry.clone())
@@ -2584,7 +2596,8 @@ fn partial_data_constr_pattern_pads_with_wildcards() {
                 Some(data_hint.clone()),
             ),
             PseudoExpr::var_with_id("a", bound_id),
-        )],
+        )]
+        .into(),
     };
     let out = PrettyPrinter::new()
         .with_registry(registry.clone())
@@ -2627,7 +2640,8 @@ fn bare_some_pattern_pads_to_unary_wildcard() {
                 ),
                 PseudoExpr::Bool(false),
             ),
-        ],
+        ]
+        .into(),
     };
     let out = PrettyPrinter::new()
         .with_registry(registry.clone())
@@ -2662,7 +2676,8 @@ fn non_option_constructor_named_some_is_not_padded() {
                 Some(user_hint.clone()),
             ),
             PseudoExpr::Bool(true),
-        )],
+        )]
+        .into(),
     };
     let out = PrettyPrinter::new()
         .with_registry(registry.clone())
@@ -2701,7 +2716,8 @@ fn full_data_constr_pattern_unchanged() {
                 PBox::new(PseudoExpr::var_with_id("a", a_id)),
                 PBox::new(PseudoExpr::var_with_id("b", b_id)),
             ),
-        )],
+        )]
+        .into(),
     };
     let out = PrettyPrinter::new()
         .with_registry(registry.clone())
@@ -3050,7 +3066,7 @@ mod scott_constructor_annotation {
             function: PBox::new(three_variant_ctor()),
             args: vec![var("p", 10), var("q", 11)].into(),
         };
-        let tup = PseudoExpr::Tuple((vec![var("x", 20), app, var("y", 21)]).into());
+        let tup = PseudoExpr::Tuple(vec![var("x", 20), app, var("y", 21)].into());
         let rendered = tup.to_pretty();
         for line in rendered.lines() {
             if line.contains("// Scott-encoded") {

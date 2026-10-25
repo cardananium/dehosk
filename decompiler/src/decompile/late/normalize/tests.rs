@@ -704,7 +704,8 @@ fn test_fix_bool_option_confusion_converts_false_none_lookup_shape() {
                         }),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -745,7 +746,8 @@ fn test_rename_option_like_patterns_marks_helper_result_patterns_as_some_none() 
                     WhenPattern::constructor(ConstructorShape::unknown_data(0, 0), vec![]),
                     PseudoExpr::bool(true),
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
     let expr = PseudoExpr::Let {
@@ -790,7 +792,8 @@ fn test_rename_option_like_patterns_marks_helper_result_patterns_as_some_none() 
                             )],
                         ),
                     ),
-                ],
+                ]
+                .into(),
             }),
         })),
         body: PBox::new(expr),
@@ -861,7 +864,8 @@ fn test_rename_option_like_patterns_fills_none_for_wildcard_on_option_subject() 
                     PseudoExpr::var("payload"),
                 ),
                 WhenClause::new(WhenPattern::Wildcard, PseudoExpr::var("fallback")),
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -902,7 +906,8 @@ fn test_rename_option_like_patterns_recovers_missing_some_payload_binder() {
                     WhenPattern::constructor_known(KnownConstructor::None, vec![]),
                     PseudoExpr::error(),
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -960,7 +965,8 @@ fn test_rename_option_like_patterns_recovers_missing_some_payload_preserves_auth
                     WhenPattern::constructor_known(KnownConstructor::None, vec![]),
                     PseudoExpr::error(),
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -1010,14 +1016,15 @@ fn test_rename_option_like_patterns_prefers_root_payload_name_among_multiple_gen
                 WhenClause::new(
                     WhenPattern::constructor(ConstructorShape::unknown_data(0, 0), vec![]),
                     PseudoExpr::Tuple(
-                        (vec![PseudoExpr::var("fields"), PseudoExpr::var("field_0")]).into(),
+                        vec![PseudoExpr::var("fields"), PseudoExpr::var("field_0")].into(),
                     ),
                 ),
                 WhenClause::new(
                     WhenPattern::constructor_known(KnownConstructor::None, vec![]),
                     PseudoExpr::error(),
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -1075,7 +1082,8 @@ fn test_rename_option_like_patterns_does_not_merge_ambiguous_same_name_different
                     WhenPattern::constructor_known(KnownConstructor::None, vec![]),
                     PseudoExpr::error(),
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -1146,7 +1154,8 @@ fn test_recover_free_validator_carriers_recovers_constructor_fields_from_direct_
                 ]
                 .into(),
             ),
-        )],
+        )]
+        .into(),
     };
 
     let rewritten = recover_free_validator_carriers(expr, &std::collections::HashMap::new(), false);
@@ -1327,7 +1336,8 @@ fn test_recover_free_validator_carriers_recovered_constructor_field_blocks_scrip
                     }),
                     body: PBox::new(PseudoExpr::var_with_id("data", data_id)),
                 },
-            )],
+            )]
+            .into(),
         }),
     };
 
@@ -1391,7 +1401,8 @@ fn test_recover_free_validator_carriers_ignores_direct_subject_field_accesses_on
                     ]
                     .into(),
                 ),
-            )],
+            )]
+            .into(),
         }),
     };
 
@@ -1481,7 +1492,8 @@ fn test_recover_free_validator_carriers_keeps_same_name_different_id_field_acces
                 ]
                 .into(),
             ),
-        )],
+        )]
+        .into(),
     };
 
     let rewritten = recover_free_validator_carriers(expr, &std::collections::HashMap::new(), false);
@@ -1547,7 +1559,8 @@ fn test_recover_free_validator_carriers_keeps_same_name_different_id_constructor
                 )),
                 index: 0,
             },
-        )],
+        )]
+        .into(),
     };
 
     let rewritten = recover_free_validator_carriers(expr, &std::collections::HashMap::new(), false);
@@ -1600,7 +1613,8 @@ fn test_recover_free_validator_carriers_extracts_subject_field0_binder_from_buri
                     body: PBox::new(PseudoExpr::var_with_id("fields_0_list", fields_0_list_id)),
                 }),
             },
-        )],
+        )]
+        .into(),
     };
 
     let rewritten = recover_free_validator_carriers(expr, &std::collections::HashMap::new(), false);
@@ -1658,7 +1672,8 @@ fn test_recover_free_validator_carriers_rewrites_generated_constructor_field_ali
                 ]
                 .into(),
             ),
-        )],
+        )]
+        .into(),
     };
 
     let rewritten = recover_free_validator_carriers(expr, &std::collections::HashMap::new(), false);
@@ -1715,7 +1730,8 @@ fn test_recover_free_validator_carriers_recovers_generated_field_under_same_name
                         .into(),
                     )),
                 },
-            )],
+            )]
+            .into(),
         }),
     };
 
@@ -1796,7 +1812,8 @@ fn test_recover_free_validator_carriers_does_not_convert_if_when_condition_only_
                         )),
                     }),
                 },
-            )],
+            )]
+            .into(),
         }),
     };
 
@@ -1870,7 +1887,8 @@ fn test_recover_free_validator_carriers_rewrites_direct_constructor_field_access
                 ]
                 .into(),
             ),
-        )],
+        )]
+        .into(),
     };
 
     let rewritten = recover_free_validator_carriers(expr, &std::collections::HashMap::new(), false);
@@ -1902,7 +1920,8 @@ fn test_recover_free_validator_carriers_rewrites_generated_constructor_field_ali
             PseudoExpr::Tuple(
                 vec![PseudoExpr::var("fields_6"), PseudoExpr::var("fields_8")].into(),
             ),
-        )],
+        )]
+        .into(),
     };
 
     let rewritten = recover_free_validator_carriers(expr, &std::collections::HashMap::new(), false);
@@ -1953,7 +1972,8 @@ fn test_recover_free_validator_carriers_handles_option_subjects_without_tipo() {
         clauses: vec![WhenClause::new(
             WhenPattern::constructor(ConstructorShape::unknown_data(0, 0), vec![]),
             PseudoExpr::var("fields_0"),
-        )],
+        )]
+        .into(),
     };
 
     let rewritten = recover_free_validator_carriers(expr, &std::collections::HashMap::new(), false);
@@ -1995,7 +2015,8 @@ fn test_recover_free_validator_carriers_rebinds_free_generated_subject_aliases()
                     .into(),
                 )),
             },
-        )],
+        )]
+        .into(),
     };
 
     let rewritten = recover_free_validator_carriers(expr, &std::collections::HashMap::new(), false);
@@ -2178,7 +2199,8 @@ fn test_rewrite_constructor_subject_field_accesses_to_pattern_binders_after_expe
                 }]
                 .into(),
             },
-        )],
+        )]
+        .into(),
     };
 
     let rewritten = super::rewrite_constructor_subject_field_accesses_to_pattern_binders(expr);
@@ -2222,7 +2244,8 @@ fn test_rename_option_like_patterns_rewrites_subject_payload_field_accesses() {
                     WhenPattern::constructor_known(KnownConstructor::None, vec![]),
                     PseudoExpr::error(),
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -2281,7 +2304,8 @@ fn test_rename_option_like_patterns_rewrites_subject_payload_field_projections()
                     WhenPattern::constructor_known(KnownConstructor::None, vec![]),
                     PseudoExpr::error(),
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -2345,7 +2369,8 @@ fn test_rename_option_like_patterns_rewrites_expect_body_subject_payload_project
                             WhenPattern::constructor_known(KnownConstructor::None, vec![]),
                             PseudoExpr::error(),
                         ),
-                    ],
+                    ]
+                    .into(),
                 },
                 PseudoExpr::IndexAccess {
                     collection: PBox::new(PseudoExpr::field_access(
@@ -2426,7 +2451,8 @@ fn test_rename_option_like_patterns_rewrites_existing_some_binder_projections_in
                     WhenPattern::constructor_known(KnownConstructor::None, vec![]),
                     PseudoExpr::error(),
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -2484,7 +2510,8 @@ fn test_rename_option_like_patterns_specializes_none_plus_wildcard_to_some() {
                         index: 0,
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 

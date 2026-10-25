@@ -56,7 +56,8 @@ fn test_improve_variable_names_ignores_same_name_different_id_fold_map_tail_ref(
                                     .into(),
                                 },
                             ),
-                        ],
+                        ]
+                        .into(),
                     }),
                 }),
                 body: PBox::new(PseudoExpr::Apply {

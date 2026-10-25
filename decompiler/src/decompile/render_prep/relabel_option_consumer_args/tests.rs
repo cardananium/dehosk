@@ -101,7 +101,8 @@ fn helper_with_option_param(param_ids: (u32, u32)) -> PseudoExpr {
                     guard: None,
                     body: PseudoExpr::Bool(false),
                 },
-            ],
+            ]
+            .into(),
         }),
     }
 }
@@ -217,7 +218,8 @@ fn genuine_result_position_not_relabeled() {
                     guard: None,
                     body: PseudoExpr::Bool(false),
                 },
-            ],
+            ]
+            .into(),
         }),
     };
     let input = with_marker(PseudoExpr::Let {

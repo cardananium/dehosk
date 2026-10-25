@@ -132,7 +132,7 @@ pub(super) fn rewrite_constructor_subject_field_accesses_to_pattern_binders(
             PseudoExpr::When {
                 subject: PBox::new(subject),
                 subject_name,
-                clauses,
+                clauses: clauses.into(),
             }
         }
     }

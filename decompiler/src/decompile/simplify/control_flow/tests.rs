@@ -20,7 +20,8 @@ fn readability_condition_name_allocation_uses_names_from_condition() {
                 PseudoExpr::Bool(true),
             ),
             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Bool(false)),
-        ],
+        ]
+        .into(),
     };
 
     let mut used_names = HashSet::new();
@@ -123,7 +124,8 @@ fn direct_subject_field_rewrite_respects_when_pattern_shadowing() {
                 )),
                 index: 0,
             },
-        )],
+        )]
+        .into(),
     };
 
     let counts = Simplifier::collect_direct_subject_fields_index_access_counts(

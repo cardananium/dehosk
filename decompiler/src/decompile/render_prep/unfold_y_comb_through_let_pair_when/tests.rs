@@ -46,7 +46,8 @@ fn unfolds_let_bound_y_comb_pair_destructure() {
                 pattern: WhenPattern::Pair(binder("a", a_id), binder("b", b_id)),
                 guard: None,
                 body: body.clone(),
-            }],
+            }]
+            .into(),
         }),
     };
     let out = unfold_y_comb_through_let_pair_when(input);
@@ -94,7 +95,8 @@ fn preserves_self_recursion_by_var_id() {
                 pattern: WhenPattern::Pair(binder("a", a_id), binder("b", b_id)),
                 guard: None,
                 body,
-            }],
+            }]
+            .into(),
         }),
     };
     let out = unfold_y_comb_through_let_pair_when(input);
@@ -158,7 +160,8 @@ fn rejects_y_comb_with_swapped_args() {
                 pattern: WhenPattern::Pair(binder("a", 200), binder("b", 201)),
                 guard: None,
                 body: PseudoExpr::Unit,
-            }],
+            }]
+            .into(),
         }),
     };
     let out = unfold_y_comb_through_let_pair_when(input.clone());
@@ -184,7 +187,8 @@ fn rejects_non_y_comb_subject() {
                 pattern: WhenPattern::Pair(binder("a", 200), binder("b", 201)),
                 guard: None,
                 body: PseudoExpr::Unit,
-            }],
+            }]
+            .into(),
         }),
     };
     let out = unfold_y_comb_through_let_pair_when(input.clone());
@@ -214,7 +218,8 @@ fn rejects_multi_arm_when() {
                     guard: None,
                     body: PseudoExpr::Unit,
                 },
-            ],
+            ]
+            .into(),
         }),
     };
     let out = unfold_y_comb_through_let_pair_when(input.clone());
@@ -236,7 +241,8 @@ fn rejects_clause_with_guard() {
                 pattern: WhenPattern::Pair(binder("a", 200), binder("b", 201)),
                 guard: Some(PseudoExpr::Bool(true)),
                 body: PseudoExpr::Unit,
-            }],
+            }]
+            .into(),
         }),
     };
     let out = unfold_y_comb_through_let_pair_when(input.clone());
@@ -268,7 +274,8 @@ fn unfolds_constructor_pair_pattern_variant() {
                 },
                 guard: None,
                 body: var("a", a_id),
-            }],
+            }]
+            .into(),
         }),
     };
     let out = unfold_y_comb_through_let_pair_when(input);
@@ -301,7 +308,8 @@ fn rejects_when_with_explicit_subject_name() {
                 pattern: WhenPattern::Pair(binder("a", 200), binder("b", 201)),
                 guard: None,
                 body: PseudoExpr::Unit,
-            }],
+            }]
+            .into(),
         }),
     };
     let out = unfold_y_comb_through_let_pair_when(input.clone());
@@ -324,7 +332,8 @@ fn unfolds_inside_nested_lambda() {
                 pattern: WhenPattern::Pair(binder("a", a_id), binder("b", b_id)),
                 guard: None,
                 body: var("a", a_id),
-            }],
+            }]
+            .into(),
         }),
     };
     let input = PseudoExpr::Let {

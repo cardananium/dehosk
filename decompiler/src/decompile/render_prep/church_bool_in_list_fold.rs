@@ -39,11 +39,11 @@ pub(super) fn rewrite_church_bool_in_list_fold(expr: PseudoExpr) -> PseudoExpr {
             subject_name,
             clauses,
         } => {
-            let clauses = maybe_rewrite_clauses(clauses);
+            let clauses = maybe_rewrite_clauses(clauses.into_vec());
             PseudoExpr::When {
                 subject,
                 subject_name,
-                clauses,
+                clauses: clauses.into(),
             }
         }
         PseudoExpr::BuiltinCall { name, args } => {

@@ -402,7 +402,7 @@ impl Simplifier {
                 return Some(PseudoExpr::When {
                     subject: PBox::new(subject),
                     subject_name: None,
-                    clauses,
+                    clauses: clauses.into(),
                 });
             }
 
@@ -456,7 +456,7 @@ impl Simplifier {
         Some(PseudoExpr::When {
             subject: PBox::new(subject),
             subject_name: None,
-            clauses,
+            clauses: clauses.into(),
         })
     }
 

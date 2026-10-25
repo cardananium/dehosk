@@ -108,7 +108,8 @@ fn detects_duplicate_when_subject_or_pattern_binder_id() {
                 shape: crate::pseudo::constructor::ConstructorShape::unknown_data(0, 1),
             },
             PseudoExpr::Unit,
-        )],
+        )]
+        .into(),
     };
 
     assert!(has_duplicate_binding_ids(&expr));
@@ -132,7 +133,8 @@ fn unique_binding_ids_make_deduplicate_var_ids_structural_identity() {
                     params: vec![Binder::new("arg", VarId::from_raw(25))],
                     body: PBox::new(PseudoExpr::var_with_id("arg", VarId::from_raw(25))),
                 },
-            )],
+            )]
+            .into(),
         }),
     };
 

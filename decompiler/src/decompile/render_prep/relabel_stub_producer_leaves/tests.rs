@@ -104,7 +104,8 @@ fn inverse_polarity_shape() -> PseudoExpr {
                 guard: None,
                 body: PseudoExpr::Unit,
             },
-        ],
+        ]
+        .into(),
     };
     with_marker(PseudoExpr::Let {
         name: "f_13".to_string(),
@@ -180,7 +181,8 @@ fn non_exclusive_flow_not_touched() {
                 guard: None,
                 body: PseudoExpr::Unit,
             },
-        ],
+        ]
+        .into(),
     };
     let input = with_marker(PseudoExpr::Let {
         name: "f".to_string(),
@@ -258,7 +260,8 @@ fn shared_producer_fn_not_relabeled() {
                 guard: None,
                 body: PseudoExpr::Unit,
             },
-        ],
+        ]
+        .into(),
     };
     // f is ALSO called elsewhere: let t = f(1) → escapes the chain.
     let input = with_marker(PseudoExpr::Let {

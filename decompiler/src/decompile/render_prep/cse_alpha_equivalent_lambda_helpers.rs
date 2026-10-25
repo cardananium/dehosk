@@ -1115,7 +1115,7 @@ fn apply_redirects(
                     done.push(PseudoExpr::When {
                         subject: PBox::new(subject),
                         subject_name,
-                        clauses,
+                        clauses: clauses.into(),
                     });
                 }
                 PostKind::Clause { pattern, has_guard } => {

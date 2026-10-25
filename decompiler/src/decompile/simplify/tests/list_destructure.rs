@@ -46,7 +46,8 @@ fn test_list_head_tail_destructure_both() {
                     }),
                 },
             ),
-        ],
+        ]
+        .into(),
     };
 
     let simplified = simplify(expr);
@@ -130,7 +131,8 @@ fn test_list_head_tail_destructure_apply_form() {
                     }),
                 },
             ),
-        ],
+        ]
+        .into(),
     };
 
     let simplified = simplify(expr);

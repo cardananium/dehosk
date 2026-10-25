@@ -81,7 +81,8 @@ fn recursive_self_call_participates() {
                 guard: None,
                 body: call(2, "g", vec![varref("t", 5)]),
             },
-        ],
+        ]
+        .into(),
     };
     let expr = PseudoExpr::Let {
         name: "f".to_string(),
@@ -357,7 +358,8 @@ fn when_tail_requires_proven_subject() {
             },
             guard: None,
             body: PseudoExpr::int(0),
-        }],
+        }]
+        .into(),
     };
     let s = collect_provably_list_var_ids(&expr);
     assert!(!s.contains(&VarId::new(3)));
@@ -383,7 +385,8 @@ fn cons_constructor_pattern_tail() {
                 },
                 guard: None,
                 body: PseudoExpr::int(0),
-            }],
+            }]
+            .into(),
         }),
     };
     let s = collect_provably_list_var_ids(&expr);
@@ -450,7 +453,8 @@ fn colliding_binder_id_never_proves() {
                 pattern: WhenPattern::Var(binder("field_0_2", 7)),
                 guard: None,
                 body: PseudoExpr::int(0),
-            }],
+            }]
+            .into(),
         }),
     };
     let s = collect_provably_list_var_ids(&expr);
@@ -487,7 +491,8 @@ fn return_join_proves_call_result_let() {
                 guard: None,
                 body: call(2, "g", vec![varref("t", 5)]),
             },
-        ],
+        ]
+        .into(),
     };
     let expr = PseudoExpr::Let {
         name: "f".to_string(),
@@ -661,7 +666,8 @@ fn branch_tail_join_diverging_arms() {
                 guard: None,
                 body: PseudoExpr::Error { message: None },
             },
-        ],
+        ]
+        .into(),
     };
     let s = HashSet::new();
     assert!(is_provably_list_given(
@@ -681,7 +687,8 @@ fn branch_tail_join_diverging_arms() {
             pattern: WhenPattern::Wildcard,
             guard: None,
             body: PseudoExpr::Error { message: None },
-        }],
+        }]
+        .into(),
     };
     assert!(!is_provably_list_given(&all_fail, &s));
 }
@@ -691,7 +698,7 @@ fn branch_tail_join_diverging_arms() {
 fn tuple_pair_never_prove() {
     let s = HashSet::new();
     assert!(!is_provably_list_given(
-        &PseudoExpr::Tuple((vec![PseudoExpr::int(1)]).into()),
+        &PseudoExpr::Tuple(vec![PseudoExpr::int(1)].into()),
         &s
     ));
     assert!(!is_provably_list_given(

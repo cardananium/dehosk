@@ -69,7 +69,8 @@ fn test_single_force_dethunk_delay_when_non_closed() {
                     WhenPattern::constructor_known(KnownConstructor::None, vec![]),
                     PseudoExpr::var("z"),
                 ),
-            ],
+            ]
+            .into(),
         }))),
         body: PBox::new(PseudoExpr::Force(PBox::new(PseudoExpr::var("d")))),
     };

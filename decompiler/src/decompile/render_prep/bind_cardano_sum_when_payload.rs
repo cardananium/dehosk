@@ -146,7 +146,7 @@ fn try_bind(
         None => PseudoExpr::When {
             subject,
             subject_name,
-            clauses,
+            clauses: clauses.into(),
         },
     }
 }

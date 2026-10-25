@@ -518,7 +518,7 @@ fn rebuild_plain(kind: PlainPost, done: &mut Vec<PseudoExpr>) -> PseudoExpr {
                 tail,
             }
         }
-        PlainPost::Tuple { count } => PseudoExpr::Tuple((take(done, count)).into()),
+        PlainPost::Tuple { count } => PseudoExpr::Tuple(take(done, count).into()),
         PlainPost::Pair => {
             let second = done.pop().expect("pair second");
             let first = done.pop().expect("pair first");
@@ -1066,7 +1066,7 @@ pub(in crate::decompile::late::normalize) fn recover_missing_option_payload_bind
                             PseudoExpr::When {
                                 subject: PBox::new(subject),
                                 subject_name,
-                                clauses,
+                                clauses: clauses.into(),
                             }
                         }
                         RewritePost::Let { name, id } => {

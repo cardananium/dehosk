@@ -283,7 +283,8 @@ fn test_when_apply_distribution_freshens_lambda_arg_binder_ids() {
                     WhenPattern::constructor(ConstructorShape::unknown_data(2, 0), vec![]),
                     PseudoExpr::var("f2"),
                 ),
-            ],
+            ]
+            .into(),
         }),
         args: vec![PseudoExpr::Lambda {
             params: vec![Binder::new("x", param_id)],
@@ -336,7 +337,8 @@ fn test_when_apply_distribution_moves_original_args_into_last_clause() {
                     WhenPattern::constructor(ConstructorShape::unknown_data(2, 0), vec![]),
                     PseudoExpr::var("f2"),
                 ),
-            ],
+            ]
+            .into(),
         }),
         args: vec![PseudoExpr::Lambda {
             params: vec![Binder::new("x", param_id)],

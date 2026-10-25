@@ -802,7 +802,7 @@ impl<'a> Lowerer<'a> {
                     let expr = PseudoExpr::When {
                         subject: PBox::new(subject),
                         subject_name: None,
-                        clauses,
+                        clauses: clauses.into(),
                     };
                     self.register_lowered(&expr, path, mid_id);
                     done.push(expr);

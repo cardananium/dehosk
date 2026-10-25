@@ -487,7 +487,8 @@ fn when_some(subject: PseudoExpr, elem: VarId, elem_name: &str, body: PseudoExpr
                 WhenPattern::constructor_known(KnownConstructor::None, vec![]),
                 PseudoExpr::int(0),
             ),
-        ],
+        ]
+        .into(),
     }
 }
 
@@ -665,7 +666,8 @@ fn iter_rec_over_inputs(fn_name: &str) -> PseudoExpr {
                     .into(),
                 },
             ),
-        ],
+        ]
+        .into(),
     };
     let rec_fn = PseudoExpr::RecFn {
         name: Binder::new(fn_name, rid),

@@ -157,7 +157,7 @@ pub(super) fn strip_force_on_var(
                     } => {
                         stack.push(Step::WhenSubjectDone {
                             subject_name,
-                            clauses,
+                            clauses: clauses.into_vec(),
                         });
                         stack.push(Step::Enter(subject.into_inner()));
                     }
@@ -388,7 +388,7 @@ pub(super) fn strip_force_on_var(
                 None => done.push(PseudoExpr::When {
                     subject: PBox::new(build.subject),
                     subject_name: build.subject_name,
-                    clauses: build.finished,
+                    clauses: build.finished.into(),
                 }),
                 Some(WhenClause {
                     pattern: WhenPattern::Literal(inner),

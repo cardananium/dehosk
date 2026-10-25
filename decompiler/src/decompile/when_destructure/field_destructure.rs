@@ -643,7 +643,7 @@ pub(crate) fn destructure_when_fields(
                             PseudoExpr::When {
                                 subject,
                                 subject_name,
-                                clauses,
+                                clauses: clauses.into(),
                             }
                         }
                         ReplacePost::Plain { shell, count } => {
@@ -761,7 +761,7 @@ pub(crate) fn destructure_when_fields(
                 let mut jobs: Vec<ReplaceStep> = Vec::new();
                 let mut kept_clauses: Vec<WhenClause> = Vec::new();
                 let layout = if subject_blocks {
-                    kept_clauses = clauses;
+                    kept_clauses = clauses.into_vec();
                     None
                 } else {
                     let mut layout: Vec<ReplaceClause> = Vec::with_capacity(clauses.len());
@@ -916,7 +916,7 @@ pub(crate) fn destructure_when_fields(
                     return PseudoExpr::When {
                         subject: PBox::new(subject),
                         subject_name,
-                        clauses,
+                        clauses: clauses.into(),
                     };
                 }
             };
@@ -1058,7 +1058,7 @@ pub(crate) fn destructure_when_fields(
             PseudoExpr::When {
                 subject: PBox::new(subject),
                 subject_name,
-                clauses: new_clauses,
+                clauses: new_clauses.into(),
             }
         }
     }

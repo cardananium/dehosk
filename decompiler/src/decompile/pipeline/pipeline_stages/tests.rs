@@ -119,7 +119,8 @@ fn stale_destructurable_when_fields_expr() -> PseudoExpr {
                     ),
                     "head".to_string(),
                 ),
-            )],
+            )]
+            .into(),
         }),
     }
 }
@@ -157,7 +158,8 @@ fn stale_unpack_tag_when_subject_expr() -> PseudoExpr {
                     ),
                 ),
                 WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Error { message: None }),
-            ],
+            ]
+            .into(),
         }),
     }
 }
@@ -303,7 +305,8 @@ fn stale_raw_fields_disambiguation_expr() -> PseudoExpr {
                     WhenPattern::constructor(ConstructorShape::unknown_data(1, 0), vec![]),
                     PseudoExpr::int(1),
                 ),
-            ],
+            ]
+            .into(),
         }),
     }
 }
@@ -340,7 +343,8 @@ fn stale_eta_pair_selector_expr() -> PseudoExpr {
             clauses: vec![WhenClause::new(
                 WhenPattern::Pair(Binder::new("left", left_id), Binder::new("right", right_id)),
                 PseudoExpr::var_with_id("left", left_id),
-            )],
+            )]
+            .into(),
         }),
     }
 }
@@ -437,7 +441,8 @@ fn duplicate_named_complex_when_subject_expr() -> PseudoExpr {
                     ]
                     .into(),
                 ),
-            )],
+            )]
+            .into(),
         }),
     }
 }

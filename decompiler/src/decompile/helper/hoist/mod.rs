@@ -417,7 +417,7 @@ impl ExprFolder for HelperValueHoister {
             PseudoExpr::When {
                 subject: PBox::new(subject),
                 subject_name,
-                clauses: clauses_out,
+                clauses: clauses_out.into(),
             },
         )
     }

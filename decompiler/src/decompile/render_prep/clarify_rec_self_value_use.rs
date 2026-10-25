@@ -134,7 +134,7 @@ fn revert_self_when_subjects(expr: PseudoExpr, self_id: VarId, self_name: &str) 
             PseudoExpr::When {
                 subject: PBox::new(subject),
                 subject_name,
-                clauses,
+                clauses: clauses.into(),
             }
         }
     }

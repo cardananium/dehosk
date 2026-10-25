@@ -89,7 +89,7 @@ impl ExprFolder for BoolOptionIfFolder<'_> {
         PseudoExpr::When {
             subject: PBox::new(subject),
             subject_name,
-            clauses,
+            clauses: clauses.into(),
         }
     }
 

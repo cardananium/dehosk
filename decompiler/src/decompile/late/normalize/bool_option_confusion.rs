@@ -302,7 +302,7 @@ pub(crate) fn fix_bool_option_confusion(expr: PseudoExpr) -> PseudoExpr {
                     None => done.push(PseudoExpr::When {
                         subject: build.subject,
                         subject_name: build.subject_name,
-                        clauses: build.finished,
+                        clauses: build.finished.into(),
                     }),
                     Some(WhenClause {
                         pattern,
@@ -417,7 +417,7 @@ pub(crate) fn fix_bool_option_confusion(expr: PseudoExpr) -> PseudoExpr {
             PseudoExpr::When {
                 subject: PBox::new(subject),
                 subject_name,
-                clauses,
+                clauses: clauses.into(),
             }
         }
     }

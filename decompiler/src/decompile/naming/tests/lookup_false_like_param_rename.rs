@@ -55,7 +55,8 @@ fn test_improve_variable_names_renames_false_like_lookup_params_to_pairs_and_nee
                         }),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 

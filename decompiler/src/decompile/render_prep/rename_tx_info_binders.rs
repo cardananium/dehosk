@@ -280,7 +280,7 @@ fn rewrite(expr: PseudoExpr) -> PseudoExpr {
             PseudoExpr::When {
                 subject,
                 subject_name,
-                clauses,
+                clauses: clauses.into(),
             }
         }
         other => other,

@@ -324,7 +324,7 @@ fn recurse(root: PseudoExpr, root_flag: bool) -> PseudoExpr {
                 done.push(PseudoExpr::When {
                     subject: PBox::new(subject),
                     subject_name,
-                    clauses,
+                    clauses: clauses.into(),
                 });
             }
             Step::Force => {

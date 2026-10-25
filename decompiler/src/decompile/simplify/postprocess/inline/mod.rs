@@ -579,7 +579,7 @@ pub(crate) fn resolve_inline_field_accesses(
                         &mut tasks,
                         subject.into_inner(),
                         subject_name,
-                        clauses,
+                        clauses.into_vec(),
                         ctx,
                     );
                 }

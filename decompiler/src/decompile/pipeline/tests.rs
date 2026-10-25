@@ -186,7 +186,8 @@ fn sync_late_constr_payload_kind_annotations_records_constructor_pattern_binders
                 ],
             ),
             PseudoExpr::var_with_id("payload", payload_id),
-        )],
+        )]
+        .into(),
     };
     let mut annotations = HashMap::new();
 
@@ -224,7 +225,8 @@ fn sync_late_constr_payload_kind_annotations_preserves_existing_annotations() {
                 vec![Binder::new("payload", payload_id)],
             ),
             PseudoExpr::var_with_id("payload", payload_id),
-        )],
+        )]
+        .into(),
     };
     let mut annotations = HashMap::from([(
         payload_id,

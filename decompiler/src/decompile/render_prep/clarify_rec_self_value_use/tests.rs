@@ -41,7 +41,8 @@ fn reverts_complete_3_arm_self_case() {
                     guard: None,
                     body: var("c", 12),
                 },
-            ],
+            ]
+            .into(),
         }),
     };
     let out = clarify_rec_self_value_use(input);
@@ -87,7 +88,8 @@ fn skips_non_consecutive_tags() {
                     guard: None,
                     body: var("c", 12),
                 },
-            ],
+            ]
+            .into(),
         }),
     };
     let out = clarify_rec_self_value_use(input.clone());
@@ -124,7 +126,8 @@ fn skips_constructor_with_binders() {
                     guard: None,
                     body: var("c", 12),
                 },
-            ],
+            ]
+            .into(),
         }),
     };
     let out = clarify_rec_self_value_use(input.clone());
@@ -151,7 +154,8 @@ fn skips_non_self_subject() {
                     guard: None,
                     body: var("b", 11),
                 },
-            ],
+            ]
+            .into(),
         }),
     };
     let out = clarify_rec_self_value_use(input.clone());

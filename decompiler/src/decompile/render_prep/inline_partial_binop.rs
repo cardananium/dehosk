@@ -161,7 +161,7 @@ pub(super) fn inline_partial_binop(root: PseudoExpr) -> PseudoExpr {
                 } => {
                     stack.push(Step::WhenSubjectDone {
                         subject_name,
-                        clauses,
+                        clauses: clauses.into_vec(),
                     });
                     stack.push(Step::Enter(subject.into_inner()));
                 }
@@ -309,7 +309,7 @@ pub(super) fn inline_partial_binop(root: PseudoExpr) -> PseudoExpr {
                 None => done.push(PseudoExpr::When {
                     subject: PBox::new(build.subject),
                     subject_name: build.subject_name,
-                    clauses: build.finished,
+                    clauses: build.finished.into(),
                 }),
                 Some(WhenClause {
                     pattern,

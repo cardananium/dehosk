@@ -107,7 +107,8 @@ fn test_disambiguate_constructors_with_blueprint_hints() {
                 guard: None,
                 body: PseudoExpr::Int(3.into()),
             },
-        ],
+        ]
+        .into(),
     };
 
     let mut registry = BlueprintHintRegistry::new();
@@ -158,7 +159,8 @@ fn test_disambiguate_constructors_blueprint_single_branch_resolved() {
                     message: Some("bad".to_string()),
                 },
             },
-        ],
+        ]
+        .into(),
     };
 
     let mut registry = BlueprintHintRegistry::new();
@@ -194,7 +196,8 @@ fn test_disambiguate_constructors_no_hints_falls_back() {
                 guard: None,
                 body: PseudoExpr::Int(1.into()),
             },
-        ],
+        ]
+        .into(),
     };
 
     let mut registry = BlueprintHintRegistry::new();
@@ -224,7 +227,8 @@ fn test_disambiguate_constructors_skips_arity_fallback_for_raw_fields_usage() {
             pattern: WhenPattern::Wildcard,
             guard: None,
             body: PseudoExpr::Int(value.into()),
-        }],
+        }]
+        .into(),
     };
 
     let expr = PseudoExpr::When {
@@ -241,7 +245,8 @@ fn test_disambiguate_constructors_skips_arity_fallback_for_raw_fields_usage() {
                 guard: None,
                 body: fields_when(1),
             },
-        ],
+        ]
+        .into(),
     };
 
     let mut registry = BlueprintHintRegistry::new();
@@ -372,7 +377,8 @@ fn improvement_e_annotates_user_adt_field_kind_from_blueprint() {
                 guard: None,
                 body: PseudoExpr::Int(2.into()),
             },
-        ],
+        ]
+        .into(),
     };
 
     let mut registry = BlueprintHintRegistry::new();
@@ -429,7 +435,8 @@ fn improvement_e_without_blueprint_hints_no_user_adt_annotation() {
             },
             guard: None,
             body: PseudoExpr::Int(1.into()),
-        }],
+        }]
+        .into(),
     };
 
     let mut registry = BlueprintHintRegistry::new();
@@ -493,7 +500,8 @@ fn improvement_e_skips_cardano_schema_sum_types() {
             },
             guard: None,
             body: PseudoExpr::Int(1.into()),
-        }],
+        }]
+        .into(),
     };
 
     let mut registry = BlueprintHintRegistry::new();
@@ -541,7 +549,8 @@ fn improvement_e_does_not_clobber_existing_annotation() {
             },
             guard: None,
             body: PseudoExpr::Int(1.into()),
-        }],
+        }]
+        .into(),
     };
 
     let mut registry = BlueprintHintRegistry::new();
@@ -579,7 +588,8 @@ fn improvement_e_unknown_type_name_no_annotation() {
             },
             guard: None,
             body: PseudoExpr::Int(1.into()),
-        }],
+        }]
+        .into(),
     };
 
     let mut registry = BlueprintHintRegistry::new();
@@ -620,7 +630,8 @@ fn improvement_e_no_type_hint_no_annotation() {
             },
             guard: None,
             body: PseudoExpr::Int(1.into()),
-        }],
+        }]
+        .into(),
     };
 
     let mut registry = BlueprintHintRegistry::new();

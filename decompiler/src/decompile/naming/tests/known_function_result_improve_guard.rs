@@ -180,7 +180,8 @@ fn test_improve_variable_names_ignores_same_name_different_id_contains_tail_ref(
                             }),
                         },
                     ),
-                ],
+                ]
+                .into(),
             }),
         }),
         body: PBox::new(PseudoExpr::Apply {
@@ -260,7 +261,8 @@ fn test_improve_variable_names_ignores_same_name_different_id_direct_rec_any_tai
                             }),
                         },
                     ),
-                ],
+                ]
+                .into(),
             }),
         }),
         body: PBox::new(PseudoExpr::Apply {
@@ -425,7 +427,8 @@ fn test_improve_variable_names_renames_rec_fn_result_from_known_function_rename(
                             }),
                         },
                     ),
-                ],
+                ]
+                .into(),
             }),
         }),
         body: PBox::new(PseudoExpr::Let {

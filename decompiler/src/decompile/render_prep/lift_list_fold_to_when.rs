@@ -286,7 +286,8 @@ fn try_rewrite_list_fold(expr: PseudoExpr, identity_ids: &HashSet<VarId>) -> Pse
                 guard: None,
                 body: cons_body,
             },
-        ],
+        ]
+        .into(),
     }
 }
 

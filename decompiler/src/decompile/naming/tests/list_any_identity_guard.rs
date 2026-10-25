@@ -39,7 +39,8 @@ fn test_analyze_function_binding_ignores_same_name_different_id_direct_rec_any_t
                         }),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 

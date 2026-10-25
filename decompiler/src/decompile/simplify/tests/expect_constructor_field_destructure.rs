@@ -46,17 +46,20 @@ fn test_expect_constructor_field_destructure_keeps_outer_binder_scope() {
                                                 WhenPattern::Wildcard,
                                                 PseudoExpr::Error { message: None },
                                             ),
-                                        ],
+                                        ]
+                                        .into(),
                                     }]
                                     .into(),
                                 },
                             ),
                             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Bool(false)),
-                        ],
+                        ]
+                        .into(),
                     },
                 ),
                 WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Error { message: None }),
-            ],
+            ]
+            .into(),
         }]
         .into(),
     };
@@ -123,14 +126,17 @@ fn test_expect_constructor_field_destructure_from_subject_fields_keeps_outer_mat
                                             WhenPattern::Wildcard,
                                             PseudoExpr::Error { message: None },
                                         ),
-                                    ],
+                                    ]
+                                    .into(),
                                 },
                             ),
-                        ],
+                        ]
+                        .into(),
                     },
                 ),
                 WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Error { message: None }),
-            ],
+            ]
+            .into(),
         }]
         .into(),
     };
@@ -211,18 +217,22 @@ fn test_constructor_when_fields_destructure_handles_missing_inner_subject_id() {
                                                     WhenPattern::Wildcard,
                                                     PseudoExpr::Bool(false),
                                                 ),
-                                            ],
+                                            ]
+                                            .into(),
                                         },
                                     ),
                                     WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Bool(false)),
-                                ],
+                                ]
+                                .into(),
                             },
                         ),
-                    ],
+                    ]
+                    .into(),
                 },
             ),
             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Bool(false)),
-        ],
+        ]
+        .into(),
     };
 
     let output = simplify(expr).to_pretty();
@@ -309,18 +319,22 @@ fn test_constructor_when_fields_destructure_handles_mismatched_inner_subject_id(
                                                     WhenPattern::Wildcard,
                                                     PseudoExpr::Bool(false),
                                                 ),
-                                            ],
+                                            ]
+                                            .into(),
                                         },
                                     ),
                                     WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Bool(false)),
-                                ],
+                                ]
+                                .into(),
                             },
                         ),
-                    ],
+                    ]
+                    .into(),
                 },
             ),
             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Bool(false)),
-        ],
+        ]
+        .into(),
     };
 
     let output = simplify(expr).to_pretty();
@@ -390,18 +404,22 @@ fn test_constructor_when_fields_destructure_handles_lifted_payload_var() {
                                                     WhenPattern::Wildcard,
                                                     PseudoExpr::Bool(false),
                                                 ),
-                                            ],
+                                            ]
+                                            .into(),
                                         },
                                     ),
                                     WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Bool(false)),
-                                ],
+                                ]
+                                .into(),
                             },
                         ),
-                    ],
+                    ]
+                    .into(),
                 },
             ),
             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Bool(false)),
-        ],
+        ]
+        .into(),
     };
 
     let output = simplify(expr).to_pretty();
@@ -472,18 +490,22 @@ fn test_constructor_when_fields_destructure_lifted_payload_var_uses_local_synthe
                                                     WhenPattern::Wildcard,
                                                     PseudoExpr::Bool(false),
                                                 ),
-                                            ],
+                                            ]
+                                            .into(),
                                         },
                                     ),
                                     WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Bool(false)),
-                                ],
+                                ]
+                                .into(),
                             },
                         ),
-                    ],
+                    ]
+                    .into(),
                 },
             ),
             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Bool(false)),
-        ],
+        ]
+        .into(),
     };
 
     let simplified = simplify(expr);

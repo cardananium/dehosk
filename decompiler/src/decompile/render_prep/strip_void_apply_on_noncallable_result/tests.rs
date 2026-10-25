@@ -135,7 +135,8 @@ fn pair_returning_fn_through_expect_chain() {
                 ),
             ),
             WhenClause::new(WhenPattern::wildcard(), PseudoExpr::error()),
-        ],
+        ]
+        .into(),
     };
     let expr = PseudoExpr::Let {
         name: "f".to_string(),
@@ -210,7 +211,8 @@ fn proves_mutually_recursive_helpers_non_callable() {
                 guard: None,
                 body: call(other),
             },
-        ],
+        ]
+        .into(),
     };
     let fn_let = |id: u32, other: u32, inner: PseudoExpr| PseudoExpr::Let {
         name: "g".to_string(),

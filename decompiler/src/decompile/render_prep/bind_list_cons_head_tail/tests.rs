@@ -37,7 +37,8 @@ fn when_over_xs(cons: PseudoExpr) -> PseudoExpr {
                 PseudoExpr::var("nil"),
             ),
             WhenClause::new(cons_pat(), cons),
-        ],
+        ]
+        .into(),
     }
 }
 
@@ -182,7 +183,8 @@ fn does_not_substitute_outer_head_inside_a_nested_when() {
         clauses: vec![WhenClause::new(
             cons_pat(),
             PseudoExpr::Pair(PBox::new(xs_head()), PBox::new(ys_head)),
-        )],
+        )]
+        .into(),
     };
     let out = bind_list_cons_head_tail(when_over_xs(inner_when));
     // Outer pattern unchanged: `xs.head` was only used inside the nested when.
@@ -243,7 +245,8 @@ fn reuses_named_tail_binder_when_body_reslices() {
                 PseudoExpr::var("nil"),
             ),
             WhenClause::new(named_cons, body),
-        ],
+        ]
+        .into(),
     };
     let out = bind_list_cons_head_tail(when);
     let arm = cons_arm(&out);
@@ -294,7 +297,8 @@ fn does_not_capture_subj_slice_inside_a_shadowing_let() {
                 },
                 inner,
             ),
-        ],
+        ]
+        .into(),
     };
     let out = bind_list_cons_head_tail(when);
     let PseudoExpr::Let { body, .. } = &cons_arm(&out).body else {
@@ -329,7 +333,8 @@ fn non_var_subject_is_skipped() {
                 }]
                 .into(),
             },
-        )],
+        )]
+        .into(),
     };
     let out = bind_list_cons_head_tail(when.clone());
     assert_eq!(out, when, "non-Var subject must be untouched");

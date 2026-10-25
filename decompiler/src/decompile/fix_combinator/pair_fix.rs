@@ -917,7 +917,8 @@ fn try_recover(
                 guard: None,
                 body: cons_body,
             },
-        ],
+        ]
+        .into(),
     };
     let f2 = PseudoExpr::RecFn {
         name: Binder::new(SECOND_FN_NAME, f2_id),

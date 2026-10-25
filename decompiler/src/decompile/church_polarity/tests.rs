@@ -37,7 +37,8 @@ fn tag0_success_oracle(subject: PseudoExpr) -> PseudoExpr {
                 guard: None,
                 body: PseudoExpr::Error { message: None },
             },
-        ],
+        ]
+        .into(),
     }
 }
 
@@ -69,7 +70,8 @@ fn tag1_success_oracle(subject: PseudoExpr) -> PseudoExpr {
                 guard: None,
                 body: PseudoExpr::Error { message: None },
             },
-        ],
+        ]
+        .into(),
     }
 }
 

@@ -32,7 +32,8 @@ fn strips_force_under_pair_snd_on_pattern_binder() {
             },
             guard: None,
             body: clause_body,
-        }],
+        }]
+        .into(),
     };
 
     let out = strip_force_under_member_access(expr);

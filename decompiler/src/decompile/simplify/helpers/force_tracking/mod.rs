@@ -819,7 +819,7 @@ impl Simplifier {
                     done.push(PseudoExpr::When {
                         subject: PBox::new(subject),
                         subject_name,
-                        clauses,
+                        clauses: clauses.into(),
                     });
                 }
                 Step::Delay => {

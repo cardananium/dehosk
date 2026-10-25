@@ -259,7 +259,7 @@ fn fires_on_when_subject_with_subject_name() {
             PseudoExpr::When {
                 subject: PBox::new(varref("variant_61", 20)),
                 subject_name: Some(Binder::new("variant_61".to_string(), VarId::new(20))),
-                clauses: vec![clause(PseudoExpr::int(1))],
+                clauses: vec![clause(PseudoExpr::int(1))].into(),
             },
         ),
     ));
@@ -270,7 +270,7 @@ fn fires_on_when_subject_with_subject_name() {
         PseudoExpr::When {
             subject: PBox::new(varref("e", 10)),
             subject_name: Some(Binder::new("e".to_string(), VarId::new(10))),
-            clauses: vec![clause(PseudoExpr::int(1))],
+            clauses: vec![clause(PseudoExpr::int(1))].into(),
         },
     ));
     assert_eq!(out, expected);

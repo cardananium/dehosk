@@ -76,7 +76,8 @@ fn expect_ctor(subject_id: VarId, binders: Vec<Binder>, body: PseudoExpr) -> Pse
                     message: Some("fail".to_string()),
                 },
             },
-        ],
+        ]
+        .into(),
     }
 }
 

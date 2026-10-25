@@ -546,7 +546,8 @@ fn nameless_post_pipeline_assigns_constructor_payload_temp_display_hint() {
                     PseudoExpr::var_with_id("variant", variant_id),
                 ),
                 WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Error { message: None }),
-            ],
+            ]
+            .into(),
         }),
         body: PBox::new(PseudoExpr::var_with_id("q3", temp_id)),
     };
@@ -626,7 +627,8 @@ fn nameless_post_pipeline_assigns_data_list_temp_display_hint() {
                                 .into(),
                             },
                         ),
-                    ],
+                    ]
+                    .into(),
                 }),
             }),
             body: PBox::new(PseudoExpr::BuiltinCall {
@@ -864,7 +866,8 @@ fn nameless_post_pipeline_assigns_check_temp_display_hint() {
                     PseudoExpr::Unit,
                 ),
                 WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Error { message: None }),
-            ],
+            ]
+            .into(),
         }),
         body: PBox::new(PseudoExpr::Bool(true)),
     };
@@ -903,7 +906,8 @@ fn nameless_post_pipeline_assigns_when_pattern_binder_display_hint() {
                 WhenPattern::constructor_known(KnownConstructor::None, vec![]),
                 PseudoExpr::Error { message: None },
             ),
-        ],
+        ]
+        .into(),
     };
 
     let (output, guard_report) = run_default_nameless_post_pipeline(expr, &HashMap::new());
@@ -953,7 +957,8 @@ fn nameless_post_pipeline_when_pattern_binder_display_hint_is_id_scoped() {
                 WhenPattern::constructor_known(KnownConstructor::None, vec![]),
                 PseudoExpr::Error { message: None },
             ),
-        ],
+        ]
+        .into(),
     };
 
     let (output, guard_report) = run_default_nameless_post_pipeline(expr, &HashMap::new());
@@ -1078,7 +1083,8 @@ fn nameless_post_pipeline_keeps_pattern_binder_names_in_orphan_guard() {
                     ]
                     .into(),
                 ),
-            )],
+            )]
+            .into(),
         }),
     };
 

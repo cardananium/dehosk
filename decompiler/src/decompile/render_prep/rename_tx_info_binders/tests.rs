@@ -32,7 +32,8 @@ fn renames_v1_tx_info_arity_10_pattern_and_body_uses() {
             pattern: pat,
             guard: None,
             body,
-        }],
+        }]
+        .into(),
     };
 
     let rewritten = rename_tx_info_binders(expr);
@@ -68,7 +69,8 @@ fn does_not_rename_when_subject_is_not_tx_info() {
             pattern: pat,
             guard: None,
             body: PseudoExpr::Unit,
-        }],
+        }]
+        .into(),
     };
     let rewritten = rename_tx_info_binders(expr);
     let PseudoExpr::When { clauses, .. } = rewritten else {
@@ -97,7 +99,8 @@ fn does_not_rename_wrong_arity_pattern() {
             pattern: pat,
             guard: None,
             body: PseudoExpr::Unit,
-        }],
+        }]
+        .into(),
     };
     let rewritten = rename_tx_info_binders(expr);
     let PseudoExpr::When { clauses, .. } = rewritten else {
@@ -120,7 +123,8 @@ fn renames_v2_tx_info_arity_12() {
             pattern: pat,
             guard: None,
             body: PseudoExpr::Unit,
-        }],
+        }]
+        .into(),
     };
     let rewritten = rename_tx_info_binders(expr);
     let PseudoExpr::When { clauses, .. } = rewritten else {

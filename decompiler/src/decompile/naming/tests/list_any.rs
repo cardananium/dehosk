@@ -43,7 +43,8 @@ fn test_analyze_function_binding_names_list_any_wrapper() {
                                 }),
                             },
                         ),
-                    ],
+                    ]
+                    .into(),
                 }),
             }),
             body: PBox::new(PseudoExpr::Apply {
@@ -92,7 +93,8 @@ fn test_analyze_function_binding_names_direct_rec_any() {
                         }),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 

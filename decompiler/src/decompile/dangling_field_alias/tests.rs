@@ -164,7 +164,8 @@ fn when_subject_name_anchor_uses_subject_binder_id() {
             pattern: WhenPattern::Wildcard,
             guard: None,
             body: var("inputs"),
-        }],
+        }]
+        .into(),
     };
 
     let result = inline_dangling_field_aliases(
@@ -282,7 +283,8 @@ fn substitutes_orphan_item_to_renamed_constr_binder() {
             pattern,
             guard: None,
             body,
-        }],
+        }]
+        .into(),
     };
 
     let result =
@@ -322,7 +324,8 @@ fn recovers_orphan_under_same_name_different_id_outer_binding() {
                 name: "item_0".to_string(),
                 id: Some(orphan_item0_id),
             },
-        }],
+        }]
+        .into(),
     };
     let expr = PseudoExpr::Let {
         name: "item_0".to_string(),
@@ -380,7 +383,8 @@ fn single_orphan_rewrite_preserves_existing_same_name_outer_ref_id() {
                 ]
                 .into(),
             ),
-        }],
+        }]
+        .into(),
     };
     let expr = PseudoExpr::Let {
         name: "credential".to_string(),
@@ -449,7 +453,8 @@ fn orphan_rewrite_avoids_capture_under_same_name_lambda_param() {
                     id: Some(orphan_id),
                 }),
             },
-        }],
+        }]
+        .into(),
     };
 
     let result =
@@ -510,7 +515,8 @@ fn does_not_merge_ambiguous_same_name_different_id_orphan_refs() {
                 ]
                 .into(),
             ),
-        }],
+        }]
+        .into(),
     };
 
     let result =
@@ -554,7 +560,7 @@ fn multi_orphan_constructor_rewrite_uses_pattern_binder_ids() {
         fields: vec![first.clone(), second.clone()],
         shape: ConstructorShape::unknown_data(2, 2),
     };
-    let body = PseudoExpr::Tuple((vec![var("item_0"), var("field_1")]).into());
+    let body = PseudoExpr::Tuple(vec![var("item_0"), var("field_1")].into());
 
     let when_expr = PseudoExpr::When {
         subject: PBox::new(var("subject")),
@@ -563,7 +569,8 @@ fn multi_orphan_constructor_rewrite_uses_pattern_binder_ids() {
             pattern,
             guard: None,
             body,
-        }],
+        }]
+        .into(),
     };
 
     let result =
@@ -618,7 +625,8 @@ fn introduces_binder_from_orphan_when_pattern_is_bare() {
             pattern,
             guard: None,
             body,
-        }],
+        }]
+        .into(),
     };
 
     let result =
@@ -652,7 +660,8 @@ fn list_pattern_rewrite_uses_target_binder_id() {
             },
             guard: None,
             body: var("item_0"),
-        }],
+        }]
+        .into(),
     };
 
     let result =
@@ -703,7 +712,8 @@ fn field_alias_used_as_when_subject_resolves_to_script_context() {
                 guard: None,
                 body: PseudoExpr::Error { message: None },
             },
-        ],
+        ]
+        .into(),
     };
     let lambda = PseudoExpr::Lambda {
         params: vec![binder("script_context")],

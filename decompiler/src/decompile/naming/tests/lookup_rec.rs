@@ -41,7 +41,8 @@ fn test_analyze_function_binding_names_lookup_rec() {
                         }),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -109,7 +110,8 @@ fn test_analyze_function_binding_names_lookup_rec_with_some_payload() {
                         }),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -174,7 +176,8 @@ fn test_analyze_function_binding_names_lookup_rec_with_false_none_payload() {
                         }),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -238,7 +241,8 @@ fn test_analyze_function_binding_names_lookup_rec_with_le_cutoff_payload() {
                         }),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -292,7 +296,8 @@ fn test_analyze_function_binding_names_lookup_rec_with_builtin_payload_transform
                         }),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -346,7 +351,8 @@ fn test_analyze_function_binding_names_lookup_rec_with_empty_pairs_and_builtin_p
                         }),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 

@@ -47,7 +47,7 @@ fn nested_stub_ctor_field_is_scott() {
         1,
         vec![ctor(&inner, 0, 1, vec![PseudoExpr::Unit])],
     );
-    let expr = PseudoExpr::Tuple((vec![decl0, decl1, outer_val]).into());
+    let expr = PseudoExpr::Tuple(vec![decl0, decl1, outer_val].into());
     let table = infer_field_kinds(&expr);
     assert_eq!(
         table.get(&(outer.clone(), 0, 0)),
@@ -79,7 +79,7 @@ fn disagreeing_sites_conflict() {
     let outer = th("Unknown_S_9");
     let site_a = ctor(&outer, 0, 1, vec![lam()]); // Fn
     let site_b = ctor(&outer, 0, 1, vec![un_b_data()]); // Native
-    let expr = PseudoExpr::Tuple((vec![site_a, site_b]).into());
+    let expr = PseudoExpr::Tuple(vec![site_a, site_b].into());
     let table = infer_field_kinds(&expr);
     assert_eq!(
         table.get(&(outer.clone(), 0, 0)),
@@ -122,7 +122,7 @@ fn scott_plus_opaque_site_is_conflict() {
         1,
         vec![PseudoExpr::var_with_id("v", VarId::new(3))],
     );
-    let expr = PseudoExpr::Tuple((vec![decl0, decl1, scott_site, opaque_site]).into());
+    let expr = PseudoExpr::Tuple(vec![decl0, decl1, scott_site, opaque_site].into());
     let table = infer_field_kinds(&expr);
     assert_eq!(
         table.get(&(outer.clone(), 0, 0)),
@@ -144,7 +144,7 @@ fn non_stub_outer_hint_absent() {
         1,
         vec![ctor(&inner, 0, 1, vec![PseudoExpr::Unit])],
     );
-    let expr = PseudoExpr::Tuple((vec![decl0, decl1, user_val]).into());
+    let expr = PseudoExpr::Tuple(vec![decl0, decl1, user_val].into());
     let table = infer_field_kinds(&expr);
     assert_eq!(table.get(&(user.clone(), 0, 0)), None);
 }
@@ -162,7 +162,7 @@ fn nested_non_stub_field_is_opaque() {
         1,
         vec![ctor(&inner, 0, 1, vec![PseudoExpr::Unit])],
     );
-    let expr = PseudoExpr::Tuple((vec![decl0, decl1, outer_val]).into());
+    let expr = PseudoExpr::Tuple(vec![decl0, decl1, outer_val].into());
     let table = infer_field_kinds(&expr);
     assert_eq!(table.get(&(outer.clone(), 0, 0)), Some(&FieldKind::Opaque));
 }
@@ -220,7 +220,7 @@ fn conflicting_inner_arity_blocks_scott() {
         1,
         vec![ctor(&inner, 0, 1, vec![PseudoExpr::Unit])],
     );
-    let expr = PseudoExpr::Tuple((vec![decl0a, decl0b, decl1, outer_val]).into());
+    let expr = PseudoExpr::Tuple(vec![decl0a, decl0b, decl1, outer_val].into());
     let table = infer_field_kinds(&expr);
     // arities_for_hint returns None (tag 0 uncertain) → Opaque, not Scott.
     assert_eq!(table.get(&(outer.clone(), 0, 0)), Some(&FieldKind::Opaque));
@@ -243,7 +243,8 @@ fn stub_arm_when(hint: &TypeHintId, vid: VarId, body: PseudoExpr) -> PseudoExpr 
                 Some(hint.clone()),
             ),
             body,
-        )],
+        )]
+        .into(),
     }
 }
 
@@ -306,7 +307,7 @@ fn scalar_un_list_data_site_is_other_data() {
 fn scalar_bytearray_and_int_same_key_conflict() {
     let hint = th("Unknown_S_43");
     let vid = VarId::new(204);
-    let body = PseudoExpr::Tuple((vec![un_b_of(vid), un_i_of(vid)]).into());
+    let body = PseudoExpr::Tuple(vec![un_b_of(vid), un_i_of(vid)].into());
     let expr = stub_arm_when(&hint, vid, body);
     let table = infer_arm_field_scalars(&expr);
     assert_eq!(
@@ -346,10 +347,11 @@ fn scalar_field_into_stub_match_plus_bytes_is_conflict() {
                 Some(inner_hint.clone()),
             ),
             PseudoExpr::Unit,
-        )],
+        )]
+        .into(),
     };
     // ... AND a un_b_data(field) site (ByteArray use).
-    let body = PseudoExpr::Tuple((vec![inner_when, un_b_of(vid)]).into());
+    let body = PseudoExpr::Tuple(vec![inner_when, un_b_of(vid)].into());
     let expr = stub_arm_when(&hint, vid, body);
     let table = infer_arm_field_scalars(&expr);
     assert_eq!(
@@ -391,7 +393,7 @@ fn scalar_merged_stub_bytes_plus_helper_call_is_conflict() {
         args: vec![PseudoExpr::var_with_id("f0", v_call)].into(),
     };
     let site_b = stub_arm_when(&hint, v_call, helper_call);
-    let expr = PseudoExpr::Tuple((vec![site_a, site_b]).into());
+    let expr = PseudoExpr::Tuple(vec![site_a, site_b].into());
     let table = infer_arm_field_scalars(&expr);
     assert_eq!(
         table.get(&(hint.clone(), 0, 0)),
@@ -411,7 +413,7 @@ fn scalar_merged_stub_both_bytes_is_bytearray() {
     let v2 = VarId::new(412);
     let site_a = stub_arm_when(&hint, v1, un_b_of(v1));
     let site_b = stub_arm_when(&hint, v2, un_b_of(v2));
-    let expr = PseudoExpr::Tuple((vec![site_a, site_b]).into());
+    let expr = PseudoExpr::Tuple(vec![site_a, site_b].into());
     let table = infer_arm_field_scalars(&expr);
     assert_eq!(
         table.get(&(hint.clone(), 0, 0)),
@@ -435,7 +437,7 @@ fn scalar_same_binder_bytes_and_helper_call_is_conflict() {
         function: PBox::new(PseudoExpr::var_with_id("extract_int", VarId::new(399))),
         args: vec![PseudoExpr::var_with_id("f0", vid)].into(),
     };
-    let body = PseudoExpr::Tuple((vec![un_b_of(vid), helper_call]).into());
+    let body = PseudoExpr::Tuple(vec![un_b_of(vid), helper_call].into());
     let expr = stub_arm_when(&hint, vid, body);
     let table = infer_arm_field_scalars(&expr);
     assert_eq!(

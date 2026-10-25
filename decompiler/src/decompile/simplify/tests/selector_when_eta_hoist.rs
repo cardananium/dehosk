@@ -65,10 +65,12 @@ fn test_nested_when_wildcard_flattening_still_works() {
                             WhenPattern::constructor(ConstructorShape::unknown_data(2, 0), vec![]),
                             PseudoExpr::int(3),
                         ),
-                    ],
+                    ]
+                    .into(),
                 },
             ),
-        ],
+        ]
+        .into(),
     };
 
     let simplified = simplify(expr);
@@ -102,7 +104,8 @@ fn test_eta_pair_selector_when_inlines_first_field_without_second_binder() {
                 function: PBox::new(PseudoExpr::var("use_left")),
                 args: vec![PseudoExpr::var("left")].into(),
             },
-        )],
+        )]
+        .into(),
     };
 
     let simplified = simplify(expr);
@@ -136,7 +139,8 @@ fn test_eta_pair_selector_when_keeps_second_binder_as_lambda_param() {
                 function: PBox::new(PseudoExpr::var_with_id("k", k_id)),
                 args: vec![PseudoExpr::var_with_id("left", left_id)].into(),
             },
-        )],
+        )]
+        .into(),
     };
 
     let simplified = simplify(expr);
@@ -183,7 +187,8 @@ fn test_eta_pair_selector_when_ignores_same_name_foreign_second_ref() {
                 ]
                 .into(),
             },
-        )],
+        )]
+        .into(),
     };
 
     let simplified = simplify(expr);
@@ -221,7 +226,8 @@ fn test_eta_pair_selector_when_preserves_hidden_subject_name_usage() {
                 function: PBox::new(PseudoExpr::var("use_pair")),
                 args: vec![PseudoExpr::var("pair_value"), PseudoExpr::var("left")].into(),
             },
-        )],
+        )]
+        .into(),
     };
 
     let simplified = simplify(expr);
@@ -264,7 +270,8 @@ fn test_constant_constructor_collapse_does_not_bind_same_name_foreign_ref() {
                     ]
                     .into(),
                 ),
-            )],
+            )]
+            .into(),
         }),
     };
 
@@ -458,7 +465,8 @@ fn test_index_access_pushed_into_when_clauses() {
                     PseudoExpr::field_access(PseudoExpr::var("t"), "fields".to_string()),
                 ),
                 WhenClause::new(WhenPattern::Wildcard, PseudoExpr::error()),
-            ],
+            ]
+            .into(),
         }),
         index: 0,
     };

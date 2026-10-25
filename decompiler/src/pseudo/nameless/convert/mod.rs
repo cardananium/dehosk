@@ -935,7 +935,7 @@ fn raise(expr: &NamelessExpr, table: &VarTable) -> PseudoExpr {
                             subject: PBox::new(subject),
                             subject_name: subject_name
                                 .map(|id| Binder::new(name_for(id, table), id)),
-                            clauses,
+                            clauses: clauses.into(),
                         }
                     }
                     Build::List {
@@ -953,7 +953,7 @@ fn raise(expr: &NamelessExpr, table: &VarTable) -> PseudoExpr {
                             tail,
                         }
                     }
-                    Build::Tuple(n) => PseudoExpr::Tuple((take_n(&mut results, n)).into()),
+                    Build::Tuple(n) => PseudoExpr::Tuple(take_n(&mut results, n).into()),
                     Build::Pair => {
                         let b = results.pop().expect("pair second");
                         let a = results.pop().expect("pair first");

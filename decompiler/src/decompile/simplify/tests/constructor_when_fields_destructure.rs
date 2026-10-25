@@ -22,7 +22,8 @@ fn test_constructor_when_fields_destructure_direct_subject_fields_accesses() {
                 },
             ),
             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Bool(false)),
-        ],
+        ]
+        .into(),
     };
 
     let output = simplify(expr).to_pretty();
@@ -201,18 +202,22 @@ fn test_constructor_when_fields_destructure_nested_subject_fields_shape() {
                                                     WhenPattern::Wildcard,
                                                     PseudoExpr::Bool(false),
                                                 ),
-                                            ],
+                                            ]
+                                            .into(),
                                         },
                                     ),
                                     WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Bool(false)),
-                                ],
+                                ]
+                                .into(),
                             },
                         ),
-                    ],
+                    ]
+                    .into(),
                 },
             ),
             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Bool(false)),
-        ],
+        ]
+        .into(),
     };
 
     let output = simplify(expr).to_pretty();
@@ -293,10 +298,12 @@ fn test_constructor_when_fields_destructure_freshens_collapsed_single_field_bind
                                         },
                                     ),
                                     WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Bool(false)),
-                                ],
+                                ]
+                                .into(),
                             },
                         ),
-                    ],
+                    ]
+                    .into(),
                 },
             ),
             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Bool(false)),
@@ -365,18 +372,22 @@ fn test_constructor_when_fields_destructure_already_bound_single_field_shape() {
                                                     WhenPattern::Wildcard,
                                                     PseudoExpr::Bool(false),
                                                 ),
-                                            ],
+                                            ]
+                                            .into(),
                                         },
                                     ),
                                     WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Bool(false)),
-                                ],
+                                ]
+                                .into(),
                             },
                         ),
-                    ],
+                    ]
+                    .into(),
                 },
             ),
             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Bool(false)),
-        ],
+        ]
+        .into(),
     };
 
     let output = simplify(expr).to_pretty();
@@ -473,18 +484,22 @@ fn test_constructor_when_fields_destructure_restitches_old_head_name_to_existing
                                                     WhenPattern::Wildcard,
                                                     PseudoExpr::Bool(false),
                                                 ),
-                                            ],
+                                            ]
+                                            .into(),
                                         },
                                     ),
                                     WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Bool(false)),
-                                ],
+                                ]
+                                .into(),
                             },
                         ),
-                    ],
+                    ]
+                    .into(),
                 },
             ),
             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Bool(false)),
-        ],
+        ]
+        .into(),
     };
 
     let simplified = simplify(expr);
@@ -585,14 +600,17 @@ fn test_constructor_when_fields_destructure_skips_same_name_mismatched_inner_sub
                                                     WhenPattern::Wildcard,
                                                     PseudoExpr::Bool(false),
                                                 ),
-                                            ],
+                                            ]
+                                            .into(),
                                         },
                                     ),
                                     WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Bool(false)),
-                                ],
+                                ]
+                                .into(),
                             },
                         ),
-                    ],
+                    ]
+                    .into(),
                 },
             ),
             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Bool(false)),
@@ -602,7 +620,7 @@ fn test_constructor_when_fields_destructure_skips_same_name_mismatched_inner_sub
     let output = PseudoExpr::When {
         subject: PBox::new(PseudoExpr::var("x")),
         subject_name: None,
-        clauses,
+        clauses: clauses.into(),
     }
     .to_pretty();
 
@@ -671,10 +689,12 @@ fn test_constructor_when_fields_destructure_skips_capture_under_existing_field_b
                                         },
                                     ),
                                     WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Bool(false)),
-                                ],
+                                ]
+                                .into(),
                             },
                         ),
-                    ],
+                    ]
+                    .into(),
                 },
             ),
             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Bool(false)),
@@ -684,7 +704,7 @@ fn test_constructor_when_fields_destructure_skips_capture_under_existing_field_b
     let output = PseudoExpr::When {
         subject: PBox::new(PseudoExpr::var("x")),
         subject_name: None,
-        clauses,
+        clauses: clauses.into(),
     }
     .to_pretty();
 

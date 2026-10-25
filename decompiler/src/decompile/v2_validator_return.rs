@@ -216,7 +216,7 @@ fn walk_tail(expr: PseudoExpr) -> PseudoExpr {
                             break PseudoExpr::When {
                                 subject,
                                 subject_name,
-                                clauses: vec![],
+                                clauses: vec![].into(),
                             };
                         }
                     }
@@ -352,7 +352,7 @@ fn walk_tail(expr: PseudoExpr) -> PseudoExpr {
                             value = PseudoExpr::When {
                                 subject,
                                 subject_name,
-                                clauses: done,
+                                clauses: done.into(),
                             };
                         }
                     }

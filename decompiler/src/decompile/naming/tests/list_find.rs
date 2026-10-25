@@ -43,7 +43,8 @@ fn test_analyze_function_binding_names_list_find_wrapper() {
                                 }),
                             },
                         ),
-                    ],
+                    ]
+                    .into(),
                 }),
             }),
             body: PBox::new(PseudoExpr::Apply {
@@ -104,7 +105,8 @@ fn test_analyze_function_binding_names_list_find_wrapper_with_false_none() {
                                 }),
                             },
                         ),
-                    ],
+                    ]
+                    .into(),
                 }),
             }),
             body: PBox::new(PseudoExpr::Apply {

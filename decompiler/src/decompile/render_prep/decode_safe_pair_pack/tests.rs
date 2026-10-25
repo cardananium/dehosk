@@ -161,7 +161,8 @@ fn keeps_pair_nested_in_applied_binding_value() {
             pattern: WhenPattern::Wildcard,
             guard: None,
             body: construct(var("p", 10), var("q", 11)),
-        }],
+        }]
+        .into(),
     };
     let inner = PseudoExpr::Let {
         name: "j8".to_string(),

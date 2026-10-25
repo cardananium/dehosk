@@ -512,7 +512,8 @@ mod integration_tests {
                     pattern: WhenPattern::Wildcard,
                     guard: None,
                     body: expr,
-                }],
+                }]
+                .into(),
             };
         }
 

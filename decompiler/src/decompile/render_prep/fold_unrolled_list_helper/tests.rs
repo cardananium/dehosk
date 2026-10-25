@@ -19,13 +19,21 @@ fn cons(head: PseudoExpr, tail: PseudoExpr) -> PseudoExpr {
         tail: Some(PBox::new(tail)),
     }
 }
-fn copy_when(subject: PseudoExpr, h: u32, t: u32, tail: impl FnOnce(u32) -> PseudoExpr) -> PseudoExpr {
+fn copy_when(
+    subject: PseudoExpr,
+    h: u32,
+    t: u32,
+    tail: impl FnOnce(u32) -> PseudoExpr,
+) -> PseudoExpr {
     PseudoExpr::When {
         subject: PBox::new(subject),
         subject_name: None,
         clauses: vec![
             WhenClause {
-                pattern: WhenPattern::List { elements: vec![], tail: None },
+                pattern: WhenPattern::List {
+                    elements: vec![],
+                    tail: None,
+                },
                 guard: None,
                 body: nil(),
             },
@@ -37,7 +45,8 @@ fn copy_when(subject: PseudoExpr, h: u32, t: u32, tail: impl FnOnce(u32) -> Pseu
                 guard: None,
                 body: cons(var("h", h), tail(t)),
             },
-        ],
+        ]
+        .into(),
     }
 }
 
@@ -69,7 +78,9 @@ fn helper_calls_collapse_and_wrap_levels() {
         body: PBox::new(level),
     };
     let out = fold_unrolled_list_helper(wrapped);
-    let PseudoExpr::Let { body, .. } = out else { panic!("let kept") };
+    let PseudoExpr::Let { body, .. } = out else {
+        panic!("let kept")
+    };
     assert_eq!(body.into_inner(), var("xs", 1));
 }
 

@@ -167,7 +167,7 @@ where
                 } => {
                     steps.push(ScopeStep::WhenClauses {
                         subject_name,
-                        clauses,
+                        clauses: clauses.into_vec(),
                         outer: Rc::clone(&stable),
                     });
                     steps.push(ScopeStep::Enter(subject.into_inner(), stable));
@@ -767,7 +767,7 @@ pub(super) fn rebuild_plain(kind: PlainPost, done: &mut Vec<PseudoExpr>) -> Pseu
                 tail,
             }
         }
-        PlainPost::Tuple { count } => PseudoExpr::Tuple((take(done, count)).into()),
+        PlainPost::Tuple { count } => PseudoExpr::Tuple(take(done, count).into()),
         PlainPost::Pair => {
             let second = done.pop().expect("pair second");
             let first = done.pop().expect("pair first");

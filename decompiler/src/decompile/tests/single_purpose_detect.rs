@@ -69,7 +69,8 @@ fn detects_spine_tail_expect_destructure() {
             pattern: purpose_pattern(1, 2),
             guard: None,
             body: PseudoExpr::Bool(true),
-        }],
+        }]
+        .into(),
     };
     let input = entry(PseudoExpr::Let {
         name: "tx_info".to_string(),
@@ -100,7 +101,8 @@ fn detects_var_alias_subject() {
                 body: PseudoExpr::Bool(true),
             },
             fail_arm(),
-        ],
+        ]
+        .into(),
     };
     let input = entry(PseudoExpr::Let {
         name: "script_info".to_string(),
@@ -129,7 +131,8 @@ fn detects_when_in_let_value_behind_field_access() {
                 body: varref("proposal_procedure", 30),
             },
             fail_arm(),
-        ],
+        ]
+        .into(),
     };
     let input = entry(PseudoExpr::Let {
         name: "governance_action".to_string(),
@@ -154,7 +157,8 @@ fn rejects_purpose_when_inside_when_arm() {
             pattern: purpose_pattern(0, 1),
             guard: None,
             body: PseudoExpr::Bool(true),
-        }],
+        }]
+        .into(),
     };
     let outer = PseudoExpr::When {
         subject: PBox::new(varref("redeemer", 40)),
@@ -163,7 +167,8 @@ fn rejects_purpose_when_inside_when_arm() {
             pattern: WhenPattern::Wildcard,
             guard: None,
             body: inner,
-        }],
+        }]
+        .into(),
     };
     assert_eq!(detect_single_purpose_v3(&entry(outer)), None);
 }
@@ -179,7 +184,8 @@ fn rejects_purpose_when_inside_lambda_body() {
             pattern: purpose_pattern(1, 2),
             guard: None,
             body: PseudoExpr::Bool(true),
-        }],
+        }]
+        .into(),
     };
     let input = entry(PseudoExpr::Let {
         name: "helper".to_string(),
@@ -210,7 +216,8 @@ fn rejects_two_live_purpose_arms() {
                 guard: None,
                 body: PseudoExpr::Bool(true),
             },
-        ],
+        ]
+        .into(),
     };
     assert_eq!(detect_single_purpose_v3(&entry(when)), None);
 }
@@ -233,7 +240,8 @@ fn rejects_non_failing_wildcard_arm() {
                 guard: None,
                 body: PseudoExpr::Bool(false),
             },
-        ],
+        ]
+        .into(),
     };
     assert_eq!(detect_single_purpose_v3(&entry(when)), None);
 }
@@ -255,7 +263,8 @@ fn rejects_non_script_info_subject() {
                 body: PseudoExpr::Bool(true),
             },
             fail_arm(),
-        ],
+        ]
+        .into(),
     };
     assert_eq!(detect_single_purpose_v3(&entry(when)), None);
 }
@@ -271,7 +280,8 @@ fn rejects_purpose_when_inside_if_branch() {
             pattern: purpose_pattern(1, 2),
             guard: None,
             body: PseudoExpr::Bool(true),
-        }],
+        }]
+        .into(),
     };
     let input = entry(PseudoExpr::If {
         condition: PBox::new(PseudoExpr::Bool(true)),
@@ -303,7 +313,8 @@ fn tag_when(subject: PseudoExpr, tag: usize, arity: usize, body: PseudoExpr) -> 
                 body,
             },
             fail_arm(),
-        ],
+        ]
+        .into(),
     }
 }
 
@@ -376,7 +387,8 @@ fn purpose_when(tag: usize, arity: usize, body: PseudoExpr, fallback: PseudoExpr
                 guard: None,
                 body: fallback,
             },
-        ],
+        ]
+        .into(),
     }
 }
 
@@ -402,7 +414,8 @@ fn scattered_body() -> PseudoExpr {
                     PseudoExpr::Error { message: None },
                 ),
             },
-        ],
+        ]
+        .into(),
     }
 }
 
@@ -440,7 +453,8 @@ fn scattered_purposes_ignores_a_when_with_no_cardano_anchor() {
                 guard: None,
                 body: PseudoExpr::Int(2.into()),
             },
-        ],
+        ]
+        .into(),
     };
     assert!(scattered_purposes(&plain).is_empty());
 }
@@ -477,7 +491,8 @@ fn specialize_leaves_a_when_without_purpose_arms_alone() {
             pattern: WhenPattern::Wildcard,
             guard: None,
             body: PseudoExpr::Int(7.into()),
-        }],
+        }]
+        .into(),
     };
     let after = specialize_to_purpose(before.clone(), ValidatorPurpose::Mint);
     assert_eq!(after, before);
@@ -505,7 +520,8 @@ fn specialize_leaves_a_when_whose_subject_computes() {
                 body: PseudoExpr::Int(2.into()),
             },
             fail_arm(),
-        ],
+        ]
+        .into(),
     };
     let after = specialize_to_purpose(before.clone(), ValidatorPurpose::Mint);
     assert_eq!(after, before);
@@ -525,7 +541,8 @@ fn specialize_collapses_over_a_plain_field_chain() {
                 body: PseudoExpr::Int(2.into()),
             },
             fail_arm(),
-        ],
+        ]
+        .into(),
     };
     let after = specialize_to_purpose(before, ValidatorPurpose::Mint);
     assert!(
@@ -555,7 +572,8 @@ fn scattered_purposes_ignores_a_purpose_from_the_transaction() {
                 guard: None,
                 body: PseudoExpr::Int(2.into()),
             },
-        ],
+        ]
+        .into(),
     };
     assert!(scattered_purposes(&scan).is_empty());
     assert_eq!(
@@ -579,7 +597,8 @@ fn specialize_fails_a_when_left_with_no_arm() {
             pattern: purpose_pattern(1, 2),
             guard: None,
             body: PseudoExpr::Int(2.into()),
-        }],
+        }]
+        .into(),
     };
     let after = specialize_to_purpose(before, ValidatorPurpose::Mint);
     assert!(
@@ -607,7 +626,8 @@ fn specialize_keeps_a_when_that_binds_its_subject() {
                 guard: None,
                 body: varref("si", 30),
             },
-        ],
+        ]
+        .into(),
     };
     let after = specialize_to_purpose(before, ValidatorPurpose::Mint);
     let PseudoExpr::When {
@@ -641,7 +661,8 @@ fn scattered_purposes_ignores_a_same_named_field_off_a_user_record() {
                 guard: None,
                 body: PseudoExpr::Int(2.into()),
             },
-        ],
+        ]
+        .into(),
     };
     assert!(scattered_purposes(&scan).is_empty());
     assert_eq!(

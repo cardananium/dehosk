@@ -51,7 +51,7 @@ fn value_used_function_is_unreliable() {
     let when = PseudoExpr::When {
         subject: PBox::new(var("helper", 100)),
         subject_name: None,
-        clauses: vec![],
+        clauses: vec![].into(),
     };
     let expr = PseudoExpr::Let {
         name: "helper".to_string(),
@@ -78,7 +78,7 @@ fn scott_param_setup(elim_body: PseudoExpr) -> Vec<FunctionProvenance> {
         fields: vec![PseudoExpr::Unit].into(),
         type_hint: Some(inner.clone()),
     };
-    let decls = PseudoExpr::Tuple((vec![scott(0), scott(1)]).into());
+    let decls = PseudoExpr::Tuple(vec![scott(0), scott(1)].into());
     let f = PseudoExpr::Lambda {
         params: vec![binder("p", 1)],
         body: PBox::new(elim_body),
@@ -91,7 +91,7 @@ fn scott_param_setup(elim_body: PseudoExpr) -> Vec<FunctionProvenance> {
         function: PBox::new(var("f", 100)),
         args: vec![scott(1)].into(),
     };
-    let body = PseudoExpr::Tuple((vec![decls, call1, call2]).into());
+    let body = PseudoExpr::Tuple(vec![decls, call1, call2].into());
     analyze(&PseudoExpr::Let {
         name: "f".to_string(),
         id: Some(VarId::new(100)),
@@ -116,7 +116,7 @@ fn scott_arg_eliminated_is_rewrite_target() {
     let when = PseudoExpr::When {
         subject: PBox::new(var("p", 1)),
         subject_name: None,
-        clauses: vec![],
+        clauses: vec![].into(),
     };
     let prov = scott_param_setup(when);
     let f = prov.iter().find(|f| f.name == "f").expect("f present");
@@ -134,7 +134,7 @@ fn mixed_scott_and_lambda_args_fail_closed() {
         fields: vec![PseudoExpr::Unit].into(),
         type_hint: Some(inner.clone()),
     };
-    let decls = PseudoExpr::Tuple((vec![scott(0), scott(1)]).into());
+    let decls = PseudoExpr::Tuple(vec![scott(0), scott(1)].into());
     let f = PseudoExpr::Lambda {
         params: vec![binder("p", 1)],
         body: PBox::new(var("p", 1)),
@@ -151,7 +151,7 @@ fn mixed_scott_and_lambda_args_fail_closed() {
         }]
         .into(),
     };
-    let body = PseudoExpr::Tuple((vec![decls, call_scott, call_lam]).into());
+    let body = PseudoExpr::Tuple(vec![decls, call_scott, call_lam].into());
     let expr = PseudoExpr::Let {
         name: "f".to_string(),
         id: Some(VarId::new(100)),
@@ -175,7 +175,7 @@ fn recfn_iife_entry_arg_is_recorded() {
         fields: vec![PseudoExpr::Unit].into(),
         type_hint: Some(inner.clone()),
     };
-    let decls = PseudoExpr::Tuple((vec![scott(0), scott(1)]).into());
+    let decls = PseudoExpr::Tuple(vec![scott(0), scott(1)].into());
     // rec fn g(p) { ( when p is {}, g(Scott) ) }
     let self_call = PseudoExpr::Apply {
         function: PBox::new(var("g", 200)),
@@ -184,12 +184,12 @@ fn recfn_iife_entry_arg_is_recorded() {
     let elim = PseudoExpr::When {
         subject: PBox::new(var("p", 1)),
         subject_name: None,
-        clauses: vec![],
+        clauses: vec![].into(),
     };
     let g = PseudoExpr::RecFn {
         name: binder("g", 200),
         params: vec![binder("p", 1)],
-        body: PBox::new(PseudoExpr::Tuple((vec![elim, self_call]).into())),
+        body: PBox::new(PseudoExpr::Tuple(vec![elim, self_call].into())),
     };
     // (rec fn g(p){..})(fn(x){x})   <-- entry arg is a HOF
     let iife = PseudoExpr::Apply {
@@ -200,7 +200,7 @@ fn recfn_iife_entry_arg_is_recorded() {
         }]
         .into(),
     };
-    let prov = analyze(&PseudoExpr::Tuple((vec![decls, iife]).into()));
+    let prov = analyze(&PseudoExpr::Tuple(vec![decls, iife].into()));
     let g = prov.iter().find(|f| f.name == "g").expect("g present");
     // entry arg = Fn, self-call arg = Scott -> join = Conflict, NOT a target.
     assert_eq!(g.slots[0].1, SlotVerdict::NotDecodable(FieldKind::Conflict));
@@ -218,7 +218,7 @@ fn value_escaped_recfn_is_unreliable() {
         fields: vec![PseudoExpr::Unit].into(),
         type_hint: Some(inner.clone()),
     };
-    let decls = PseudoExpr::Tuple((vec![scott(0), scott(1)]).into());
+    let decls = PseudoExpr::Tuple(vec![scott(0), scott(1)].into());
     let self_call = PseudoExpr::Apply {
         function: PBox::new(var("g", 200)),
         args: vec![scott(0)].into(),
@@ -226,15 +226,15 @@ fn value_escaped_recfn_is_unreliable() {
     let elim = PseudoExpr::When {
         subject: PBox::new(var("p", 1)),
         subject_name: None,
-        clauses: vec![],
+        clauses: vec![].into(),
     };
     let g = PseudoExpr::RecFn {
         name: binder("g", 200),
         params: vec![binder("p", 1)],
-        body: PBox::new(PseudoExpr::Tuple((vec![elim, self_call]).into())),
+        body: PBox::new(PseudoExpr::Tuple(vec![elim, self_call].into())),
     };
     // g sits as a bare value in a tuple → escapes (not Let-bound, not IIFE).
-    let prov = analyze(&PseudoExpr::Tuple((vec![decls, g]).into()));
+    let prov = analyze(&PseudoExpr::Tuple(vec![decls, g].into()));
     let g = prov.iter().find(|f| f.name == "g").expect("g present");
     assert_eq!(g.slots[0].1, SlotVerdict::Unreliable);
 }

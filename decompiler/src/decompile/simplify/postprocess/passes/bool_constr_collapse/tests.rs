@@ -33,7 +33,8 @@ fn collapses_tag_one_with_structural_bool_subject() {
                 guard: None,
                 body: PseudoExpr::Bool(false),
             },
-        ],
+        ]
+        .into(),
     };
     let final_types = FinalTypeTable::new();
     let result = bool_constr_collapse(expr, &final_types);
@@ -78,7 +79,8 @@ fn collapses_tag_zero_negates_subject() {
                 guard: None,
                 body: PseudoExpr::Bool(false),
             },
-        ],
+        ]
+        .into(),
     };
     let final_types = FinalTypeTable::new();
     let result = bool_constr_collapse(expr, &final_types);
@@ -114,7 +116,8 @@ fn refuses_wildcard_first_order_is_unsound() {
                 guard: None,
                 body: PseudoExpr::Int(1.into()),
             },
-        ],
+        ]
+        .into(),
     };
     let final_types = FinalTypeTable::new();
     let result = bool_constr_collapse(expr, &final_types);
@@ -147,7 +150,8 @@ fn refuses_when_subject_name_is_set() {
                 guard: None,
                 body: PseudoExpr::Unit,
             },
-        ],
+        ]
+        .into(),
     };
     let final_types = FinalTypeTable::new();
     let result = bool_constr_collapse(expr, &final_types);
@@ -177,7 +181,8 @@ fn collapses_var_subject_when_final_types_says_bool() {
                 guard: None,
                 body: PseudoExpr::Unit,
             },
-        ],
+        ]
+        .into(),
     };
     let mut final_types = FinalTypeTable::new();
     final_types.bind_var(vid, Rc::new(PseudoType::Bool));
@@ -205,7 +210,8 @@ fn refuses_var_subject_without_bool_in_final_types() {
                 guard: None,
                 body: PseudoExpr::Unit,
             },
-        ],
+        ]
+        .into(),
     };
     let final_types = FinalTypeTable::new(); // no binding for vid
     let result = bool_constr_collapse(expr, &final_types);
@@ -235,7 +241,8 @@ fn does_not_collapse_three_clause_when() {
                 guard: None,
                 body: PseudoExpr::Unit,
             },
-        ],
+        ]
+        .into(),
     };
     let final_types = FinalTypeTable::new();
     let result = bool_constr_collapse(expr, &final_types);
@@ -265,7 +272,8 @@ fn does_not_collapse_clause_with_field_binders() {
                 guard: None,
                 body: PseudoExpr::Unit,
             },
-        ],
+        ]
+        .into(),
     };
     let final_types = FinalTypeTable::new();
     let result = bool_constr_collapse(expr, &final_types);
@@ -302,7 +310,8 @@ fn collapses_var_subject_via_let_bound_bool_value() {
                     guard: None,
                     body: PseudoExpr::Bool(false),
                 },
-            ],
+            ]
+            .into(),
         },
     );
     let final_types = FinalTypeTable::new(); // empty — proves the let-bool path
@@ -340,7 +349,8 @@ fn collapses_known_true_constructor_shape() {
                 guard: None,
                 body: PseudoExpr::Unit,
             },
-        ],
+        ]
+        .into(),
     };
     let final_types = FinalTypeTable::new();
     let result = bool_constr_collapse(expr, &final_types);
@@ -385,7 +395,8 @@ fn collapses_var_subject_via_let_chain_tail_bool() {
                     guard: None,
                     body: PseudoExpr::Unit,
                 },
-            ],
+            ]
+            .into(),
         },
     );
     let final_types = FinalTypeTable::new(); // empty — proves the let-chain-tail path
@@ -436,7 +447,8 @@ fn refuses_let_chain_tail_non_bool() {
                     guard: None,
                     body: PseudoExpr::Unit,
                 },
-            ],
+            ]
+            .into(),
         },
     );
     let final_types = FinalTypeTable::new();

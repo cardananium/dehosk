@@ -132,7 +132,7 @@ fn arm_b() -> PseudoExpr {
         PseudoExpr::When {
             subject: PBox::new(var("x_32", PB0)),
             subject_name: None,
-            clauses: vec![nil_clause, cons_clause],
+            clauses: vec![nil_clause, cons_clause].into(),
         },
     )
 }
@@ -347,7 +347,7 @@ fn pair_fixpoint_inert_on_single_param_z_shape() {
 fn pair_fixpoint_inert_on_non_total_consumer() {
     // A second, BARE use of the pair value outside the recognized
     // projection-application form must abort the whole transform.
-    let consumer = PseudoExpr::Tuple((vec![fst_projection_call(), var("e", E)]).into());
+    let consumer = PseudoExpr::Tuple(vec![fst_projection_call(), var("e", E)].into());
     let seed = pair_seed_with(consumer, driver());
     let before = format!("{seed:?}");
     let after = recover_pair_fixpoint(seed);
@@ -392,7 +392,7 @@ fn pair_fixpoint_inert_on_unsaturated_continuation_use() {
     // outside the saturated-call proof, must be inert.
     let bad_arm_a = lambda(
         vec![binder("x_15", PA0), binder("y_12", PA1)],
-        PseudoExpr::Tuple((vec![var("z_4", D2)]).into()),
+        PseudoExpr::Tuple(vec![var("z_4", D2)].into()),
     );
     let bad_driver = lambda(
         vec![binder("x_14", D0), binder("y_11", D1), binder("z_4", D2)],

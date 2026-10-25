@@ -15,7 +15,8 @@ fn test_normalize_display_rewrites_inlines_when_adapter() {
             clauses: vec![WhenClause::new(
                 WhenPattern::Wildcard,
                 PseudoExpr::Bool(true),
-            )],
+            )]
+            .into(),
         }),
         body: PBox::new(PseudoExpr::Lambda {
             params: vec!["y".to_string().into()],
@@ -527,7 +528,8 @@ fn test_normalize_display_rewrites_renames_pair_lookup_head_binder_to_entry() {
                     }),
                 },
             ),
-        ],
+        ]
+        .into(),
     };
 
     let result = normalize_display_rewrites(expr);
@@ -593,7 +595,8 @@ fn test_normalize_display_rewrites_ignores_same_name_different_id_pair_lookup_re
                     then_branch: PBox::new(PseudoExpr::Bool(true)),
                     else_branch: PBox::new(PseudoExpr::Bool(false)),
                 },
-            )],
+            )]
+            .into(),
         }),
     };
 
@@ -746,7 +749,8 @@ fn test_normalize_display_rewrites_renames_generic_pair_lookup_binders_to_entry_
                     }),
                 },
             ),
-        ],
+        ]
+        .into(),
     };
 
     let result = normalize_display_rewrites(expr);
@@ -811,7 +815,8 @@ fn test_normalize_display_rewrites_renames_generated_list_binders_to_head_and_ta
                     .into(),
                 },
             ),
-        ],
+        ]
+        .into(),
     };
 
     let result = normalize_display_rewrites(expr);
@@ -876,7 +881,8 @@ fn test_normalize_display_rewrites_renames_generic_list_binders_to_head_and_tail
                     .into(),
                 },
             ),
-        ],
+        ]
+        .into(),
     };
 
     let result = normalize_display_rewrites(expr);
@@ -943,7 +949,8 @@ fn test_normalize_display_rewrites_rebinds_legacy_generated_list_head_alias_to_p
                     .into(),
                 ),
             ),
-        ],
+        ]
+        .into(),
     };
 
     let result = normalize_display_rewrites(expr);

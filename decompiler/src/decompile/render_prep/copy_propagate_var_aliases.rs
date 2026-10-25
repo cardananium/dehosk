@@ -175,7 +175,7 @@ fn push_map_children(node: PseudoExpr, steps: &mut Vec<PropStep>, done: &mut Vec
             subject_name,
             clauses,
         } => {
-            let (clause_meta, clause_children) = split_clauses(clauses);
+            let (clause_meta, clause_children) = split_clauses(clauses.into_vec());
             steps.push(PropStep::Post(PropPost::When {
                 subject_name,
                 clause_meta,
@@ -245,7 +245,7 @@ fn rebuild_step(post: PropPost, done: &mut Vec<PseudoExpr>) -> PseudoExpr {
             PseudoExpr::When {
                 subject: PBox::new(subject),
                 subject_name,
-                clauses: rebuild_clauses(clause_meta, &mut parts),
+                clauses: rebuild_clauses(clause_meta, &mut parts).into(),
             }
         }
         PropPost::WhenSubstitutedSubject {
@@ -258,7 +258,7 @@ fn rebuild_step(post: PropPost, done: &mut Vec<PseudoExpr>) -> PseudoExpr {
             PseudoExpr::When {
                 subject,
                 subject_name,
-                clauses: rebuild_clauses(clause_meta, &mut parts),
+                clauses: rebuild_clauses(clause_meta, &mut parts).into(),
             }
         }
         PropPost::Plain(kind) => rebuild_plain(kind, done),
@@ -621,7 +621,7 @@ fn substitute_all_uses(
                         other => other,
                     };
                     // Clause guards/bodies may hold further uses — keep walking.
-                    let (clause_meta, clause_children) = split_clauses(clauses);
+                    let (clause_meta, clause_children) = split_clauses(clauses.into_vec());
                     steps.push(PropStep::Post(PropPost::WhenSubstitutedSubject {
                         subject: PBox::new(rhs.clone()),
                         subject_name,

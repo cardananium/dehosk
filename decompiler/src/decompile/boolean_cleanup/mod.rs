@@ -765,7 +765,7 @@ fn resolve_bare_bool_constrs(expr: PseudoExpr) -> PseudoExpr {
                 PseudoExpr::When {
                     subject: PBox::new(subject),
                     subject_name,
-                    clauses,
+                    clauses: clauses.into(),
                 }
             }
         }

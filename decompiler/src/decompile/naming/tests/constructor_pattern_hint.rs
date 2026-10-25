@@ -24,7 +24,8 @@ fn collect_when_pattern_binder_display_name_hints_names_some_payload_from_get_at
                 guard: None,
                 body: PseudoExpr::Error { message: None },
             },
-        ],
+        ]
+        .into(),
     };
 
     let hints = collect_when_pattern_binder_display_name_hints(&expr);
@@ -54,7 +55,8 @@ fn semantic_and_render_naming_leave_constructor_pattern_hint_to_nameless_owner()
                 guard: None,
                 body: PseudoExpr::Error { message: None },
             },
-        ],
+        ]
+        .into(),
     };
 
     let semantic = semantic_improve_variable_names(expr.clone());
@@ -115,7 +117,8 @@ fn test_improve_variable_names_leaves_lookup_result_some_pattern_binder_to_namel
                 guard: None,
                 body: PseudoExpr::Error { message: None },
             },
-        ],
+        ]
+        .into(),
     };
 
     let improved = render_improve_variable_names(expr.clone());
@@ -196,12 +199,14 @@ fn test_improve_variable_names_leaves_generated_constructor_fields_to_nameless_o
                                 guard: None,
                                 body: PseudoExpr::Bool(false),
                             },
-                        ],
+                        ]
+                        .into(),
                     }),
                     else_branch: PBox::new(PseudoExpr::Bool(false)),
                 }),
             },
-        }],
+        }]
+        .into(),
     };
 
     let improved = render_improve_variable_names(expr.clone());
@@ -259,12 +264,14 @@ fn test_improve_variable_names_ignores_same_name_different_id_generated_construc
                         clauses: vec![WhenClause::new(
                             WhenPattern::Wildcard,
                             PseudoExpr::Bool(true),
-                        )],
+                        )]
+                        .into(),
                     }),
                     else_branch: PBox::new(PseudoExpr::Bool(false)),
                 }),
             },
-        }],
+        }]
+        .into(),
     };
 
     let hints = collect_when_pattern_binder_display_name_hints(&expr);
@@ -303,7 +310,8 @@ fn test_improve_variable_names_ignores_same_name_different_id_constructor_payloa
                 PseudoExpr::var_with_id("l3_0", outer_payload_id),
                 "fields".to_string(),
             ),
-        }],
+        }]
+        .into(),
     };
 
     let improved = improve_variable_names(expr);

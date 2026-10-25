@@ -21,7 +21,8 @@ fn test_expect_when_return_binder_rewrite_retargets_outer_body_refs() {
                     PseudoExpr::var_with_id("field", field_id),
                 ),
                 WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Error { message: None }),
-            ],
+            ]
+            .into(),
         }),
         body: PBox::new(PseudoExpr::Tuple(
             vec![
@@ -85,7 +86,8 @@ fn test_expect_when_return_binder_rewrite_retargets_guard_refs() {
                     PseudoExpr::var_with_id("field", field_id),
                 ),
                 WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Error { message: None }),
-            ],
+            ]
+            .into(),
         }),
         body: PBox::new(PseudoExpr::Tuple(
             vec![
@@ -143,7 +145,8 @@ fn test_expect_when_return_binder_rewrite_skips_inner_new_name_binding() {
                     PseudoExpr::var_with_id("field", field_id),
                 ),
                 WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Error { message: None }),
-            ],
+            ]
+            .into(),
         }),
         body: PBox::new(PseudoExpr::Tuple(
             vec![

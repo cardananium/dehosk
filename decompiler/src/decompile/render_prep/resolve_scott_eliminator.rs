@@ -457,7 +457,7 @@ fn rewrite(
                     );
                     steps.push(RewriteStep::WhenClauses {
                         subject_name,
-                        clauses,
+                        clauses: clauses.into_vec(),
                         subject_is_scott,
                         outer: Rc::clone(&stable),
                     });

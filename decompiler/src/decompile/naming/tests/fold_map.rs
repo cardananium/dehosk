@@ -52,7 +52,8 @@ fn test_analyze_function_binding_names_fold_map_wrapper() {
                                 .into(),
                             },
                         ),
-                    ],
+                    ]
+                    .into(),
                 }),
             }),
             body: PBox::new(PseudoExpr::Apply {
@@ -114,7 +115,8 @@ fn test_analyze_function_binding_names_hoisted_fold_map_adapter() {
                         .into(),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
     let root = PseudoExpr::Let {
@@ -214,7 +216,8 @@ fn test_analyze_function_binding_ignores_same_name_different_id_fold_map_tail_re
                                 .into(),
                             },
                         ),
-                    ],
+                    ]
+                    .into(),
                 }),
             }),
             body: PBox::new(PseudoExpr::Apply {

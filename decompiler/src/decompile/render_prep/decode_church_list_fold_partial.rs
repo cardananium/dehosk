@@ -297,7 +297,7 @@ fn push_rewrite_inward(
                 frames.push(Frame::When {
                     subject,
                     subject_name,
-                    clauses_vec,
+                    clauses_vec: clauses_vec.into_vec(),
                     success_idx,
                     pattern,
                     guard,
@@ -369,7 +369,7 @@ fn push_rewrite_inward(
                     PushResult::Rewritten(PseudoExpr::When {
                         subject,
                         subject_name,
-                        clauses: clauses_vec,
+                        clauses: clauses_vec.into(),
                     })
                 }
                 PushResult::NoMatch(body_back) => {
@@ -381,7 +381,7 @@ fn push_rewrite_inward(
                     PushResult::NoMatch(PseudoExpr::When {
                         subject,
                         subject_name,
-                        clauses: clauses_vec,
+                        clauses: clauses_vec.into(),
                     })
                 }
             },

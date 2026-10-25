@@ -24,7 +24,8 @@ fn when_purpose(tag: usize, payload: (&str, VarId), body: PseudoExpr) -> PseudoE
             },
             guard: None,
             body,
-        }],
+        }]
+        .into(),
     }
 }
 
@@ -67,7 +68,8 @@ fn when_tx_info_certificates(cert_id: VarId, body: PseudoExpr) -> PseudoExpr {
             },
             guard: None,
             body,
-        }],
+        }]
+        .into(),
     }
 }
 

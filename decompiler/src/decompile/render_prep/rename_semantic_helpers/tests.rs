@@ -225,7 +225,8 @@ fn avoids_collision_with_when_pattern_binder() {
                 pattern: WhenPattern::Var(Binder::new("add_int".to_string(), vid(12345))),
                 guard: None,
                 body: vref("add_int", 12345),
-            }],
+            }]
+            .into(),
         }),
     };
     let out = rename_semantic_helpers(helper_let);

@@ -500,7 +500,8 @@ impl Simplifier {
                             body.into_inner(),
                         ),
                         WhenClause::new(WhenPattern::Wildcard, cons_val),
-                    ],
+                    ]
+                    .into(),
                 });
             }
         }
@@ -534,7 +535,8 @@ impl Simplifier {
                         ),
                         PseudoExpr::Bool(*b2),
                     ),
-                ],
+                ]
+                .into(),
             });
         }
 
@@ -641,7 +643,8 @@ impl Simplifier {
                 clauses: vec![WhenClause::new(
                     WhenPattern::constructor(ConstructorShape::scott_positional(0, arity), params),
                     body.into_inner(),
-                )],
+                )]
+                .into(),
             });
         }
 
@@ -1491,7 +1494,8 @@ impl Simplifier {
                                 },
                                 cons_body,
                             ),
-                        ],
+                        ]
+                        .into(),
                     });
                 }
             }
@@ -1655,7 +1659,7 @@ impl Simplifier {
                 return ApplyAction::Done(PseudoExpr::When {
                     subject,
                     subject_name: None,
-                    clauses,
+                    clauses: clauses.into(),
                 });
             }
         }

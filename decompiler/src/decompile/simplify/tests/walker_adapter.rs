@@ -136,7 +136,7 @@ fn walker_adapter_post_hooks_walk_structural_variants() {
             elements: vec![PseudoExpr::int(1), PseudoExpr::int(2)].into(),
             tail: None,
         },
-        PseudoExpr::Tuple((vec![PseudoExpr::int(1), PseudoExpr::int(2)]).into()),
+        PseudoExpr::Tuple(vec![PseudoExpr::int(1), PseudoExpr::int(2)].into()),
         PseudoExpr::Pair(PBox::new(PseudoExpr::int(1)), PBox::new(PseudoExpr::int(2))),
         PseudoExpr::Delay(PBox::new(PseudoExpr::int(3))),
         PseudoExpr::Trace {
@@ -224,7 +224,7 @@ fn walker_adapter_matches_simplify_on_structural_variants() {
             .into(),
             tail: None,
         },
-        PseudoExpr::Tuple((vec![PseudoExpr::int(1), PseudoExpr::int(2)]).into()),
+        PseudoExpr::Tuple(vec![PseudoExpr::int(1), PseudoExpr::int(2)].into()),
         PseudoExpr::Pair(PBox::new(PseudoExpr::int(1)), PBox::new(PseudoExpr::int(2))),
         // Delay around simple value unwraps.
         PseudoExpr::Delay(PBox::new(PseudoExpr::int(3))),
@@ -291,7 +291,8 @@ fn walker_adapter_helper_variants_route_via_simplify_helpers() {
                 pattern: WhenPattern::Wildcard,
                 guard: None,
                 body: PseudoExpr::int(0),
-            }],
+            }]
+            .into(),
         },
         PseudoExpr::UnOp {
             op: UnaryOp::Not,
@@ -360,7 +361,8 @@ fn walker_adapter_matches_simplify_on_helper_variants() {
                 pattern: WhenPattern::Wildcard,
                 guard: None,
                 body: PseudoExpr::int(42),
-            }],
+            }]
+            .into(),
         },
         // !!x → x.
         PseudoExpr::UnOp {

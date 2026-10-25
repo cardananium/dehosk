@@ -466,7 +466,7 @@ fn recover_free_validator_carriers(
                     } => {
                         tasks.push(Task::WhenClauses {
                             subject_name,
-                            clauses,
+                            clauses: clauses.into_vec(),
                         });
                         tasks.push(Task::Enter(subject.into_inner()));
                     }
@@ -741,7 +741,7 @@ fn recover_free_validator_carriers(
                     done.push(PseudoExpr::When {
                         subject: PBox::new(frame.subject),
                         subject_name: frame.subject_name,
-                        clauses: frame.clauses,
+                        clauses: frame.clauses.into(),
                     });
                 }
                 Task::ExpectEnv => {
@@ -1101,7 +1101,7 @@ pub(crate) fn rename_option_like_patterns(
                     } => {
                         tasks.push(Task::WhenClauses {
                             subject_name,
-                            clauses,
+                            clauses: clauses.into_vec(),
                         });
                         tasks.push(Task::Enter(subject.into_inner()));
                     }
@@ -1343,7 +1343,7 @@ pub(crate) fn rename_option_like_patterns(
                     done.push(PseudoExpr::When {
                         subject: PBox::new(frame.subject),
                         subject_name: frame.subject_name,
-                        clauses,
+                        clauses: clauses.into(),
                     });
                 }
                 Task::If => {

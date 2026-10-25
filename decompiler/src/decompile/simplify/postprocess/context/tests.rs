@@ -213,7 +213,8 @@ fn test_detect_sum_type_overrides_finds_single_non_fail_constructor() {
                 PseudoExpr::int(1),
             ),
             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::error()),
-        ],
+        ]
+        .into(),
     };
 
     let overrides = detect_sum_type_overrides(

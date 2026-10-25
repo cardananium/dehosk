@@ -111,7 +111,8 @@ fn dedup_renames_earlier_duplicate_constr_binders() {
             pattern,
             guard: None,
             body: PseudoExpr::var("map"),
-        }],
+        }]
+        .into(),
     };
 
     let result = debug_deduplicate_constr_pattern_binders(when_expr);
@@ -162,7 +163,8 @@ fn dedup_renames_body_refs_for_renamed_duplicate_binder_ids() {
                 ]
                 .into(),
             ),
-        }],
+        }]
+        .into(),
     };
 
     let result = debug_deduplicate_constr_pattern_binders(when_expr);
@@ -213,7 +215,8 @@ fn dedup_leaves_unique_pattern_untouched() {
             pattern,
             guard: None,
             body: PseudoExpr::Unit,
-        }],
+        }]
+        .into(),
     };
 
     let result = debug_deduplicate_constr_pattern_binders(when_expr);
@@ -560,7 +563,8 @@ fn let_disambiguation_fallback_respects_when_subject_name_shadow() {
                     pattern: WhenPattern::Wildcard,
                     guard: Some(PseudoExpr::compat_var("x")),
                     body: PseudoExpr::compat_var("x"),
-                }],
+                }]
+                .into(),
             }),
         }),
     };
@@ -623,7 +627,8 @@ fn let_disambiguation_fallback_respects_when_pattern_shadow() {
                     pattern: WhenPattern::Var(Binder::new("x", pattern_x_id)),
                     guard: Some(PseudoExpr::compat_var("x")),
                     body: PseudoExpr::compat_var("x"),
-                }],
+                }]
+                .into(),
             }),
         }),
     };
@@ -714,7 +719,8 @@ fn expr_contains_var_name_still_walks_literal_pattern_outside_clause_scope() {
             pattern: WhenPattern::Literal(PseudoExpr::var("x")),
             guard: Some(PseudoExpr::var("x")),
             body: PseudoExpr::var("x"),
-        }],
+        }]
+        .into(),
     };
 
     assert!(debug_expr_contains_var_name(&expr, "x"));
@@ -729,7 +735,8 @@ fn expr_contains_var_name_blocks_guard_and_body_when_clause_binds_target() {
             pattern: WhenPattern::Wildcard,
             guard: Some(PseudoExpr::var("x")),
             body: PseudoExpr::var("x"),
-        }],
+        }]
+        .into(),
     };
 
     assert!(!debug_expr_contains_var_name(&expr, "x"));
@@ -773,7 +780,8 @@ fn rename_var_use_by_id_in_expr_renames_when_subject_name_and_uses() {
             pattern: WhenPattern::Wildcard,
             guard: Some(PseudoExpr::var_with_id("ctx", subject_id)),
             body: PseudoExpr::var_with_id("ctx", subject_id),
-        }],
+        }]
+        .into(),
     };
 
     let renamed = rename_var_use_by_id_in_expr(&expr, subject_id, "purpose");
@@ -787,7 +795,8 @@ fn rename_var_use_by_id_in_expr_renames_when_subject_name_and_uses() {
                 pattern: WhenPattern::Wildcard,
                 guard: Some(PseudoExpr::var_with_id("purpose", subject_id)),
                 body: PseudoExpr::var_with_id("purpose", subject_id),
-            }],
+            }]
+            .into(),
         }
     );
 }

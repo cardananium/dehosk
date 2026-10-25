@@ -61,7 +61,8 @@ fn test_analyze_function_binding_names_filter_matches_wrapper() {
                                 }),
                             },
                         ),
-                    ],
+                    ]
+                    .into(),
                 }),
             }),
             body: PBox::new(PseudoExpr::Apply {
@@ -134,7 +135,8 @@ fn test_analyze_function_binding_names_direct_rec_filter_matches_with_capture_pa
                         }),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -203,7 +205,8 @@ fn test_analyze_function_binding_ignores_same_name_different_id_direct_rec_filte
                         }),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 

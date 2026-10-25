@@ -197,7 +197,8 @@ fn test_resolve_cardano_field_names_when_pattern_propagation() {
                 ),
                 guard: None,
                 body: PseudoExpr::field_access(PseudoExpr::var("field_0"), "#1".to_string()),
-            }],
+            }]
+            .into(),
         }),
     };
     let result = resolve_cardano_field_names(expr, ScriptVersion::PlutusV2);
@@ -372,7 +373,8 @@ fn resolve_cardano_field_names_records_when_pattern_context_kinds() {
                     PseudoExpr::var_with_id("field_0", field_0.var_id()),
                     "#1".to_string(),
                 ),
-            }],
+            }]
+            .into(),
         }),
     };
     let mut annotations = std::collections::HashMap::new();
@@ -465,7 +467,8 @@ fn test_resolve_cardano_field_names_does_not_leak_when_pattern_bindings_across_c
                         "#1".to_string(),
                     ),
                 },
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -646,7 +649,8 @@ fn test_resolve_data_case_collapses_repeated_var_fallbacks() {
                 PseudoExpr::Int(1.into()),
             ),
             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::var("d")),
-        ],
+        ]
+        .into(),
     };
 
     let expr = PseudoExpr::BuiltinCall {
@@ -707,7 +711,8 @@ fn test_resolve_data_case_collapses_apply_form_with_repeated_var_fallbacks() {
                 PseudoExpr::Int(1.into()),
             ),
             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::var("d")),
-        ],
+        ]
+        .into(),
     };
 
     let expr = PseudoExpr::Apply {
@@ -1373,7 +1378,8 @@ fn test_propagate_types_and_name_constructors_does_not_leak_inner_lambda_shadowi
                     ),
                     guard: None,
                     body: PseudoExpr::Int(0.into()),
-                }],
+                }]
+                .into(),
             },
         )),
     };

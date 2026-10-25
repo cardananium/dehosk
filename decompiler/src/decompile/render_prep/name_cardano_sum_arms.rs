@@ -129,7 +129,7 @@ fn walk(
                 } => {
                     steps.push(Step::WhenClauses {
                         subject_name,
-                        clauses,
+                        clauses: clauses.into_vec(),
                     });
                     steps.push(Step::Enter(subject.into_inner()));
                 }

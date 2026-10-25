@@ -60,10 +60,11 @@ fn with_t26_catalog_and_rooted_payload(payload_use: PseudoExpr) -> PseudoExpr {
             },
             guard: None,
             body: payload_use,
-        }],
+        }]
+        .into(),
     };
     // Tuple just to hold all three in one expr the pass can scan.
-    PseudoExpr::Tuple((vec![decl0, decl1, when]).into())
+    PseudoExpr::Tuple(vec![decl0, decl1, when].into())
 }
 
 fn count_when(expr: &PseudoExpr) -> usize {
@@ -80,7 +81,7 @@ fn count_when(expr: &PseudoExpr) -> usize {
 #[test]
 fn catalog_indexes_unique_signature() {
     let t26 = th("Unknown_S_26");
-    let expr = PseudoExpr::Tuple((vec![ctor(&t26, 0, 1), ctor(&t26, 1, 3)]).into());
+    let expr = PseudoExpr::Tuple(vec![ctor(&t26, 0, 1), ctor(&t26, 1, 3)].into());
     let cat = build_stub_catalog(&expr);
     assert_eq!(cat.get(&vec![1, 3]), Some(&Some(t26)));
 }
@@ -139,7 +140,7 @@ fn does_not_rewrite_non_scott_rooted_var() {
         ]
         .into(),
     };
-    let expr = PseudoExpr::Tuple((vec![ctor(&t26, 0, 1), ctor(&t26, 1, 3), app]).into());
+    let expr = PseudoExpr::Tuple(vec![ctor(&t26, 0, 1), ctor(&t26, 1, 3), app].into());
     let out = resolve_scott_eliminator(expr);
     assert_eq!(
         count_when(&out),
@@ -174,7 +175,8 @@ fn rewrites_unattributed_when_signature_ambiguous() {
             },
             guard: None,
             body: payload_use,
-        }],
+        }]
+        .into(),
     };
     let expr = PseudoExpr::Tuple(
         vec![

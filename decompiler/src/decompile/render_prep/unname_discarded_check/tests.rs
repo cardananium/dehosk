@@ -21,7 +21,8 @@ fn check() -> PseudoExpr {
                 guard: None,
                 body: PseudoExpr::error(),
             },
-        ],
+        ]
+        .into(),
     }
 }
 

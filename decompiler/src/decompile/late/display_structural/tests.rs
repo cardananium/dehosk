@@ -118,7 +118,8 @@ fn test_try_inline_when_adapter_let_ignores_same_name_different_id_in_clause_bod
             clauses: vec![WhenClause::new(
                 WhenPattern::Wildcard,
                 PseudoExpr::var_with_id("payload", unrelated_id),
-            )],
+            )]
+            .into(),
         },
         PseudoExpr::Lambda {
             params: vec!["arg".to_string().into()],

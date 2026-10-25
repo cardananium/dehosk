@@ -362,7 +362,8 @@ fn scott_builder(nil_arm: PseudoExpr, cons_arm: PseudoExpr) -> PseudoExpr {
                     guard: None,
                     body: cons_arm,
                 },
-            ],
+            ]
+            .into(),
         }),
     }
 }

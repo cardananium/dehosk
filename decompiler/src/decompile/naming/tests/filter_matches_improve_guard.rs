@@ -62,7 +62,8 @@ fn test_improve_variable_names_ignores_same_name_different_id_direct_rec_filter_
                             }),
                         },
                     ),
-                ],
+                ]
+                .into(),
             }),
         }),
         body: PBox::new(PseudoExpr::Apply {

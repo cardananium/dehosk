@@ -444,7 +444,7 @@ impl<'a> PayloadRepair<'a> {
                         done.push(PseudoExpr::When {
                             subject,
                             subject_name,
-                            clauses,
+                            clauses: clauses.into(),
                         });
                     }
                     RepairPost::Plain { shell, count } => {
@@ -1194,7 +1194,7 @@ fn rewrite_var_ref(
                     done.push(PseudoExpr::When {
                         subject: PBox::new(subject),
                         subject_name,
-                        clauses: rebuilt,
+                        clauses: rebuilt.into(),
                     });
                 }
             },

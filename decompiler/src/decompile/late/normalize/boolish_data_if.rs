@@ -269,7 +269,8 @@ pub(crate) fn rewrite_boolish_data_ifs(
                                 guard: None,
                                 body: else_branch,
                             },
-                        ],
+                        ]
+                        .into(),
                     };
                 }
             }

@@ -120,7 +120,8 @@ fn test_bool_naming_in_when() {
                 WhenPattern::constructor(ConstructorShape::unknown_data(1, 0), vec![]),
                 PseudoExpr::var("b"),
             ),
-        ],
+        ]
+        .into(),
     };
     let simplified = simplify(expr);
     match &simplified {
@@ -160,7 +161,8 @@ fn test_bool_naming_skips_data_like_subjects_with_fields_access() {
         clauses: vec![WhenClause::new(
             WhenPattern::Wildcard,
             PseudoExpr::var(fallback),
-        )],
+        )]
+        .into(),
     };
 
     let expr = PseudoExpr::When {
@@ -175,7 +177,8 @@ fn test_bool_naming_skips_data_like_subjects_with_fields_access() {
                 WhenPattern::constructor(ConstructorShape::unknown_data(1, 0), vec![]),
                 fields_when("b"),
             ),
-        ],
+        ]
+        .into(),
     };
 
     let simplified = simplify(expr);

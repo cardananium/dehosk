@@ -608,7 +608,7 @@ pub(crate) fn disambiguate_constructors(
                 return PseudoExpr::When {
                     subject: PBox::new(subject),
                     subject_name,
-                    clauses,
+                    clauses: clauses.into(),
                 };
             }
 
@@ -718,7 +718,7 @@ pub(crate) fn disambiguate_constructors(
                 return PseudoExpr::When {
                     subject: PBox::new(subject),
                     subject_name,
-                    clauses,
+                    clauses: clauses.into(),
                 };
             }
 
@@ -727,7 +727,7 @@ pub(crate) fn disambiguate_constructors(
                 return PseudoExpr::When {
                     subject: PBox::new(subject),
                     subject_name,
-                    clauses,
+                    clauses: clauses.into(),
                 };
             }
 
@@ -788,14 +788,14 @@ pub(crate) fn disambiguate_constructors(
                 PseudoExpr::When {
                     subject: PBox::new(subject),
                     subject_name,
-                    clauses,
+                    clauses: clauses.into(),
                 }
             } else {
                 // No match — return unchanged
                 PseudoExpr::When {
                     subject: PBox::new(subject),
                     subject_name,
-                    clauses,
+                    clauses: clauses.into(),
                 }
             }
         }

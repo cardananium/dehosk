@@ -52,7 +52,8 @@ fn test_analyze_function_binding_names_lookup_then_rec() {
                         }),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -118,7 +119,8 @@ fn test_analyze_function_binding_ignores_same_name_different_id_lookup_then_tail
                         }),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 

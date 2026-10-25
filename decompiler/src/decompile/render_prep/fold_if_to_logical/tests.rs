@@ -194,7 +194,8 @@ fn leaves_when_body_unfolded() {
         clauses: vec![WhenClause::new(
             WhenPattern::Wildcard,
             PseudoExpr::Bool(true),
-        )],
+        )]
+        .into(),
     };
     let expr = PseudoExpr::If {
         condition: cond(),

@@ -112,7 +112,7 @@ pub(super) fn build_purpose_handler_bodies(
                 PseudoExpr::When {
                     subject,
                     subject_name,
-                    clauses: vec![arm],
+                    clauses: vec![arm].into(),
                 }
             }
             PseudoExpr::Apply { function, args }
@@ -145,7 +145,7 @@ pub(super) fn build_purpose_handler_bodies(
                 PseudoExpr::When {
                     subject,
                     subject_name,
-                    clauses: vec![arm],
+                    clauses: vec![arm].into(),
                 }
             }
             _ => return None,
@@ -405,7 +405,7 @@ pub(crate) fn specialize_to_purpose(expr: PseudoExpr, purpose: ValidatorPurpose)
                 return PseudoExpr::When {
                     subject: PBox::new(subject),
                     subject_name,
-                    clauses,
+                    clauses: clauses.into(),
                 };
             }
             let kept: Vec<_> = clauses
@@ -441,7 +441,7 @@ pub(crate) fn specialize_to_purpose(expr: PseudoExpr, purpose: ValidatorPurpose)
             PseudoExpr::When {
                 subject: PBox::new(subject),
                 subject_name,
-                clauses: kept,
+                clauses: kept.into(),
             }
         }
     }

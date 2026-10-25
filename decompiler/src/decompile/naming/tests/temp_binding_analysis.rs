@@ -17,7 +17,8 @@ fn test_analyze_unit_check_temp_binding_with_consistency_names_variant_from_cons
                 ),
             ),
             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Error { message: None }),
-        ],
+        ]
+        .into(),
     };
 
     assert_eq!(
@@ -44,7 +45,8 @@ fn test_analyze_unit_check_temp_binding_with_consistency_ignores_inconsistent_fi
                 ),
             ),
             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Error { message: None }),
-        ],
+        ]
+        .into(),
     };
 
     assert_eq!(
@@ -127,7 +129,8 @@ fn test_analyze_value_binding_with_known_renames_names_option_passthrough_result
                     args: vec![PseudoExpr::var("pairs")].into(),
                 },
             ),
-        ],
+        ]
+        .into(),
     };
 
     assert_eq!(

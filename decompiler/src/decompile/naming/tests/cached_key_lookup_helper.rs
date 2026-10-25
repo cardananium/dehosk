@@ -65,7 +65,8 @@ fn test_improve_variable_names_renames_cached_key_lookup_helper() {
                         }),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -152,7 +153,8 @@ fn test_improve_variable_names_renames_false_like_cached_key_lookup_helper() {
                         }),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -238,7 +240,8 @@ fn test_improve_variable_names_renames_le_cutoff_cached_key_lookup_helper() {
                         }),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 

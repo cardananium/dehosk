@@ -42,7 +42,8 @@ fn d4_rewrites_bool_when_in_expect_chain() {
                         guard: None,
                         body: PseudoExpr::Bool(false),
                     },
-                ],
+                ]
+                .into(),
             },
             PseudoExpr::Unit,
         ]
@@ -85,7 +86,8 @@ fn d4_refuses_wildcard_true_arm() {
                     pattern: WhenPattern::Wildcard,
                     guard: None,
                     body: PseudoExpr::Bool(true),
-                }],
+                }]
+                .into(),
             },
             PseudoExpr::Unit,
         ]
@@ -117,7 +119,8 @@ fn d4_rewrites_shape_b_wraps_body_in_inner_expect() {
                         guard: None,
                         body: PseudoExpr::Bool(false),
                     },
-                ],
+                ]
+                .into(),
             },
             PseudoExpr::Unit,
         ]
@@ -174,7 +177,8 @@ fn d4_rewrites_shape_b_with_non_trivial_tail() {
                         guard: None,
                         body: PseudoExpr::Bool(false),
                     },
-                ],
+                ]
+                .into(),
             },
             tail,
         ]
@@ -225,7 +229,8 @@ fn d4_refuses_when_with_guard() {
                         guard: None,
                         body: PseudoExpr::Bool(false),
                     },
-                ],
+                ]
+                .into(),
             },
             PseudoExpr::Unit,
         ]
@@ -256,7 +261,8 @@ fn d4_refuses_when_subject_name() {
                         guard: None,
                         body: PseudoExpr::Bool(false),
                     },
-                ],
+                ]
+                .into(),
             },
             PseudoExpr::Unit,
         ]
@@ -286,7 +292,8 @@ fn d4_refuses_3_arg_expect() {
                         guard: None,
                         body: PseudoExpr::Bool(false),
                     },
-                ],
+                ]
+                .into(),
             },
             PseudoExpr::Unit,
             PseudoExpr::String("msg".to_string()),
@@ -322,7 +329,8 @@ fn d4_refuses_multiple_true_arms() {
                         guard: None,
                         body: PseudoExpr::Bool(false),
                     },
-                ],
+                ]
+                .into(),
             },
             PseudoExpr::Unit,
         ]
@@ -351,7 +359,8 @@ fn d4_refuses_when_function_is_not_expect_helper() {
                         guard: None,
                         body: PseudoExpr::Bool(false),
                     },
-                ],
+                ]
+                .into(),
             },
             PseudoExpr::Unit,
         ]

@@ -268,7 +268,7 @@ pub(crate) trait ExprFolder {
         PseudoExpr::When {
             subject: PBox::new(subject),
             subject_name,
-            clauses,
+            clauses: clauses.into(),
         }
     }
 
@@ -636,7 +636,8 @@ pub(crate) trait ExprFolder {
                 let mut clause_meta = Vec::with_capacity(clauses.len());
                 let mut clause_steps: Vec<FoldStep> = Vec::new();
                 for clause in clauses {
-                    let scope = scope_clauses.then(|| (subject_name.clone(), clause.pattern.clone()));
+                    let scope =
+                        scope_clauses.then(|| (subject_name.clone(), clause.pattern.clone()));
                     // Same order as `fold_clause`: pattern literal, guard, body.
                     let pattern = match clause.pattern {
                         WhenPattern::Literal(lit) if !keep_literals => {
@@ -830,7 +831,7 @@ pub(crate) trait ExprFolder {
                 subject,
                 subject_name,
                 clauses,
-            } => self.fold_when(subject.into_inner(), subject_name, clauses),
+            } => self.fold_when(subject.into_inner(), subject_name, clauses.into_vec()),
             PseudoExpr::Error { message } => self.post_error(message),
             PseudoExpr::Raw { uplc, reason } => self.post_raw(uplc, reason),
             PseudoExpr::Data(data) => self.post_data(data),

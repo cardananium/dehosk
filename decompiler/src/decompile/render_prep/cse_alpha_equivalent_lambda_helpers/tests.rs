@@ -90,7 +90,8 @@ fn redirect_does_not_capture_shadowing_pattern_binder() {
             },
             guard: None,
             body: var("field", h2_id),
-        }],
+        }]
+        .into(),
     };
     let input = PseudoExpr::Let {
         name: "h1".to_string(),
@@ -379,7 +380,7 @@ fn cse_two_alpha_equivalent_pair_pack_calls() {
     let e_id = 801;
     let x583_id = 810;
     let x583_2_id = 811;
-    let body = PseudoExpr::Tuple((vec![var("x583", x583_id), var("x583_2", x583_2_id)]).into());
+    let body = PseudoExpr::Tuple(vec![var("x583", x583_id), var("x583_2", x583_2_id)].into());
     let make_call = |lam_param_id, lam_param_id2| PseudoExpr::Apply {
         function: PBox::new(var("pair_pack", pair_pack_id)),
         args: vec![
@@ -647,7 +648,7 @@ fn cse_three_alpha_equivalent_helpers() {
         params: vec![binder("p", p_id)],
         body: PBox::new(var("p", p_id)),
     };
-    let body = PseudoExpr::Tuple((vec![var("f1", 100), var("f2", 101), var("f3", 102)]).into());
+    let body = PseudoExpr::Tuple(vec![var("f1", 100), var("f2", 101), var("f3", 102)].into());
     let input = PseudoExpr::Let {
         name: "f1".to_string(),
         id: Some(VarId::new(100)),

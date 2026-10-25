@@ -529,7 +529,7 @@ pub(crate) fn resolve_data_case(expr: PseudoExpr) -> PseudoExpr {
         Some(PseudoExpr::When {
             subject: PBox::new(scrutinee),
             subject_name: None,
-            clauses,
+            clauses: clauses.into(),
         })
     }
 
@@ -583,7 +583,7 @@ pub(crate) fn resolve_data_case(expr: PseudoExpr) -> PseudoExpr {
                     let mut all_args = builtin_args;
                     all_args.extend(args);
                     if let Some(resolved) = resolve_data_case_args(
-                        (all_args.clone()).into_vec(),
+                        all_args.clone().into_vec(),
                         &mut self.used_let_names,
                     ) {
                         return resolved;

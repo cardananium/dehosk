@@ -85,7 +85,8 @@ fn test_when_void_fail_pattern_becomes_expect_guard() {
                 PseudoExpr::Unit,
             ),
             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Error { message: None }),
-        ],
+        ]
+        .into(),
     };
 
     let simplified = simplify(expr);
@@ -118,7 +119,8 @@ fn test_when_fail_void_pattern_becomes_inverted_expect_guard() {
                 PseudoExpr::Error { message: None },
             ),
             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Unit),
-        ],
+        ]
+        .into(),
     };
 
     let simplified = simplify(expr);

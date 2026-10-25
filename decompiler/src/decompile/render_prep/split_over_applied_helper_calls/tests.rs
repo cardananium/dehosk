@@ -120,7 +120,7 @@ fn non_function_tail_not_a_candidate() {
         PseudoExpr::When {
             subject: PBox::new(arg(0)),
             subject_name: None,
-            clauses: vec![],
+            clauses: vec![].into(),
         },
     );
     let body = call("h", 7, vec![arg(0), arg(1), arg(2)]);

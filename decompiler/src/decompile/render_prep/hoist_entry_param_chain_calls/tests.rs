@@ -158,7 +158,8 @@ fn when_clause_pattern_binder_in_scope() {
             pattern: crate::pseudo::ast::WhenPattern::Pair(pair_left, pair_right),
             guard: None,
             body: clause_body,
-        }],
+        }]
+        .into(),
     };
     let expr = wrap_decompiled(vec![entry_param], entry_body);
 

@@ -84,7 +84,8 @@ fn collect_consistent_ref_ids_treats_when_subject_name_as_clause_scope_binder() 
             WhenPattern::Wildcard,
             PseudoExpr::var_with_id("payload", subject_id),
             PseudoExpr::var_with_id("payload", subject_id),
-        )],
+        )]
+        .into(),
     };
 
     let consistent = collect_consistent_ref_ids(&expr);

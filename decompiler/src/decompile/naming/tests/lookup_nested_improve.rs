@@ -74,7 +74,8 @@ fn test_improve_variable_names_renames_nested_lookup_int_wrapper_and_params() {
                                         }),
                                     },
                                 ),
-                            ],
+                            ]
+                            .into(),
                         }),
                     }),
                     body: PBox::new(PseudoExpr::Let {
@@ -106,7 +107,8 @@ fn test_improve_variable_names_renames_nested_lookup_int_wrapper_and_params() {
                                         .into(),
                                     },
                                 ),
-                            ],
+                            ]
+                            .into(),
                         }),
                         body: PBox::new(PseudoExpr::When {
                             subject: PBox::new(PseudoExpr::var("l2")),
@@ -130,7 +132,8 @@ fn test_improve_variable_names_renames_nested_lookup_int_wrapper_and_params() {
                                         .into(),
                                     },
                                 ),
-                            ],
+                            ]
+                            .into(),
                         }),
                     }),
                 }),

@@ -41,7 +41,8 @@ fn test_analyze_function_binding_names_single_letter_lookup_helper() {
                         }),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -94,7 +95,8 @@ fn test_analyze_temporary_value_binding_names_single_letter_lookup_result() {
                             }),
                         },
                     ),
-                ],
+                ]
+                .into(),
             }),
         }),
         body: PBox::new(PseudoExpr::Apply {

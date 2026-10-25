@@ -26,7 +26,8 @@ fn test_cps_selector_inlining_all_selectors() {
                     body: PBox::new(PseudoExpr::var("b")),
                 },
             ),
-        ],
+        ]
+        .into(),
     };
     let applied = PseudoExpr::Apply {
         function: PBox::new(when_expr),
@@ -90,7 +91,8 @@ fn test_cps_selector_inlining_with_fail() {
                 WhenPattern::constructor(ConstructorShape::unknown_data(2, 0), vec![]),
                 PseudoExpr::error(),
             ),
-        ],
+        ]
+        .into(),
     };
     let applied = PseudoExpr::Apply {
         function: PBox::new(when_expr),
@@ -142,7 +144,8 @@ fn test_cps_selector_inlining_mixed_not_applied() {
                     body: PBox::new(PseudoExpr::var("b")),
                 },
             ),
-        ],
+        ]
+        .into(),
     };
     let applied = PseudoExpr::Apply {
         function: PBox::new(when_expr),
@@ -283,7 +286,8 @@ fn test_when_branches_rewrite_scott_constructor_family_to_constr_values() {
                     }),
                 },
             ),
-        ],
+        ]
+        .into(),
     };
 
     let simplified = simplify(expr);

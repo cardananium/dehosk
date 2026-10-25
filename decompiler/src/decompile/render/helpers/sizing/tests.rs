@@ -189,7 +189,8 @@ fn value_renders_as_function_f_ext6_when_all_clauses_lambda() {
                 guard: None,
                 body: lambda_b,
             },
-        ],
+        ]
+        .into(),
     };
     assert!(
         value_renders_as_function(&expr),
@@ -220,7 +221,8 @@ fn value_renders_as_function_f_ext6_when_skips_fail_picks_lambda() {
                 guard: None,
                 body: lambda,
             },
-        ],
+        ]
+        .into(),
     };
     assert!(
         value_renders_as_function(&expr),
@@ -240,7 +242,8 @@ fn value_renders_as_function_f_ext6_when_int_clause_returns_false() {
             pattern: WhenPattern::Wildcard,
             guard: None,
             body: PseudoExpr::int(42),
-        }],
+        }]
+        .into(),
     };
     assert!(
         !value_renders_as_function(&expr),

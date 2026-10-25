@@ -413,7 +413,7 @@ pub(crate) enum PseudoExpr {
         /// Optional subject name for use in clauses.
         subject_name: Option<Binder>,
         /// Match clauses.
-        clauses: Vec<WhenClause>,
+        clauses: Clauses,
     },
 
     // ========== Data Structures ==========
@@ -833,6 +833,93 @@ pub(crate) enum HelperIntrinsic {
 }
 
 /// Pattern matching clause for When expressions.
+
+/// A `when`'s clauses, released without recursing.
+///
+/// A clause keeps its guard and body inline, so a plain `Vec<WhenClause>`
+/// would drop a `when` nested in a clause body — and the `when` in that one's
+/// body, and so on — one call frame per level, as deep as the script nests
+/// them. Dropping this hands every clause expression to the same worklist the
+/// boxed children use.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct Clauses(Vec<WhenClause>);
+
+impl Clauses {
+    /// Take the clauses out, consuming the container.
+    pub(crate) fn into_vec(self) -> Vec<WhenClause> {
+        let mut this = std::mem::ManuallyDrop::new(self);
+        std::mem::take(&mut this.0)
+    }
+}
+
+impl Drop for Clauses {
+    fn drop(&mut self) {
+        let mut exprs: Vec<PseudoExpr> = Vec::new();
+        for clause in self.0.drain(..) {
+            let WhenClause {
+                pattern,
+                guard,
+                body,
+            } = clause;
+            if let WhenPattern::Literal(lit) = pattern {
+                exprs.push(lit);
+            }
+            exprs.extend(guard);
+            exprs.push(body);
+        }
+        crate::pseudo::pbox::release_all(exprs);
+    }
+}
+
+impl std::ops::Deref for Clauses {
+    type Target = Vec<WhenClause>;
+    fn deref(&self) -> &Vec<WhenClause> {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Clauses {
+    fn deref_mut(&mut self) -> &mut Vec<WhenClause> {
+        &mut self.0
+    }
+}
+
+impl From<Vec<WhenClause>> for Clauses {
+    fn from(clauses: Vec<WhenClause>) -> Self {
+        Clauses(clauses)
+    }
+}
+
+impl FromIterator<WhenClause> for Clauses {
+    fn from_iter<I: IntoIterator<Item = WhenClause>>(iter: I) -> Self {
+        Clauses(iter.into_iter().collect())
+    }
+}
+
+impl IntoIterator for Clauses {
+    type Item = WhenClause;
+    type IntoIter = std::vec::IntoIter<WhenClause>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.into_vec().into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a Clauses {
+    type Item = &'a WhenClause;
+    type IntoIter = std::slice::Iter<'a, WhenClause>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a mut Clauses {
+    type Item = &'a mut WhenClause;
+    type IntoIter = std::slice::IterMut<'a, WhenClause>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter_mut()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct WhenClause {
     /// Pattern to match.

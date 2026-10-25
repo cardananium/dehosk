@@ -284,7 +284,7 @@ impl Simplifier {
                 clauses,
             } = when_expr
             {
-                return self.simplify_when(subject.into_inner(), subject_name, clauses);
+                return self.simplify_when(subject.into_inner(), subject_name, clauses.into_vec());
             }
             return Step::Done(when_expr);
         }
@@ -805,7 +805,7 @@ impl Simplifier {
             return Step::Done(PseudoExpr::When {
                 subject: PBox::new(simplified_subject),
                 subject_name,
-                clauses: simplified_clauses,
+                clauses: simplified_clauses.into(),
             });
         }
 
@@ -827,7 +827,7 @@ impl Simplifier {
             return Step::Done(PseudoExpr::When {
                 subject: PBox::new(simplified_subject),
                 subject_name,
-                clauses: simplified_clauses,
+                clauses: simplified_clauses.into(),
             });
         }
         let outcome_summary = late_summary.outcome;
@@ -981,7 +981,7 @@ impl Simplifier {
         Step::Done(PseudoExpr::When {
             subject: PBox::new(simplified_subject),
             subject_name,
-            clauses: simplified_clauses,
+            clauses: simplified_clauses.into(),
         })
     }
 }

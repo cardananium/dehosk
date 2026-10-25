@@ -44,7 +44,8 @@ fn substitutes_fields_head_with_pattern_binder_0() {
             },
             guard: None,
             body: fields_head(PseudoExpr::var_with_id("ctx", subject_id)),
-        }],
+        }]
+        .into(),
     };
 
     let rewritten = inline_pattern_field_access(expr);
@@ -81,7 +82,8 @@ fn substitutes_fields_index_with_pattern_binder_n() {
             guard: None,
             // body = ctx.fields[1] — should become Var("second", arg1_id).
             body: fields_index(PseudoExpr::var_with_id("ctx", subject_id), 1),
-        }],
+        }]
+        .into(),
     };
 
     let rewritten = inline_pattern_field_access(expr);
@@ -114,7 +116,8 @@ fn promotes_underscore_binder_when_field_is_accessed() {
             },
             guard: None,
             body: fields_head(PseudoExpr::var_with_id("ctx", subject_id)),
-        }],
+        }]
+        .into(),
     };
 
     let rewritten = inline_pattern_field_access(expr);
@@ -161,7 +164,8 @@ fn does_not_promote_underscore_when_field_is_not_accessed() {
             guard: None,
             // Body uses `named` but NOT subject.fields.head.
             body: PseudoExpr::var_with_id("named", arg1_id),
-        }],
+        }]
+        .into(),
     };
 
     let rewritten = inline_pattern_field_access(expr);
@@ -212,7 +216,8 @@ fn substitution_inside_let_value_drops_alias() {
                 value: PBox::new(fields_head(PseudoExpr::var_with_id("ctx", subject_id))),
                 body: PBox::new(PseudoExpr::var_with_id("head", head_id)),
             },
-        }],
+        }]
+        .into(),
     };
 
     let rewritten = inline_pattern_field_access(expr);
@@ -271,7 +276,8 @@ fn nested_when_clauses_extend_scope() {
             },
             guard: None,
             body: fields_head(PseudoExpr::var_with_id("outer", outer_id)),
-        }],
+        }]
+        .into(),
     };
     let expr = PseudoExpr::When {
         subject: PBox::new(PseudoExpr::var_with_id("outer", outer_id)),
@@ -285,7 +291,8 @@ fn nested_when_clauses_extend_scope() {
             },
             guard: None,
             body: inner_when,
-        }],
+        }]
+        .into(),
     };
 
     let rewritten = inline_pattern_field_access(expr);
@@ -332,7 +339,8 @@ fn expands_pattern_when_body_accesses_field_beyond_declared_arity() {
             },
             guard: None,
             body: fields_index(PseudoExpr::var_with_id("subject", subject_id), 2),
-        }],
+        }]
+        .into(),
     };
 
     let rewritten = inline_pattern_field_access(expr);
@@ -400,7 +408,8 @@ fn inlines_subject_fields_alias_then_expands_pattern() {
             },
             guard: None,
             body,
-        }],
+        }]
+        .into(),
     };
 
     let rewritten = inline_pattern_field_access(expr);
@@ -443,7 +452,8 @@ fn does_not_expand_when_no_overflow_accesses() {
             },
             guard: None,
             body: fields_head(PseudoExpr::var_with_id("subject", subject_id)),
-        }],
+        }]
+        .into(),
     };
 
     let rewritten = inline_pattern_field_access(expr);

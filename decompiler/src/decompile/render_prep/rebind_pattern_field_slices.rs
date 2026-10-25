@@ -178,7 +178,7 @@ fn rewrite(expr: PseudoExpr) -> PseudoExpr {
                     } => {
                         steps.push(Step::WhenClauses {
                             subject_name,
-                            clauses,
+                            clauses: clauses.into_vec(),
                             outer: Rc::clone(&scope),
                         });
                         steps.push(Step::Enter(subject.into_inner(), scope));

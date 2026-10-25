@@ -303,7 +303,7 @@ pub(crate) fn lift_unpack_tag_when_subjects(
                 return PseudoExpr::When {
                     subject: PBox::new(subject),
                     subject_name,
-                    clauses,
+                    clauses: clauses.into(),
                 };
             };
 
@@ -337,7 +337,7 @@ pub(crate) fn lift_unpack_tag_when_subjects(
                 return PseudoExpr::When {
                     subject: PBox::new(subject),
                     subject_name,
-                    clauses: lifted_clauses,
+                    clauses: lifted_clauses.into(),
                 };
             }
 
@@ -345,7 +345,7 @@ pub(crate) fn lift_unpack_tag_when_subjects(
                 PseudoExpr::When {
                     subject: PBox::new(real_subject),
                     subject_name,
-                    clauses: lifted_clauses,
+                    clauses: lifted_clauses.into(),
                 },
                 self.blueprint_hints,
                 self.registry,
@@ -404,7 +404,7 @@ pub(crate) fn extract_complex_when_subjects(expr: PseudoExpr) -> PseudoExpr {
                 return PseudoExpr::When {
                     subject: PBox::new(subject),
                     subject_name,
-                    clauses,
+                    clauses: clauses.into(),
                 };
             }
 
@@ -414,7 +414,7 @@ pub(crate) fn extract_complex_when_subjects(expr: PseudoExpr) -> PseudoExpr {
                 return PseudoExpr::When {
                     subject: PBox::new(subject),
                     subject_name,
-                    clauses,
+                    clauses: clauses.into(),
                 };
             }
 
@@ -440,7 +440,7 @@ pub(crate) fn extract_complex_when_subjects(expr: PseudoExpr) -> PseudoExpr {
                         id: Some(binder.id),
                     }),
                     subject_name: None,
-                    clauses,
+                    clauses: clauses.into(),
                 }),
             }
         }
@@ -548,7 +548,7 @@ pub(crate) fn collapse_eta_pair_selector_when_subjects(expr: PseudoExpr) -> Pseu
             PseudoExpr::When {
                 subject: PBox::new(subject),
                 subject_name,
-                clauses,
+                clauses: clauses.into(),
             }
         }
     }

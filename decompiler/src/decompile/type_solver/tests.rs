@@ -54,7 +54,8 @@ fn test_generate_constraints_uses_var_id_keys_for_id_backed_binders() {
                         ]
                         .into(),
                     ),
-                }],
+                }]
+                .into(),
             },
         ]
         .into(),
@@ -191,7 +192,8 @@ fn test_let_expression_body_alias_keeps_pair_subject_type() {
             pattern: WhenPattern::Pair("left".into(), "right".into()),
             guard: None,
             body: PseudoExpr::Unit,
-        }],
+        }]
+        .into(),
     };
 
     let result = solve_type_constraints(expr);
@@ -245,7 +247,8 @@ fn test_pair_pattern_refines_generic_data_subject() {
             ),
             guard: None,
             body: PseudoExpr::Unit,
-        }],
+        }]
+        .into(),
     };
 
     let result = solve_type_constraints(expr);
@@ -283,7 +286,8 @@ fn test_constructor_pair_pattern_refines_generic_data_subject() {
             ),
             guard: None,
             body: PseudoExpr::Unit,
-        }],
+        }]
+        .into(),
     };
 
     let result = solve_type_constraints(expr);
@@ -364,7 +368,8 @@ fn test_option_unknown_refined_by_field_usage() {
                     )),
                 },
             },
-        ],
+        ]
+        .into(),
     };
 
     // Type solver should not crash on this expression
@@ -425,7 +430,8 @@ fn test_pair_refined_from_expect_pattern() {
                     )),
                 }),
             },
-        }],
+        }]
+        .into(),
     };
 
     // Type solver should not crash on this expression
@@ -623,7 +629,8 @@ fn test_constructor_when_subject_beats_stale_bool_annotation() {
                         .into(),
                     },
                 },
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -667,7 +674,8 @@ fn test_when_subject_is_not_overwritten_by_clause_body_type() {
                         tail: None,
                     },
                 },
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -898,7 +906,8 @@ fn test_when_pattern_shadowing_without_var_ids_does_not_refine_outer_let() {
                             name: crate::BuiltinId::expect_known("Data.to_bytes"),
                             args: vec![PseudoExpr::var("x")].into(),
                         },
-                    }],
+                    }]
+                    .into(),
                 }),
                 body: PBox::new(PseudoExpr::var("x")),
             }),
@@ -964,7 +973,8 @@ fn test_validate_type_invariants_rejects_pair_pattern_on_bool_subject() {
             pattern: WhenPattern::Pair("left".into(), "right".into()),
             guard: None,
             body: PseudoExpr::Unit,
-        }],
+        }]
+        .into(),
     };
 
     let err = validate_type_invariants(&expr, None, &env).expect_err("expected invariant failure");
@@ -997,7 +1007,8 @@ fn test_validate_type_invariants_accepts_pair_pattern_on_pair_subject() {
             pattern: WhenPattern::Pair("left".into(), "right".into()),
             guard: None,
             body: PseudoExpr::Unit,
-        }],
+        }]
+        .into(),
     };
 
     validate_type_invariants(&expr, None, &env).expect("pair subject should satisfy invariants");
@@ -1084,7 +1095,8 @@ fn test_when_pattern_with_unknown_shape_does_not_crash() {
             pattern: WhenPattern::constructor(ConstructorShape::unknown_data(1, 0), vec![]),
             guard: None,
             body: PseudoExpr::Unit,
-        }],
+        }]
+        .into(),
     };
     let _ = solve_type_constraints(expr);
 }
@@ -1107,7 +1119,8 @@ fn test_well_formed_some_pattern_still_solves() {
             ),
             guard: None,
             body: PseudoExpr::var_with_id("v", VarId::new(900)),
-        }],
+        }]
+        .into(),
     };
     let result = solve_type_constraints(expr);
     assert!(matches!(result, PseudoExpr::When { .. }));
@@ -1197,7 +1210,8 @@ fn final_type_table_records_pair_container_for_when_subject_name() {
             pattern: WhenPattern::Pair(Binder::new("a", a_id), Binder::new("b", b_id)),
             guard: None,
             body: PseudoExpr::var_with_id("a", a_id),
-        }],
+        }]
+        .into(),
     };
 
     let (_expr, table) = solve_type_constraints_with_final_table(expr);
@@ -1364,7 +1378,8 @@ fn p2_2_slice_a_function_loses_to_pair_in_unification() {
             pattern: WhenPattern::Pair(Binder::new("a", a_id), Binder::new("b", b_id)),
             guard: None,
             body: PseudoExpr::var_with_id("a", a_id),
-        }],
+        }]
+        .into(),
     };
     let expr = PseudoExpr::Let {
         name: "m".to_string(),
@@ -1413,7 +1428,8 @@ fn p2_2_slice_a_function_subject_accepts_pair_pattern_in_invariants() {
             pattern: WhenPattern::Pair(Binder::new("a", a_id), Binder::new("b", b_id)),
             guard: None,
             body: PseudoExpr::var_with_id("a", a_id),
-        }],
+        }]
+        .into(),
     };
     let expr = PseudoExpr::Let {
         name: "m".to_string(),

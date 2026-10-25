@@ -192,7 +192,7 @@ impl PayloadRewriteCtx<'_> {
                                                 guard: None,
                                                 body: else_branch,
                                             },
-                                        ],
+                                        ].into(),
                                     });
                                     continue;
                                 }
@@ -214,7 +214,7 @@ impl PayloadRewriteCtx<'_> {
                                             guard: None,
                                             body: else_branch,
                                         },
-                                    ],
+                                    ].into(),
                                 });
                                 continue;
                             }

@@ -2755,7 +2755,7 @@ fn rewrite(expr: PseudoExpr, names: &StubAdtNames, analysis: &AliasAnalysis) -> 
                 } => {
                     steps.push(RwStep::Post(RwPost::WhenSubject {
                         subject_name,
-                        clauses,
+                        clauses: clauses.into_vec(),
                     }));
                     steps.push(RwStep::Visit(subject.into_inner()));
                 }

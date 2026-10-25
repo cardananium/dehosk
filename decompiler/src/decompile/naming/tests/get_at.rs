@@ -51,7 +51,8 @@ fn test_analyze_function_binding_names_get_at_wrapper() {
                                 }),
                             },
                         ),
-                    ],
+                    ]
+                    .into(),
                 }),
             }),
             body: PBox::new(PseudoExpr::Apply {
@@ -112,7 +113,8 @@ fn test_analyze_function_binding_names_direct_rec_get_at() {
                         }),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -167,7 +169,8 @@ fn test_analyze_function_binding_names_direct_rec_get_at_with_false_none() {
                         }),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -223,7 +226,8 @@ fn test_analyze_function_binding_ignores_same_name_different_id_get_at_tail_ref(
                         }),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 

@@ -906,7 +906,8 @@ fn sc_evidence_nested_projection_inside_when_clause_body() {
                 record: PBox::new(PseudoExpr::var_with_id("__1", p_id)),
                 selector: FieldSelector::ContextField("tx_info".to_string()),
             },
-        )],
+        )]
+        .into(),
     };
     assert!(has_script_context_evidence(&params, &body, None));
 }

@@ -9,7 +9,8 @@ fn make_when(body: PseudoExpr) -> PseudoExpr {
             pattern: WhenPattern::Wildcard,
             guard: None,
             body,
-        }],
+        }]
+        .into(),
     }
 }
 

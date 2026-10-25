@@ -43,7 +43,8 @@ fn test_let_lambda_rec_wrapper_promotes_to_direct_recfn_binding() {
                                     }),
                                 },
                             ),
-                        ],
+                        ]
+                        .into(),
                     }),
                 }),
                 body: PBox::new(PseudoExpr::Apply {
@@ -129,7 +130,8 @@ fn test_let_lambda_rec_wrapper_promotes_captured_outer_params_into_recfn() {
                                     }),
                                 },
                             ),
-                        ],
+                        ]
+                        .into(),
                     }),
                 }),
                 body: PBox::new(PseudoExpr::Apply {

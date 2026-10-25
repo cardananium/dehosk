@@ -198,7 +198,8 @@ fn test_substitute_var_for_var_does_not_capture_under_when_subject_new_name() {
             pattern: WhenPattern::Literal(PseudoExpr::var_with_id("x", old_id)),
             guard: Some(PseudoExpr::var_with_id("x", old_id)),
             body: PseudoExpr::var_with_id("x", old_id),
-        }],
+        }]
+        .into(),
     };
 
     let result = Simplifier::substitute_var_for_var(&expr, "x", Some(old_id), "y", new_id);
@@ -225,7 +226,8 @@ fn test_rename_var_binding_respects_when_subject_shadowing_but_renames_pattern_l
             pattern: WhenPattern::Literal(PseudoExpr::var("x")),
             guard: Some(PseudoExpr::var("x")),
             body: PseudoExpr::var("x"),
-        }],
+        }]
+        .into(),
     };
 
     let result = Simplifier::rename_var_binding(&expr, "x", None, "y");

@@ -48,7 +48,8 @@ fn test_boolean_negation_detection() {
                 guard: None,
                 body: PseudoExpr::Bool(true),
             },
-        ],
+        ]
+        .into(),
     };
     assert!(is_boolean_negation(&body));
 }

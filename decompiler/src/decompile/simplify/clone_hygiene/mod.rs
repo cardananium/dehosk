@@ -221,7 +221,7 @@ where
                     done.push(PseudoExpr::When {
                         subject: PBox::new(new_subject),
                         subject_name: new_subject_name,
-                        clauses: new_clauses,
+                        clauses: new_clauses.into(),
                     });
                 }
                 PseudoExpr::Apply { function, args } => {

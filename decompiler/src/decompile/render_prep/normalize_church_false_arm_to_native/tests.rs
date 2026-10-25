@@ -70,7 +70,8 @@ fn normalizes_church_false_arm_with_bool_sibling() {
                     right: PBox::new(var("b", 31)),
                 },
             },
-        ],
+        ]
+        .into(),
     };
     let out = normalize_church_false_arm_to_native(wrap_with_def(cf, when));
     // The now-unreferenced `church_false` def is self-cleaned away, so the
@@ -105,7 +106,8 @@ fn no_op_without_bool_sibling() {
                 guard: None,
                 body: var("other", 7),
             },
-        ],
+        ]
+        .into(),
     };
     let out = normalize_church_false_arm_to_native(wrap_with_def(cf, when));
     // No Bool sibling => no normalization => the church_false ref (hence
@@ -152,7 +154,8 @@ fn genuine_call_is_never_touched() {
                     right: PBox::new(var("b", 31)),
                 },
             },
-        ],
+        ]
+        .into(),
     };
     let out = normalize_church_false_arm_to_native(wrap_with_def(cf, when));
     // The genuine `church_false(x, y)` call keeps a live ref to the def, so
@@ -288,7 +291,8 @@ fn opaque_call_arm_does_not_veto_and_bool_sibling_grounds() {
                 guard: None,
                 body: cons_body,
             },
-        ],
+        ]
+        .into(),
     };
     assert!(
         when_is_bool_typed(

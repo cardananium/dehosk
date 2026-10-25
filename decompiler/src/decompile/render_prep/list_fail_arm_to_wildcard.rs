@@ -34,7 +34,8 @@ pub(super) fn list_fail_arm_to_wildcard(expr: PseudoExpr) -> PseudoExpr {
                         guard: None,
                         body: nil.body,
                     },
-                ],
+                ]
+                .into(),
             }
         }
         other => other,

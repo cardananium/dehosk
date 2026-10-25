@@ -4047,7 +4047,8 @@ fn consistent_ref_id_contract_accepts_improve_variable_names_outputs() {
                     crate::pseudo::ast::WhenPattern::Wildcard,
                     PseudoExpr::Error { message: None },
                 ),
-            ],
+            ]
+            .into(),
         }),
         body: PBox::new(PseudoExpr::Let {
             name: "check_2".to_string(),
@@ -4327,7 +4328,8 @@ fn consistent_ref_id_contract_accepts_disambiguate_constructors_output() {
                             id: Some(subject_id),
                         },
                     },
-                ],
+                ]
+                .into(),
             }),
         },
         None,
@@ -4653,7 +4655,8 @@ fn consistent_ref_id_contract_accepts_extract_complex_when_subjects_output() {
                     ]
                     .into(),
                 ),
-            )],
+            )]
+            .into(),
         }),
     });
 
@@ -4732,7 +4735,8 @@ fn consistent_ref_id_contract_accepts_collapse_eta_pair_selector_when_subjects_o
                     ]
                     .into(),
                 ),
-            )],
+            )]
+            .into(),
         }),
     });
 

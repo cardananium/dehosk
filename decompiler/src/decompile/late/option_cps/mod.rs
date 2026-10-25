@@ -96,7 +96,7 @@ fn try_rewrite_option_cps_apply_with_reserved(
                 body: PBox::new(PseudoExpr::When {
                     subject: PBox::new(subject),
                     subject_name: None,
-                    clauses,
+                    clauses: clauses.into(),
                 }),
             }
         }
@@ -106,7 +106,7 @@ fn try_rewrite_option_cps_apply_with_reserved(
                 args: core_args.into(),
             }),
             subject_name: None,
-            clauses,
+            clauses: clauses.into(),
         },
     })
 }

@@ -39,7 +39,8 @@ fn test_improve_variable_names_leaves_data_list_wrapper_to_nameless_owner() {
                             .into(),
                         },
                     ),
-                ],
+                ]
+                .into(),
             }),
         }),
         body: PBox::new(PseudoExpr::BuiltinCall {

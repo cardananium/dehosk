@@ -51,7 +51,8 @@ fn collapses_canonical_bool_identity_pattern_with_fail_arm() {
             WhenClause::new(true_pat(), true_ctor()),
             WhenClause::new(false_pat(), false_ctor()),
             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Error { message: None }),
-        ],
+        ]
+        .into(),
     };
 
     let rewritten = collapse_bool_identity_when(when_expr);
@@ -73,7 +74,8 @@ fn collapses_without_fail_arm() {
         clauses: vec![
             WhenClause::new(true_pat(), true_ctor()),
             WhenClause::new(false_pat(), false_ctor()),
-        ],
+        ]
+        .into(),
     };
 
     let rewritten = collapse_bool_identity_when(when_expr);
@@ -95,7 +97,8 @@ fn collapses_with_literal_bool_arm_bodies() {
             WhenClause::new(true_pat(), PseudoExpr::bool(true)),
             WhenClause::new(false_pat(), PseudoExpr::bool(false)),
             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Error { message: None }),
-        ],
+        ]
+        .into(),
     };
 
     let rewritten = collapse_bool_identity_when(when_expr);
@@ -117,7 +120,8 @@ fn does_not_collapse_when_arm_body_differs() {
         clauses: vec![
             WhenClause::new(true_pat(), false_ctor()),
             WhenClause::new(false_pat(), true_ctor()),
-        ],
+        ]
+        .into(),
     };
 
     let rewritten = collapse_bool_identity_when(when_expr);
@@ -143,7 +147,8 @@ fn does_not_collapse_when_subject_is_complex() {
         clauses: vec![
             WhenClause::new(true_pat(), true_ctor()),
             WhenClause::new(false_pat(), false_ctor()),
-        ],
+        ]
+        .into(),
     };
 
     let rewritten = collapse_bool_identity_when(when_expr);
@@ -165,7 +170,8 @@ fn does_not_collapse_when_only_one_bool_arm() {
         clauses: vec![
             WhenClause::new(true_pat(), true_ctor()),
             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Error { message: None }),
-        ],
+        ]
+        .into(),
     };
 
     let rewritten = collapse_bool_identity_when(when_expr);
@@ -190,7 +196,8 @@ fn does_not_collapse_when_guard_present() {
                 body: true_ctor(),
             },
             WhenClause::new(false_pat(), false_ctor()),
-        ],
+        ]
+        .into(),
     };
 
     let rewritten = collapse_bool_identity_when(when_expr);

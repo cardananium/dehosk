@@ -35,7 +35,8 @@ fn test_analyze_function_binding_names_accumulator_sum_wrapper() {
                         .into(),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -83,7 +84,8 @@ fn test_analyze_function_binding_names_accumulator_max_wrapper() {
                         }),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 

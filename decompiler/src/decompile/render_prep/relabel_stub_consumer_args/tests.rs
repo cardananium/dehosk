@@ -62,7 +62,8 @@ fn expect_known(
             pattern: known_pattern(kc, vec![b]),
             guard: None,
             body,
-        }],
+        }]
+        .into(),
     }
 }
 
@@ -75,7 +76,8 @@ fn expect_pair(p0: Binder, p1: Binder, subject: PseudoExpr, body: PseudoExpr) ->
             pattern: WhenPattern::Pair(p0, p1),
             guard: None,
             body,
-        }],
+        }]
+        .into(),
     }
 }
 
@@ -95,7 +97,8 @@ fn when_result(subject: PseudoExpr) -> PseudoExpr {
                 guard: None,
                 body: PseudoExpr::Bool(false),
             },
-        ],
+        ]
+        .into(),
     }
 }
 

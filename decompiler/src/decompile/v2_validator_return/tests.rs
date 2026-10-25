@@ -84,7 +84,8 @@ fn v2_rewrites_when_clause_body_unit_to_true() {
                 guard: None,
                 body: PseudoExpr::Bool(false),
             },
-        ],
+        ]
+        .into(),
     };
     let (expr, kinds) = make_validator_let(body);
     let result = lower_v2_tail_unit_to_true(expr, Some(ScriptVersion::PlutusV2), &kinds);

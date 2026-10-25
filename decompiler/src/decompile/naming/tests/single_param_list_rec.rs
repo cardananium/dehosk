@@ -32,7 +32,8 @@ fn test_analyze_single_param_list_rec_names_explicit_contains_shape() {
                     }),
                 },
             ),
-        ],
+        ]
+        .into(),
     };
 
     assert_eq!(
@@ -76,7 +77,8 @@ fn test_analyze_single_param_list_rec_names_explicit_all_shape() {
                     else_branch: PBox::new(PseudoExpr::bool(false)),
                 },
             ),
-        ],
+        ]
+        .into(),
     };
 
     assert_eq!(
@@ -120,7 +122,8 @@ fn test_analyze_single_param_list_rec_names_explicit_any_shape() {
                     }),
                 },
             ),
-        ],
+        ]
+        .into(),
     };
 
     assert_eq!(
@@ -173,7 +176,8 @@ fn test_analyze_single_param_list_rec_names_explicit_count_shape() {
                     }),
                 },
             ),
-        ],
+        ]
+        .into(),
     };
 
     assert_eq!(

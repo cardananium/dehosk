@@ -508,7 +508,8 @@ impl Rewriter {
                         guard: None,
                         body: fail.clone(),
                     },
-                ],
+                ]
+                .into(),
             },
         };
         // Wrap the pre-binds outside the guard, outermost = lowest slot index.

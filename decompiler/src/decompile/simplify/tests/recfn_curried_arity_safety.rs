@@ -48,7 +48,8 @@ fn does_not_flatten_recfn_with_under_applied_self_call() {
                     }),
                 },
             ),
-        ],
+        ]
+        .into(),
     };
 
     let recfn = PseudoExpr::RecFn {
@@ -121,7 +122,8 @@ fn flattens_recfn_when_self_call_matches_merged_arity() {
                     }),
                 },
             ),
-        ],
+        ]
+        .into(),
     };
 
     let recfn = PseudoExpr::RecFn {

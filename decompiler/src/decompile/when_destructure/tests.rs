@@ -12,7 +12,7 @@ fn test_extract_complex_when_subjects_unwraps_identity_iife_subject() {
             args: vec![PseudoExpr::var("xs")].into(),
         }),
         subject_name: None,
-        clauses: vec![WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Unit)],
+        clauses: vec![WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Unit)].into(),
     };
 
     let extracted = extract_complex_when_subjects(expr);
@@ -61,7 +61,8 @@ fn test_extract_complex_when_subjects_preserves_existing_subject_name_identity()
                 ]
                 .into(),
             ),
-        )],
+        )]
+        .into(),
     };
 
     let extracted = extract_complex_when_subjects(expr);
@@ -141,7 +142,7 @@ fn test_extract_complex_when_subjects_uses_fresh_generated_subject_name() {
                 args: vec![PseudoExpr::var("xs")].into(),
             }),
             subject_name: None,
-            clauses: vec![WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Unit)],
+            clauses: vec![WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Unit)].into(),
         }),
     };
 
@@ -206,7 +207,8 @@ fn test_lift_unpack_tag_when_subjects_promotes_constructor_patterns_and_fields()
                 ),
             ),
             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Error { message: None }),
-        ],
+        ]
+        .into(),
     };
 
     let lifted = lift_unpack_tag_when_subjects(expr, None, None);
@@ -268,7 +270,8 @@ fn test_destructure_when_fields_avoids_generated_binder_capture_under_lambda() {
                     "head".to_string(),
                 )),
             },
-        )],
+        )]
+        .into(),
     };
 
     let destructured = destructure_when_fields(expr, None, None);
@@ -331,7 +334,8 @@ fn test_destructure_when_fields_avoids_generated_binder_shadowing_existing_claus
                     ]
                     .into(),
                 ),
-            )],
+            )]
+            .into(),
         }),
     };
 
@@ -403,7 +407,8 @@ fn test_destructure_when_fields_reuses_high_index_field_binder_id() {
                 }]
                 .into(),
             ),
-        )],
+        )]
+        .into(),
     };
 
     let destructured = destructure_when_fields(expr, None, None);

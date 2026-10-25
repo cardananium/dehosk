@@ -30,7 +30,8 @@ fn single_arm_when(sc_id: VarId, body: PseudoExpr) -> PseudoExpr {
                 shape: ConstructorShape::unknown_data(0, 0),
             },
             body,
-        )],
+        )]
+        .into(),
     }
 }
 
@@ -105,7 +106,8 @@ fn leaves_when_with_multiple_clauses() {
                 },
                 PseudoExpr::int(2),
             ),
-        ],
+        ]
+        .into(),
     };
     let expr = entry_let(sc_id, when_expr, "decompiled");
     let result = collapse_script_context_when(expr);
@@ -141,7 +143,8 @@ fn collapses_when_trailing_wildcard_has_arbitrary_body() {
                 productive_body.clone(),
             ),
             WhenClause::new(WhenPattern::wildcard(), PseudoExpr::int(2)),
-        ],
+        ]
+        .into(),
     };
     let expr = entry_let(sc_id, when_expr, "decompiled");
     let result = collapse_script_context_when(expr);
@@ -177,7 +180,8 @@ fn leaves_when_when_pattern_binds_fields() {
                 shape: ConstructorShape::unknown_data(0, 2),
             },
             PseudoExpr::var("field1"),
-        )],
+        )]
+        .into(),
     };
     let expr = entry_let(sc_id, when_expr, "decompiled");
     let result = collapse_script_context_when(expr);
@@ -208,7 +212,8 @@ fn leaves_when_when_subject_is_not_script_context() {
                 shape: ConstructorShape::unknown_data(0, 0),
             },
             PseudoExpr::int(42),
-        )],
+        )]
+        .into(),
     };
     let expr = entry_let(sc_id, when_expr, "decompiled");
     let result = collapse_script_context_when(expr);
@@ -243,7 +248,8 @@ fn collapses_when_trailing_wildcard_is_fail() {
                 body.clone(),
             ),
             WhenClause::new(WhenPattern::wildcard(), PseudoExpr::Error { message: None }),
-        ],
+        ]
+        .into(),
     };
     let expr = entry_let(sc_id, when_expr, "decompiled");
     let result = collapse_script_context_when(expr);
@@ -288,7 +294,8 @@ fn leaves_when_with_two_productive_arms_and_one_fail() {
                 PseudoExpr::int(2),
             ),
             WhenClause::new(WhenPattern::wildcard(), PseudoExpr::Error { message: None }),
-        ],
+        ]
+        .into(),
     };
     let expr = entry_let(sc_id, when_expr, "decompiled");
     let result = collapse_script_context_when(expr);
@@ -322,7 +329,8 @@ fn leaves_when_with_wildcard_before_constructor() {
                 },
                 PseudoExpr::int(1),
             ),
-        ],
+        ]
+        .into(),
     };
     let expr = entry_let(sc_id, when_expr, "decompiled");
     let result = collapse_script_context_when(expr);
@@ -352,7 +360,8 @@ fn leaves_when_with_subject_alias() {
                 shape: ConstructorShape::unknown_data(0, 0),
             },
             PseudoExpr::int(42),
-        )],
+        )]
+        .into(),
     };
     let expr = entry_let(sc_id, when_expr, "decompiled");
     let result = collapse_script_context_when(expr);
@@ -386,7 +395,8 @@ fn leaves_when_with_nonzero_constructor_tag() {
                 PseudoExpr::int(1),
             ),
             WhenClause::new(WhenPattern::wildcard(), PseudoExpr::Error { message: None }),
-        ],
+        ]
+        .into(),
     };
     let expr = entry_let(sc_id, when_expr, "decompiled");
     let result = collapse_script_context_when(expr);
@@ -417,7 +427,8 @@ fn leaves_when_with_guard() {
             },
             guard: Some(PseudoExpr::Bool(true)),
             body: PseudoExpr::int(42),
-        }],
+        }]
+        .into(),
     };
     let expr = entry_let(sc_id, when_expr, "decompiled");
     let result = collapse_script_context_when(expr);

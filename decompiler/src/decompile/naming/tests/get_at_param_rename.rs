@@ -49,7 +49,8 @@ fn test_improve_variable_names_renames_let_bound_recfn_binder_without_duplicate_
                             }),
                         },
                     ),
-                ],
+                ]
+                .into(),
             }),
         }),
         body: PBox::new(PseudoExpr::Apply {
@@ -144,7 +145,8 @@ fn test_improve_variable_names_renames_get_at_params_to_list_and_index() {
                         }),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 

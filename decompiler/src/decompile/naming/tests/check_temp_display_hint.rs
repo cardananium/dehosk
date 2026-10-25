@@ -17,7 +17,8 @@ fn collect_check_temp_display_name_hints_names_unused_void_temp_binding() {
                     PseudoExpr::Unit,
                 ),
                 WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Error { message: None }),
-            ],
+            ]
+            .into(),
         }),
         body: PBox::new(PseudoExpr::Bool(true)),
     };
@@ -44,7 +45,8 @@ fn semantic_and_render_naming_leave_check_temp_to_nameless_owner() {
                         PseudoExpr::Unit,
                     ),
                     WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Error { message: None }),
-                ],
+                ]
+                .into(),
             }),
             body: PBox::new(PseudoExpr::Bool(true)),
         };
@@ -202,7 +204,8 @@ fn collect_check_temp_display_name_hints_ignores_same_name_shadow_ref() {
                     PseudoExpr::Unit,
                 ),
                 WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Error { message: None }),
-            ],
+            ]
+            .into(),
         }),
         body: PBox::new(PseudoExpr::Let {
             name: "check_2".to_string(),
@@ -240,7 +243,8 @@ fn test_improve_variable_names_keeps_check_binding_when_actual_ref_remains() {
                     PseudoExpr::Unit,
                 ),
                 WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Error { message: None }),
-            ],
+            ]
+            .into(),
         }),
         body: PBox::new(PseudoExpr::var_with_id("check_2", check_id)),
     };
@@ -274,7 +278,8 @@ fn collect_check_temp_display_name_hints_names_variant_void_temp_binding() {
                     PseudoExpr::Unit,
                 ),
                 WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Error { message: None }),
-            ],
+            ]
+            .into(),
         }),
         body: PBox::new(PseudoExpr::Bool(true)),
     };
@@ -321,7 +326,8 @@ fn collect_check_temp_display_name_hints_names_nested_variant_validation() {
                                     WhenPattern::Wildcard,
                                     PseudoExpr::Error { message: None },
                                 ),
-                            ],
+                            ]
+                            .into(),
                         }),
                         body: PBox::new(PseudoExpr::Unit),
                     },
@@ -350,12 +356,14 @@ fn collect_check_temp_display_name_hints_names_nested_variant_validation() {
                                     WhenPattern::Wildcard,
                                     PseudoExpr::Error { message: None },
                                 ),
-                            ],
+                            ]
+                            .into(),
                         }),
                         body: PBox::new(PseudoExpr::Unit),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
         body: PBox::new(PseudoExpr::Bool(true)),
     };
@@ -390,7 +398,8 @@ fn collect_check_temp_display_name_hints_uses_consistent_subject_field_access() 
                         ),
                     ),
                     WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Error { message: None }),
-                ],
+                ]
+                .into(),
             }),
             body: PBox::new(PseudoExpr::Bool(true)),
         }),
@@ -432,7 +441,8 @@ fn collect_check_temp_display_name_hints_uses_subject_name_for_inconsistent_subj
                     ),
                 ),
                 WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Error { message: None }),
-            ],
+            ]
+            .into(),
         }),
         body: PBox::new(PseudoExpr::Bool(true)),
     };

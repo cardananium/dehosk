@@ -42,7 +42,8 @@ fn when2(subj: VarId, ctor_body: PseudoExpr, fallback: PseudoExpr) -> PseudoExpr
                 guard: None,
                 body: fallback,
             },
-        ],
+        ]
+        .into(),
     }
 }
 
@@ -260,7 +261,8 @@ fn bails_on_wildcard_first_selector() {
                 guard: None,
                 body: ident(xid),
             },
-        ],
+        ]
+        .into(),
     };
     let (prog, _fid, _rid) = program(PseudoExpr::int(0), reversed);
     let out = inline_identity_params(prog.clone());
@@ -319,7 +321,7 @@ fn bails_on_multi_call_site() {
         name: "f".to_string(),
         id: Some(fid),
         value: PBox::new(f_lambda),
-        body: PBox::new(PseudoExpr::Tuple((vec![mk_call(), mk_call()]).into())),
+        body: PBox::new(PseudoExpr::Tuple(vec![mk_call(), mk_call()].into())),
     };
     let out = inline_identity_params(prog.clone());
     assert_eq!(out, prog, "multiple call sites must NOT fold");

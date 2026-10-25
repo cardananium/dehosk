@@ -65,7 +65,8 @@ fn test_improve_variable_names_ignores_same_name_different_id_lookup_nested_map_
                                     }),
                                 },
                             ),
-                        ],
+                        ]
+                        .into(),
                     }),
                 }),
                 body: PBox::new(PseudoExpr::Apply {
@@ -112,7 +113,8 @@ fn test_improve_variable_names_ignores_same_name_different_id_lookup_nested_map_
                                             }),
                                         },
                                     ),
-                                ],
+                                ]
+                                .into(),
                             }),
                         },
                         PseudoExpr::BuiltinCall {
@@ -205,7 +207,8 @@ fn test_improve_variable_names_ignores_same_name_different_id_lookup_then_tail_r
                             }),
                         },
                     ),
-                ],
+                ]
+                .into(),
             }),
         }),
         body: PBox::new(PseudoExpr::Apply {
@@ -304,7 +307,8 @@ fn test_improve_variable_names_ignores_same_name_different_id_lookup_nested_int_
                                         }),
                                     },
                                 ),
-                            ],
+                            ]
+                            .into(),
                         }),
                     }),
                     body: PBox::new(PseudoExpr::Let {
@@ -339,7 +343,8 @@ fn test_improve_variable_names_ignores_same_name_different_id_lookup_nested_int_
                                         .into(),
                                     },
                                 ),
-                            ],
+                            ]
+                            .into(),
                         }),
                         body: PBox::new(PseudoExpr::When {
                             subject: PBox::new(PseudoExpr::var("l2")),
@@ -363,7 +368,8 @@ fn test_improve_variable_names_ignores_same_name_different_id_lookup_nested_int_
                                         .into(),
                                     },
                                 ),
-                            ],
+                            ]
+                            .into(),
                         }),
                     }),
                 }),

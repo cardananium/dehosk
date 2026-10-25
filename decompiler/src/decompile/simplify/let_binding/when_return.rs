@@ -86,7 +86,7 @@ impl Simplifier {
         Some(PseudoExpr::When {
             subject: subject.clone(),
             subject_name: subject_name.clone(),
-            clauses: new_clauses,
+            clauses: new_clauses.into(),
         })
     }
 }

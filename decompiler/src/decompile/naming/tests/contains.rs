@@ -66,7 +66,8 @@ fn test_analyze_function_binding_ignores_same_name_different_id_contains_tail_re
                         }),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 

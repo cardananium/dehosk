@@ -27,7 +27,8 @@ fn test_improve_variable_names_renames_multi_suffix_list_acc_params() {
                         args: vec![PseudoExpr::var("tail"), PseudoExpr::var("acc")].into(),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -80,7 +81,8 @@ fn test_improve_variable_names_renames_nested_accumulator_helper_params() {
                         .into(),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -138,7 +140,8 @@ fn test_improve_variable_names_renames_outer_decode_credential_list_param() {
                         .into(),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -188,7 +191,8 @@ fn test_improve_variable_names_renames_nested_single_param_list_helper() {
                         }),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 

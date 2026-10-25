@@ -33,7 +33,8 @@ fn test_validate_type_invariants_accepts_pair_pattern_through_let_body_type() {
             pattern: WhenPattern::Pair(Binder::synthetic("left"), Binder::synthetic("right")),
             guard: None,
             body: PseudoExpr::Unit,
-        }],
+        }]
+        .into(),
     };
 
     validate_type_invariants(&expr, None, &env)

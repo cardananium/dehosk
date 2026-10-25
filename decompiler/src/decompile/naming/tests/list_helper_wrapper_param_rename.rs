@@ -34,7 +34,8 @@ fn test_improve_variable_names_renames_outer_decode_credential_wrapper_params() 
                                     .into(),
                             },
                         ),
-                    ],
+                    ]
+                    .into(),
                 }),
             }),
             body: PBox::new(PseudoExpr::Apply {
@@ -93,7 +94,8 @@ fn test_improve_variable_names_renames_let_wrapped_single_param_list_helper() {
                                     .into(),
                             },
                         ),
-                    ],
+                    ]
+                    .into(),
                 }),
             }),
             body: PBox::new(PseudoExpr::When {
@@ -121,7 +123,8 @@ fn test_improve_variable_names_renames_let_wrapped_single_param_list_helper() {
                             }),
                         },
                     ),
-                ],
+                ]
+                .into(),
             }),
         }),
     };

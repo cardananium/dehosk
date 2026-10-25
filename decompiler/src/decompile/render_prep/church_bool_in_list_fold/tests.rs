@@ -48,7 +48,8 @@ fn rewrites_nil_true_when_cons_returns_apply() {
                     .into(),
                 },
             },
-        ],
+        ]
+        .into(),
     };
 
     let rewritten = rewrite_church_bool_in_list_fold(expr);
@@ -95,7 +96,8 @@ fn does_not_rewrite_when_both_arms_are_bool() {
                 guard: None,
                 body: PseudoExpr::Bool(false),
             },
-        ],
+        ]
+        .into(),
     };
 
     let rewritten = rewrite_church_bool_in_list_fold(expr);
@@ -137,7 +139,8 @@ fn does_not_rewrite_when_cons_arm_evaluates_to_bool() {
                     right: PBox::new(PseudoExpr::Bool(false)),
                 },
             },
-        ],
+        ]
+        .into(),
     };
 
     let rewritten = rewrite_church_bool_in_list_fold(expr);
@@ -187,7 +190,8 @@ fn rewrites_nil_false_to_church_false() {
                     args: vec![PseudoExpr::Unit].into(),
                 },
             },
-        ],
+        ]
+        .into(),
     };
 
     let rewritten = rewrite_church_bool_in_list_fold(expr);
@@ -317,7 +321,8 @@ fn does_not_rewrite_when_wildcard_fallthrough() {
                     args: vec![].into(),
                 },
             },
-        ],
+        ]
+        .into(),
     };
 
     let rewritten = rewrite_church_bool_in_list_fold(expr);

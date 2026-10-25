@@ -26,7 +26,7 @@ fn when_on(subject: &str, sid: VarId, clauses: Vec<WhenClause>) -> PseudoExpr {
     PseudoExpr::When {
         subject: PBox::new(PseudoExpr::var_with_id(subject, sid)),
         subject_name: None,
-        clauses,
+        clauses: clauses.into(),
     }
 }
 
@@ -37,7 +37,7 @@ fn when_on_field(record: &str, rid: VarId, field: &str, clauses: Vec<WhenClause>
     PseudoExpr::When {
         subject: PBox::new(subject),
         subject_name: None,
-        clauses,
+        clauses: clauses.into(),
     }
 }
 
@@ -603,7 +603,8 @@ fn credential_when(subject: &str, sid: VarId, body0: PseudoExpr, body1: PseudoEx
         clauses: vec![
             mk(0, VarId::new(9001), body0),
             mk(1, VarId::new(9002), body1),
-        ],
+        ]
+        .into(),
     }
 }
 
@@ -701,9 +702,10 @@ fn leaves_credential_stub_when_key_conflicts_across_sites() {
             },
             guard: None,
             body: un_i_of(VarId::new(9202)),
-        }],
+        }]
+        .into(),
     };
-    let expr = PseudoExpr::Tuple((vec![cred, conflicting]).into());
+    let expr = PseudoExpr::Tuple(vec![cred, conflicting].into());
     let out = name_cardano_sum_arms(expr, &CardanoTypeEnv::default(), &RenderCtx::at(None));
     let PseudoExpr::Tuple(items) = out else {
         panic!()

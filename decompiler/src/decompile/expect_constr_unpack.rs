@@ -839,7 +839,8 @@ pub(super) fn resolve_expect_constr_unpack(
                                 message: Some("expect".to_string()),
                             },
                         },
-                    ],
+                    ]
+                    .into(),
                 };
             }
 

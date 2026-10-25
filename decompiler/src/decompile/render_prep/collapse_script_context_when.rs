@@ -123,7 +123,7 @@ impl ExprFolder for Collapser {
             return PseudoExpr::When {
                 subject: PBox::new(subject),
                 subject_name,
-                clauses,
+                clauses: clauses.into(),
             };
         }
         // Gate 3: first clause `Constructor(tag=0, fields=[])`, all
@@ -134,7 +134,7 @@ impl ExprFolder for Collapser {
                 return PseudoExpr::When {
                     subject: PBox::new(subject),
                     subject_name,
-                    clauses,
+                    clauses: clauses.into(),
                 };
             }
         }
@@ -142,21 +142,21 @@ impl ExprFolder for Collapser {
             return PseudoExpr::When {
                 subject: PBox::new(subject),
                 subject_name,
-                clauses,
+                clauses: clauses.into(),
             };
         };
         let WhenPattern::Constructor { tag, fields, .. } = &first.pattern else {
             return PseudoExpr::When {
                 subject: PBox::new(subject),
                 subject_name,
-                clauses,
+                clauses: clauses.into(),
             };
         };
         if *tag != 0 || !fields.is_empty() {
             return PseudoExpr::When {
                 subject: PBox::new(subject),
                 subject_name,
-                clauses,
+                clauses: clauses.into(),
             };
         }
         for c in clauses.iter().skip(1) {
@@ -164,7 +164,7 @@ impl ExprFolder for Collapser {
                 return PseudoExpr::When {
                     subject: PBox::new(subject),
                     subject_name,
-                    clauses,
+                    clauses: clauses.into(),
                 };
             }
         }

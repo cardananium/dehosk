@@ -69,7 +69,8 @@ fn relabels_witnessed_producer_leaves() {
             pattern: some_pattern(),
             guard: None,
             body: PseudoExpr::Bool(true),
-        }],
+        }]
+        .into(),
     };
     let input = with_marker(PseudoExpr::Let {
         name: "d".to_string(),
@@ -147,7 +148,8 @@ fn non_leaf_positions_stay_raw() {
             pattern: some_pattern(),
             guard: None,
             body: PseudoExpr::Bool(true),
-        }],
+        }]
+        .into(),
     };
     let input = with_marker(PseudoExpr::Let {
         name: "helper".to_string(),

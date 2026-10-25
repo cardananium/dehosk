@@ -376,7 +376,8 @@ fn test_strip_force_on_var_respects_when_subject_and_pattern_shadowing() {
             pattern: WhenPattern::Var(Binder::new("x", VarId::fresh_compat_placeholder())),
             guard: Some(PseudoExpr::Force(PBox::new(PseudoExpr::var("x")))),
             body: PseudoExpr::Force(PBox::new(PseudoExpr::var("x"))),
-        }],
+        }]
+        .into(),
     };
 
     let stripped = strip_force_on_var(expr.clone(), "x", None);
@@ -433,7 +434,8 @@ fn test_count_var_usages_respects_when_subject_and_pattern_shadowing() {
                     pattern: WhenPattern::Var(Binder::new("x", VarId::fresh_compat_placeholder())),
                     guard: Some(PseudoExpr::Force(PBox::new(PseudoExpr::var("x")))),
                     body: PseudoExpr::Force(PBox::new(PseudoExpr::var("x"))),
-                }],
+                }]
+                .into(),
             },
         ]
         .into(),
@@ -614,7 +616,8 @@ fn test_cancel_force_delay_vars_respects_when_pattern_shadowing() {
                 pattern: WhenPattern::Var(Binder::new("x", pattern_id)),
                 guard: None,
                 body: PseudoExpr::Force(PBox::new(PseudoExpr::var("x"))),
-            }],
+            }]
+            .into(),
         }),
     };
 

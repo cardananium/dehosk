@@ -290,7 +290,8 @@ fn eliminate_var_aliases_rewrites_when_guard_and_body_refs() {
                     pattern: WhenPattern::Wildcard,
                     guard: Some(PseudoExpr::var_with_id("x", x_id)),
                     body: PseudoExpr::var_with_id("x", x_id),
-                }],
+                }]
+                .into(),
             }),
         }),
     };
@@ -336,7 +337,8 @@ fn eliminate_var_aliases_respects_when_pattern_shadowing() {
                     pattern: WhenPattern::Var(Binder::new("x", pattern_x_id)),
                     guard: Some(PseudoExpr::var_with_id("x", pattern_x_id)),
                     body: PseudoExpr::var_with_id("x", pattern_x_id),
-                }],
+                }]
+                .into(),
             }),
         }),
     };
@@ -382,7 +384,8 @@ fn eliminate_var_aliases_respects_when_subject_name_shadowing() {
                     pattern: WhenPattern::Wildcard,
                     guard: Some(PseudoExpr::var_with_id("x", subject_x_id)),
                     body: PseudoExpr::var_with_id("x", subject_x_id),
-                }],
+                }]
+                .into(),
             }),
         }),
     };

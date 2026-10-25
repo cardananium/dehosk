@@ -23,7 +23,8 @@ fn test_analyze_when_body_accepts_un_bytearray_extractor() {
                 guard: None,
                 body: PseudoExpr::error(),
             },
-        ],
+        ]
+        .into(),
     };
 
     assert_eq!(
@@ -54,7 +55,8 @@ fn test_analyze_when_body_accepts_un_int_extractor() {
                 guard: None,
                 body: PseudoExpr::error(),
             },
-        ],
+        ]
+        .into(),
     };
 
     assert_eq!(analyze_when_body(&body, 1), Some("extract_int".to_string()));
@@ -88,7 +90,8 @@ fn multi_arm_decoder_is_not_named_extract_policy_id() {
                 guard: None,
                 body: PseudoExpr::error(),
             },
-        ],
+        ]
+        .into(),
     };
     assert_ne!(
         analyze_when_body(&body, 1),
@@ -119,14 +122,15 @@ fn extractor_inside_a_nested_lambda_does_not_name_the_function() {
                     vec!["field_0".into()],
                 ),
                 guard: None,
-                body: PseudoExpr::Tuple((vec![PseudoExpr::var("field_0"), nested]).into()),
+                body: PseudoExpr::Tuple(vec![PseudoExpr::var("field_0"), nested].into()),
             },
             WhenClause {
                 pattern: WhenPattern::Wildcard,
                 guard: None,
                 body: PseudoExpr::error(),
             },
-        ],
+        ]
+        .into(),
     };
     assert_ne!(
         analyze_when_body(&body, 1),
@@ -156,7 +160,7 @@ fn narrow_decoder_without_the_output_datum_shape_is_not_named_for_it() {
     let body = PseudoExpr::When {
         subject: PBox::new(PseudoExpr::var("x")),
         subject_name: None,
-        clauses: vec![arm(0), arm(1), arm(2)],
+        clauses: vec![arm(0), arm(1), arm(2)].into(),
     };
     assert_eq!(
         analyze_when_body(&body, 1),
@@ -186,7 +190,7 @@ fn output_datum_shape_keeps_its_name() {
     let body = PseudoExpr::When {
         subject: PBox::new(PseudoExpr::var("x")),
         subject_name: None,
-        clauses: vec![nullary, payload(1), payload(2)],
+        clauses: vec![nullary, payload(1), payload(2)].into(),
     };
     assert_eq!(
         analyze_when_body(&body, 1),
@@ -226,7 +230,8 @@ fn output_datum_shape_rejects_a_live_wildcard_arm() {
                 guard: None,
                 body: PseudoExpr::Bool(false),
             },
-        ],
+        ]
+        .into(),
     };
     assert_ne!(
         analyze_when_body(&body, 1),
@@ -263,7 +268,8 @@ fn extractor_behind_a_conditional_still_names_the_function() {
                 guard: None,
                 body: PseudoExpr::error(),
             },
-        ],
+        ]
+        .into(),
     };
     assert_eq!(
         analyze_when_body(&body, 1),

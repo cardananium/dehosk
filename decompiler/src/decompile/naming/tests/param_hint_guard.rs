@@ -73,7 +73,8 @@ fn test_improve_variable_names_param_hint_avoids_shadowing_outer_same_name_ref()
                                 }),
                             },
                         ),
-                    ],
+                    ]
+                    .into(),
                 }),
             }),
         }),
@@ -187,7 +188,8 @@ fn test_improve_variable_names_param_fallback_ignores_same_name_foreign_binder()
                         }),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
     let foreign_lambda = PseudoExpr::Lambda {
@@ -198,7 +200,7 @@ fn test_improve_variable_names_param_fallback_ignores_same_name_foreign_binder()
         name: "list".to_string(),
         id: Some(outer_list_id),
         value: PBox::new(PseudoExpr::int(0)),
-        body: PBox::new(PseudoExpr::Tuple((vec![rec, foreign_lambda]).into())),
+        body: PBox::new(PseudoExpr::Tuple(vec![rec, foreign_lambda].into())),
     };
     assert!(
         !crate::decompile::ref_retarget::refs_need_retarget_by_scope(&expr),

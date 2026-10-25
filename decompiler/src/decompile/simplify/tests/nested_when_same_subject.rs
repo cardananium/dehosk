@@ -38,9 +38,11 @@ fn test_nested_when_same_subject_constructor_resolution() {
                         WhenPattern::constructor(ConstructorShape::unknown_data(1, 0), vec![]),
                         PseudoExpr::int(999),
                     ),
-                ],
+                ]
+                .into(),
             },
-        )],
+        )]
+        .into(),
     };
 
     let simplified = simplify(expr);
@@ -103,9 +105,11 @@ fn test_nested_when_same_subject_wildcard_fallback() {
                         PseudoExpr::int(1),
                     ),
                     WhenClause::new(WhenPattern::Wildcard, PseudoExpr::int(2)),
-                ],
+                ]
+                .into(),
             },
-        )],
+        )]
+        .into(),
     };
 
     let simplified = simplify(expr);

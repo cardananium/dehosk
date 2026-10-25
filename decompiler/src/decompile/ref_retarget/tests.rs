@@ -160,7 +160,8 @@ fn when_pattern_binder_retargets() {
                 name: "v".to_string(),
                 id: Some(stale),
             },
-        }],
+        }]
+        .into(),
     };
     let out = retarget_refs_by_scope(expr);
     let PseudoExpr::When { clauses, .. } = out else {

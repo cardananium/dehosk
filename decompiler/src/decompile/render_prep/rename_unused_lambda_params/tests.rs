@@ -114,7 +114,8 @@ fn renames_unused_pair_binder_in_when_clause() {
         clauses: vec![WhenClause::new(
             WhenPattern::Pair(Binder::new("__7", dead_id), Binder::new("used", used_id)),
             PseudoExpr::var_with_id("used", used_id),
-        )],
+        )]
+        .into(),
     };
     let renamed = rename_unused_lambda_params(expr);
     let PseudoExpr::When { clauses, .. } = renamed else {
@@ -145,7 +146,8 @@ fn renames_unused_constructor_field_in_when_clause() {
                 shape: ConstructorShape::unknown_data(0, 2),
             },
             PseudoExpr::var_with_id("used", used_id),
-        )],
+        )]
+        .into(),
     };
     let renamed = rename_unused_lambda_params(expr);
     let PseudoExpr::When { clauses, .. } = renamed else {
@@ -192,7 +194,8 @@ fn keeps_payload_variant_under_type_hint() {
                 shape: ConstructorShape::unknown_data(0, 7),
             },
             PseudoExpr::var_with_id("used", used_id),
-        )],
+        )]
+        .into(),
     };
     let renamed = rename_unused_lambda_params(expr);
     let PseudoExpr::When { clauses, .. } = renamed else {
@@ -236,7 +239,8 @@ fn collapses_payload_when_no_type_hint() {
                 shape: ConstructorShape::unknown_data(0, 1),
             },
             PseudoExpr::var_with_id("used", used_id),
-        )],
+        )]
+        .into(),
     };
     let renamed = rename_unused_lambda_params(expr);
     let PseudoExpr::When { clauses, .. } = renamed else {
@@ -271,7 +275,8 @@ fn prefix_marks_unused_nonplaceholder_constructor_field() {
                 shape: ConstructorShape::unknown_data(0, 2),
             },
             PseudoExpr::var_with_id("datum", datum_id),
-        )],
+        )]
+        .into(),
     };
     let out = underscore_unused_pattern_binders(expr);
     let PseudoExpr::When { clauses, .. } = out else {
@@ -313,7 +318,8 @@ fn prefix_leaves_lambda_params_and_placeholders_alone() {
                 shape: ConstructorShape::unknown_data(0, 2),
             },
             PseudoExpr::var_with_id("used", used_id),
-        )],
+        )]
+        .into(),
     };
     let expr = PseudoExpr::Lambda {
         params: vec![Binder::new("output_reference", lam_id)],
@@ -357,7 +363,8 @@ fn prefix_is_idempotent() {
                 shape: ConstructorShape::unknown_data(0, 1),
             },
             PseudoExpr::var_with_id("used", used_id),
-        )],
+        )]
+        .into(),
     };
     let once = underscore_unused_pattern_binders(expr);
     let twice = underscore_unused_pattern_binders(once);

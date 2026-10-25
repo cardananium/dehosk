@@ -53,7 +53,8 @@ fn rewrites_bool_residue_to_if() {
                 guard: None,
                 body: varref("B", 2),
             },
-        ],
+        ]
+        .into(),
     };
     // let result = if cond { e } else { b } in <when_body>
     let if_then_else = PseudoExpr::Let {
@@ -128,7 +129,8 @@ fn does_not_rewrite_when_branches_same_tag() {
                 guard: None,
                 body: varref("B", 2),
             },
-        ],
+        ]
+        .into(),
     };
     let expr = PseudoExpr::Let {
         name: "e".to_string(),
@@ -176,7 +178,8 @@ fn does_not_rewrite_when_constructor_has_fields() {
                 guard: None,
                 body: varref("B", 2),
             },
-        ],
+        ]
+        .into(),
     };
     let expr = PseudoExpr::Let {
         name: "e".to_string(),

@@ -58,7 +58,8 @@ fn test_analyze_function_binding_names_lookup_nested_map_wrapper() {
                                 }),
                             },
                         ),
-                    ],
+                    ]
+                    .into(),
                 }),
             }),
             body: PBox::new(PseudoExpr::Apply {
@@ -105,7 +106,8 @@ fn test_analyze_function_binding_names_lookup_nested_map_wrapper() {
                                         }),
                                     },
                                 ),
-                            ],
+                            ]
+                            .into(),
                         }),
                     },
                     PseudoExpr::BuiltinCall {
@@ -185,7 +187,8 @@ fn test_analyze_function_binding_ignores_same_name_different_id_lookup_nested_ma
                                 }),
                             },
                         ),
-                    ],
+                    ]
+                    .into(),
                 }),
             }),
             body: PBox::new(PseudoExpr::Apply {
@@ -232,7 +235,8 @@ fn test_analyze_function_binding_ignores_same_name_different_id_lookup_nested_ma
                                         }),
                                     },
                                 ),
-                            ],
+                            ]
+                            .into(),
                         }),
                     },
                     PseudoExpr::BuiltinCall {

@@ -22,7 +22,7 @@ fn sibling_duplicate_lets_split() {
         )),
     };
     let input =
-        PseudoExpr::Tuple((vec![mk(1, PseudoExpr::int(0)), mk(2, PseudoExpr::int(0))]).into());
+        PseudoExpr::Tuple(vec![mk(1, PseudoExpr::int(0)), mk(2, PseudoExpr::int(0))].into());
     let out = uniquify_duplicate_binders(input);
     assert_eq!(count_duplicate_binder_ids(&out), 0);
     let PseudoExpr::Tuple(items) = &out else {
@@ -67,7 +67,8 @@ fn nested_duplicate_pattern_binder() {
                     pattern: WhenPattern::Var(binder("inner", 7)),
                     guard: None,
                     body: varref("inner", 7),
-                }],
+                }]
+                .into(),
             }),
         )),
     };
@@ -118,7 +119,7 @@ fn let_recfn_pair_stays_collapsed() {
         body: PBox::new(varref("f", id)),
     };
     // Two copies of the same pair (the clone shape).
-    let input = PseudoExpr::Tuple((vec![pair(7), pair(7)]).into());
+    let input = PseudoExpr::Tuple(vec![pair(7), pair(7)].into());
     let out = uniquify_duplicate_binders(input);
     assert_eq!(count_duplicate_binder_ids(&out), 0);
     let PseudoExpr::Tuple(items) = &out else {

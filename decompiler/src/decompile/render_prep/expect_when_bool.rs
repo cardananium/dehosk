@@ -143,7 +143,7 @@ fn try_rewrite(function: &PseudoExpr, args: &[PseudoExpr]) -> Option<PseudoExpr>
     Some(PseudoExpr::When {
         subject: subject.clone(),
         subject_name: None,
-        clauses: rewritten_clauses,
+        clauses: rewritten_clauses.into(),
     })
 }
 

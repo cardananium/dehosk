@@ -31,16 +31,13 @@ fn when(clauses: Vec<WhenClause>) -> PseudoExpr {
     PseudoExpr::When {
         subject: PBox::new(var("xs", 1)),
         subject_name: None,
-        clauses,
+        clauses: clauses.into(),
     }
 }
 
 #[test]
 fn nil_fail_arm_becomes_wildcard_fallthrough() {
-    let before = when(vec![
-        clause(nil(), fail()),
-        clause(cons(), var("h", 2)),
-    ]);
+    let before = when(vec![clause(nil(), fail()), clause(cons(), var("h", 2))]);
     let after = when(vec![
         clause(cons(), var("h", 2)),
         clause(WhenPattern::Wildcard, fail()),

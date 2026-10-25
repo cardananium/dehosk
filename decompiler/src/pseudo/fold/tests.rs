@@ -123,7 +123,8 @@ fn test_visitor_when_hook_runs_before_clause_walks() {
             pattern: WhenPattern::Wildcard,
             guard: Some(PseudoExpr::var("guard")),
             body: PseudoExpr::var("body"),
-        }],
+        }]
+        .into(),
     };
 
     let mut visitor = WhenOrder { events: Vec::new() };
@@ -164,7 +165,8 @@ fn test_visitor_when_clause_hook_runs_after_literal_before_guard_and_body() {
             pattern: WhenPattern::Literal(PseudoExpr::var("lit")),
             guard: Some(PseudoExpr::var("guard")),
             body: PseudoExpr::var("body"),
-        }],
+        }]
+        .into(),
     };
 
     let mut visitor = WhenClauseOrder { events: Vec::new() };

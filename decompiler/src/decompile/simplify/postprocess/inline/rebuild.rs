@@ -90,7 +90,7 @@ pub(super) fn rebuild_constr_from_results(
 }
 
 pub(super) fn rebuild_tuple_from_results(results: &mut Vec<PseudoExpr>, len: usize) -> PseudoExpr {
-    PseudoExpr::Tuple((pop_n_results(results, len)).into())
+    PseudoExpr::Tuple(pop_n_results(results, len).into())
 }
 
 pub(super) fn rebuild_field_access_from_results(
@@ -175,6 +175,6 @@ pub(super) fn rebuild_when_from_results(
     PseudoExpr::When {
         subject: PBox::new(subject),
         subject_name,
-        clauses: rebuilt_clauses,
+        clauses: rebuilt_clauses.into(),
     }
 }

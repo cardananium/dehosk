@@ -12,7 +12,8 @@ fn test_when_single_known_constr_clause_collapses() {
         clauses: vec![WhenClause::new(
             WhenPattern::constructor(ConstructorShape::unknown_data(0, 1), vec!["_".into()]),
             PseudoExpr::int(42),
-        )],
+        )]
+        .into(),
     }));
 
     let simplified = simplify(expr);
@@ -37,7 +38,8 @@ fn test_when_known_constr_multi_clause_picks_matching_constructor() {
                 PseudoExpr::int(20),
             ),
             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::int(30)),
-        ],
+        ]
+        .into(),
     }));
 
     let simplified = simplify(expr);
@@ -55,7 +57,8 @@ fn test_when_known_constr_with_fewer_pattern_fields_collapses_only_non_safe() {
         clauses: vec![WhenClause::new(
             WhenPattern::constructor(ConstructorShape::unknown_data(0, 0), vec![]),
             PseudoExpr::int(99),
-        )],
+        )]
+        .into(),
     };
 
     let simplified = simplify(expr.clone());
@@ -86,7 +89,8 @@ fn test_when_known_constr_ignores_guard_on_non_matching_constructor_clause() {
                 WhenPattern::constructor(ConstructorShape::unknown_data(1, 1), vec!["_".into()]),
                 PseudoExpr::int(20),
             ),
-        ],
+        ]
+        .into(),
     };
 
     let simplified = simplify(expr);
@@ -111,7 +115,8 @@ fn test_when_known_constr_does_not_collapse_across_matching_guarded_clause() {
                 body: PseudoExpr::int(10),
             },
             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::int(20)),
-        ],
+        ]
+        .into(),
     };
 
     let simplified = simplify(expr);

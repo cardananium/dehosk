@@ -138,7 +138,8 @@ fn d1_rewrites_inside_when_arm() {
                 }),
                 selector: FieldSelector::PairFst,
             },
-        }],
+        }]
+        .into(),
     };
     let out = rewrite_expect_field_access(input);
     match out {

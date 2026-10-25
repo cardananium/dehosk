@@ -34,7 +34,7 @@ fn when(subject: PseudoExpr, clauses: Vec<WhenClause>) -> PseudoExpr {
     PseudoExpr::When {
         subject: PBox::new(subject),
         subject_name: None,
-        clauses,
+        clauses: clauses.into(),
     }
 }
 

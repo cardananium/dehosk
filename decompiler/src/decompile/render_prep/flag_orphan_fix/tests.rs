@@ -43,7 +43,8 @@ fn renames_orphan_fix_inside_when_subject() {
         clauses: vec![crate::pseudo::ast::WhenClause::new(
             crate::pseudo::ast::WhenPattern::wildcard(),
             PseudoExpr::int(0),
-        )],
+        )]
+        .into(),
     };
     let renamed = flag_orphan_fix(expr);
     let PseudoExpr::When { subject, .. } = renamed else {

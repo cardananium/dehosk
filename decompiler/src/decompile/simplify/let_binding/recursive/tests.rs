@@ -348,7 +348,8 @@ fn test_try_promote_lambda_rec_wrapper_reorders_recursive_args_to_outer_param_or
                         function: PBox::new(PseudoExpr::var("inner")),
                         args: vec![PseudoExpr::var_with_id("y_t", tail_id)].into(),
                     },
-                )],
+                )]
+                .into(),
             }),
         },
         PseudoExpr::Apply {

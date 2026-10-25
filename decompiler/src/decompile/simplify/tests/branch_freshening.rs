@@ -37,7 +37,8 @@ fn test_cps_selector_inlining_freshens_shared_delayed_lambda_body_ids() {
                 WhenPattern::constructor(ConstructorShape::unknown_data(2, 0), vec![]),
                 select_second(),
             ),
-        ],
+        ]
+        .into(),
     };
     let args = vec![
         PseudoExpr::Delay(PBox::new(PseudoExpr::Lambda {
@@ -136,7 +137,8 @@ fn test_if_when_merge_freshens_repeated_then_branch_binder_ids() {
                 WhenPattern::constructor(ConstructorShape::unknown_data(2, 0), vec![]),
                 PseudoExpr::Bool(false),
             ),
-        ],
+        ]
+        .into(),
     };
     let then_branch = PseudoExpr::Lambda {
         params: vec![Binder::new("x", param_id)],
@@ -198,7 +200,8 @@ fn test_constant_constructor_collapse_freshens_field_binding_when_subject_name_k
                 ]
                 .into(),
             ),
-        )],
+        )]
+        .into(),
     };
 
     let simplified = simplify(expr);

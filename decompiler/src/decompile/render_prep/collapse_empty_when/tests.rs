@@ -10,7 +10,7 @@ fn collapses_empty_when_to_subject() {
             message: Some("PT2".into()),
         }),
         subject_name: None,
-        clauses: vec![],
+        clauses: vec![].into(),
     };
     let out = collapse_empty_when(expr);
     match out {
@@ -26,7 +26,7 @@ fn collapses_empty_when_over_var_subject() {
     let expr = PseudoExpr::When {
         subject: PBox::new(PseudoExpr::var_with_id("variant_24", vid)),
         subject_name: Some(Binder::new("s", VarId::fresh_binding())),
-        clauses: vec![],
+        clauses: vec![].into(),
     };
     let out = collapse_empty_when(expr);
     assert!(matches!(out, PseudoExpr::Var { .. }));
@@ -38,7 +38,7 @@ fn leaves_non_empty_when_untouched() {
     let when = PseudoExpr::When {
         subject: PBox::new(PseudoExpr::var_with_id("x", vid)),
         subject_name: None,
-        clauses: vec![WhenClause::new(WhenPattern::Wildcard, PseudoExpr::int(1))],
+        clauses: vec![WhenClause::new(WhenPattern::Wildcard, PseudoExpr::int(1))].into(),
     };
     let out = collapse_empty_when(when);
     assert!(matches!(out, PseudoExpr::When { .. }));
@@ -50,7 +50,7 @@ fn collapses_recursively_in_nested_position() {
     let inner = PseudoExpr::When {
         subject: PBox::new(PseudoExpr::Error { message: None }),
         subject_name: None,
-        clauses: vec![],
+        clauses: vec![].into(),
     };
     let expr = PseudoExpr::Apply {
         function: PBox::new(PseudoExpr::var_with_id("f", VarId::fresh_binding())),

@@ -33,7 +33,8 @@ fn count_binding_uses_by_id_matches_individual_shadow_aware_counts() {
                             .into(),
                         }),
                     },
-                )],
+                )]
+                .into(),
             }),
         }),
         args: vec![PseudoExpr::var_with_id("y", outer_y.id)].into(),
@@ -168,7 +169,8 @@ fn count_var_uses_by_id_counts_exact_refs_under_same_name_foreign_when_binders()
                 ]
                 .into(),
             ),
-        }],
+        }]
+        .into(),
     };
 
     assert_eq!(
@@ -208,7 +210,8 @@ fn expr_size_preserves_existing_when_contract() {
                 WhenPattern::Wildcard,
                 PseudoExpr::Delay(PBox::new(PseudoExpr::int(3))),
             ),
-        ],
+        ]
+        .into(),
     };
 
     assert_eq!(
@@ -241,7 +244,8 @@ fn count_binding_uses_by_id_single_target_matches_shadow_aware_single_count() {
                         PseudoExpr::var_with_id("x", outer_x.id),
                     ),
                     WhenClause::new(WhenPattern::Wildcard, PseudoExpr::var("x")),
-                ],
+                ]
+                .into(),
             }),
         }),
     };
@@ -274,12 +278,14 @@ fn count_var_uses_ignores_when_subject_name_shadowing() {
                     PseudoExpr::When {
                         subject: PBox::new(PseudoExpr::var("x")),
                         subject_name: Some(Binder::synthetic("x")),
-                        clauses: vec![WhenClause::new(WhenPattern::Wildcard, PseudoExpr::var("x"))],
+                        clauses: vec![WhenClause::new(WhenPattern::Wildcard, PseudoExpr::var("x"))]
+                            .into(),
                     },
                 ]
                 .into(),
             ),
-        )],
+        )]
+        .into(),
     };
 
     assert_eq!(
@@ -307,12 +313,14 @@ fn count_var_uses_by_id_ignores_when_subject_name_shadowing() {
                         clauses: vec![WhenClause::new(
                             WhenPattern::Wildcard,
                             PseudoExpr::var_with_id("x", outer_x.id),
-                        )],
+                        )]
+                        .into(),
                     },
                 ]
                 .into(),
             ),
-        )],
+        )]
+        .into(),
     };
 
     assert_eq!(

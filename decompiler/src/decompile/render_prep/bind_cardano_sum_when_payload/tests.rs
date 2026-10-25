@@ -48,7 +48,7 @@ fn script_info_when(body: PseudoExpr) -> PseudoExpr {
     PseudoExpr::When {
         subject: PBox::new(field(var("script_context", 1), "script_info")),
         subject_name: None,
-        clauses: vec![nullary_clause(5, body), fail_clause()],
+        clauses: vec![nullary_clause(5, body), fail_clause()].into(),
     }
 }
 
@@ -93,7 +93,8 @@ fn bails_on_non_cardano_subject() {
         clauses: vec![
             nullary_clause(5, index(field(var("foo", 1), "fields"), 1)),
             fail_clause(),
-        ],
+        ]
+        .into(),
     };
     let out = bind_cardano_sum_when_payload(input.clone(), &CardanoTypeEnv::default(), &v3());
     assert_eq!(out, input, "non-Cardano subject must bail");

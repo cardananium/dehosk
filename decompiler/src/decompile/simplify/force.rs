@@ -177,7 +177,7 @@ impl Simplifier {
         {
             return self.simplify_apply(
                 PseudoExpr::field_access_typed((**record).clone(), selector.clone()),
-                (args.clone()).into_vec(),
+                args.clone().into_vec(),
             );
         }
 
@@ -264,7 +264,8 @@ impl Simplifier {
                         empty_case,
                     ),
                     WhenClause::new(WhenPattern::Wildcard, non_empty_case),
-                ],
+                ]
+                .into(),
             });
         }
 
@@ -402,7 +403,8 @@ impl Simplifier {
                             empty_case,
                         ),
                         WhenClause::new(WhenPattern::Wildcard, non_empty_case),
-                    ],
+                    ]
+                    .into(),
                 });
             }
         }

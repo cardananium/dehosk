@@ -44,7 +44,8 @@ fn list_when(nil_body: PseudoExpr, cons_body: PseudoExpr) -> PseudoExpr {
                 guard: None,
                 body: cons_body,
             },
-        ],
+        ]
+        .into(),
     }
 }
 
@@ -254,7 +255,8 @@ fn fires_on_root_list_with_suspect_tail() {
             pattern: WhenPattern::Wildcard,
             guard: None,
             body: varref("x_300", 31), // function param leak
-        }],
+        }]
+        .into(),
     };
     let input = with_church_true_const(list_when(
         varref("church_true", CHURCH_TRUE_ID),
@@ -293,7 +295,8 @@ fn fires_on_constructor_encoded_list_patterns() {
                 guard: None,
                 body: cons_cell(varref("rest", 11)),
             },
-        ],
+        ]
+        .into(),
     });
     let out = complete_church_nil_to_empty_list(input);
     assert_eq!(nil_arm_of(&out), &empty_list());
@@ -327,7 +330,8 @@ fn veto_unknown_constructor_patterns() {
                 guard: None,
                 body: cons_cell(varref("rest", 11)),
             },
-        ],
+        ]
+        .into(),
     });
     let out = complete_church_nil_to_empty_list(input.clone());
     assert_eq!(out, input);

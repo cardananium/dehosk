@@ -47,7 +47,8 @@ fn test_analyze_temporary_value_binding_names_constructor_payload_alias() {
                     guard: None,
                     body: PseudoExpr::Error { message: None },
                 },
-            ],
+            ]
+            .into(),
         }),
         body: PBox::new(PseudoExpr::var_with_id("q3", temp_id)),
     };
@@ -84,7 +85,8 @@ fn test_analyze_temporary_value_binding_ignores_same_name_different_id_construct
                     guard: None,
                     body: PseudoExpr::Error { message: None },
                 },
-            ],
+            ]
+            .into(),
         }),
         body: PBox::new(PseudoExpr::var_with_id("q3", temp_id)),
     };
@@ -113,7 +115,8 @@ fn test_analyze_temporary_value_binding_names_constructor_payload_identity_alias
                     guard: None,
                     body: PseudoExpr::Error { message: None },
                 },
-            ],
+            ]
+            .into(),
         }),
         body: PBox::new(PseudoExpr::var_with_id("q3", temp_id)),
     };
@@ -145,7 +148,8 @@ fn test_analyze_temporary_value_binding_ignores_same_name_different_id_construct
                     guard: None,
                     body: PseudoExpr::Error { message: None },
                 },
-            ],
+            ]
+            .into(),
         }),
         body: PBox::new(PseudoExpr::var_with_id("q3", temp_id)),
     };

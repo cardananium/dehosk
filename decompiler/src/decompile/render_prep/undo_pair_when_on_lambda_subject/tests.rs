@@ -23,7 +23,8 @@ fn rewrites_when_on_lambda_subject_with_pair_clause() {
         clauses: vec![WhenClause::new(
             WhenPattern::Pair(Binder::new("a", a_id), Binder::new("b", b_id)),
             arm_body,
-        )],
+        )]
+        .into(),
     };
 
     let rewritten = undo_pair_when_on_lambda_subject(when_expr);
@@ -60,7 +61,8 @@ fn rewrites_when_on_recfn_subject_with_pair_clause() {
         clauses: vec![WhenClause::new(
             WhenPattern::Pair(Binder::new("a", a_id), Binder::new("b", b_id)),
             PseudoExpr::var_with_id("a", a_id),
-        )],
+        )]
+        .into(),
     };
 
     let rewritten = undo_pair_when_on_lambda_subject(when_expr);
@@ -84,7 +86,8 @@ fn does_not_rewrite_when_on_var_subject() {
         clauses: vec![WhenClause::new(
             WhenPattern::Pair(Binder::new("a", a_id), Binder::new("b", b_id)),
             PseudoExpr::var_with_id("a", a_id),
-        )],
+        )]
+        .into(),
     };
 
     let rewritten = undo_pair_when_on_lambda_subject(when_expr.clone());
@@ -114,7 +117,8 @@ fn does_not_rewrite_when_with_multiple_clauses() {
                 PseudoExpr::var_with_id("a", a_id),
             ),
             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Unit),
-        ],
+        ]
+        .into(),
     };
 
     let rewritten = undo_pair_when_on_lambda_subject(when_expr);
@@ -142,7 +146,8 @@ fn does_not_rewrite_when_with_guard() {
             pattern: WhenPattern::Pair(Binder::new("a", a_id), Binder::new("b", b_id)),
             guard: Some(PseudoExpr::bool(true)),
             body: PseudoExpr::var_with_id("a", a_id),
-        }],
+        }]
+        .into(),
     };
 
     let rewritten = undo_pair_when_on_lambda_subject(when_expr);
@@ -171,7 +176,8 @@ fn does_not_rewrite_when_with_subject_name() {
         clauses: vec![WhenClause::new(
             WhenPattern::Pair(Binder::new("a", a_id), Binder::new("b", b_id)),
             PseudoExpr::var_with_id("a", a_id),
-        )],
+        )]
+        .into(),
     };
 
     let rewritten = undo_pair_when_on_lambda_subject(when_expr);
@@ -193,7 +199,7 @@ fn does_not_rewrite_when_with_non_pair_pattern() {
     let when_expr = PseudoExpr::When {
         subject: PBox::new(subject_lambda),
         subject_name: None,
-        clauses: vec![WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Unit)],
+        clauses: vec![WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Unit)].into(),
     };
 
     let rewritten = undo_pair_when_on_lambda_subject(when_expr);

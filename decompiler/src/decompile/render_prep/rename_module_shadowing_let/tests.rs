@@ -82,7 +82,8 @@ fn fresh_name_avoids_pattern_binder_collision() {
                         pattern: WhenPattern::Var(Binder::new("list_2", VarId::new(7))),
                         guard: None,
                         body: PseudoExpr::Unit,
-                    }],
+                    }]
+                    .into(),
                 },
             ]
             .into(),
@@ -117,7 +118,8 @@ fn skips_rename_when_ref_is_in_literal_pattern() {
                     pattern: crate::pseudo::ast::WhenPattern::Literal(var("list", 1)),
                     guard: None,
                     body: PseudoExpr::Unit,
-                }],
+                }]
+                .into(),
             }),
         }),
     };

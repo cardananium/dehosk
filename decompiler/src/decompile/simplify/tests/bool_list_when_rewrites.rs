@@ -18,7 +18,8 @@ fn test_bool_when_to_if() {
                 guard: None,
                 body: PseudoExpr::var("b"),
             },
-        ],
+        ]
+        .into(),
     };
     let simplified = simplify(expr);
     assert!(
@@ -45,7 +46,8 @@ fn test_bool_when_to_if_preserves_named_subject_binder_id() {
                 guard: None,
                 body: PseudoExpr::int(0),
             },
-        ],
+        ]
+        .into(),
     };
 
     let simplified = simplify(expr);
@@ -79,7 +81,8 @@ fn test_list_bool_when_to_list_is_empty() {
                 PseudoExpr::Bool(true),
             ),
             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Bool(false)),
-        ],
+        ]
+        .into(),
     };
 
     let simplified = simplify(expr);
@@ -109,7 +112,8 @@ fn test_delay_list_bool_when_to_not_list_is_empty() {
                 PseudoExpr::Bool(false),
             ),
             WhenClause::new(WhenPattern::Wildcard, PseudoExpr::Bool(true)),
-        ],
+        ]
+        .into(),
     }));
 
     let simplified = simplify(expr);

@@ -31,7 +31,7 @@ fn relabels_false_to_none_when_binding_matched_as_option() {
     let body = PseudoExpr::When {
         subject: PBox::new(var("r", 10)),
         subject_name: None,
-        clauses: vec![some_clause()],
+        clauses: vec![some_clause()].into(),
     };
     let input = PseudoExpr::Let {
         name: "r".to_string(),
@@ -90,7 +90,7 @@ fn leaves_non_tail_false_untouched() {
     let body = PseudoExpr::When {
         subject: PBox::new(var("r", 10)),
         subject_name: None,
-        clauses: vec![some_clause()],
+        clauses: vec![some_clause()].into(),
     };
     let input = PseudoExpr::Let {
         name: "r".to_string(),
@@ -120,7 +120,7 @@ fn relabels_false_in_trace_value_tail() {
     let body = PseudoExpr::When {
         subject: PBox::new(var("r", 10)),
         subject_name: None,
-        clauses: vec![some_clause()],
+        clauses: vec![some_clause()].into(),
     };
     let input = PseudoExpr::Let {
         name: "r".to_string(),
@@ -166,7 +166,7 @@ fn leaves_bool_if_untouched_when_matched_as_option() {
     let body = PseudoExpr::When {
         subject: PBox::new(var("r", 10)),
         subject_name: None,
-        clauses: vec![some_clause()],
+        clauses: vec![some_clause()].into(),
     };
     let input = PseudoExpr::Let {
         name: "r".to_string(),
@@ -207,12 +207,13 @@ fn leaves_false_when_value_has_comparison_tail_leaf() {
                 guard: None,
                 body: PseudoExpr::Bool(false),
             },
-        ],
+        ]
+        .into(),
     };
     let body = PseudoExpr::When {
         subject: PBox::new(var("r", 10)),
         subject_name: None,
-        clauses: vec![some_clause()],
+        clauses: vec![some_clause()].into(),
     };
     let input = PseudoExpr::Let {
         name: "r".to_string(),

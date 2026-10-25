@@ -1103,7 +1103,8 @@ fn constr_payload_pattern_requires_mint_site_annotation() {
                 name: "item_0".to_string(),
                 id: Some(payload_id),
             },
-        }],
+        }]
+        .into(),
     };
 
     let mut table = VarTable::new();

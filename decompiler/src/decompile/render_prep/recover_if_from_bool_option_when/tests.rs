@@ -30,7 +30,8 @@ fn bool_predicate_value() -> PseudoExpr {
                 guard: None,
                 body: PseudoExpr::Bool(false),
             },
-        ],
+        ]
+        .into(),
     }
 }
 
@@ -51,7 +52,8 @@ fn bool_when_over_ok() -> PseudoExpr {
                 guard: None,
                 body: var("tail", 80),
             },
-        ],
+        ]
+        .into(),
     }
 }
 
@@ -102,7 +104,8 @@ fn recovers_if_for_inline_bool_subject() {
                 guard: None,
                 body: var("tail", 80),
             },
-        ],
+        ]
+        .into(),
     };
     let out = recover_if_from_bool_option_when(input);
     let PseudoExpr::If { condition, .. } = out else {
@@ -181,7 +184,8 @@ fn leaves_leading_wildcard_fail() {
                 guard: None,
                 body: var("tail", 80),
             },
-        ],
+        ]
+        .into(),
     };
     let input = PseudoExpr::Let {
         name: "ok".to_string(),

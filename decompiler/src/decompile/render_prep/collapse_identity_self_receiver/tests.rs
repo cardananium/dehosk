@@ -54,7 +54,8 @@ fn collapses_dead_identity_self_receiver() {
                 guard: None,
                 body: var("c", 12),
             },
-        ],
+        ]
+        .into(),
     };
     let rec_fn = PseudoExpr::RecFn {
         name: Binder::new("x_111".to_string(), VarId::new(100)),
@@ -193,7 +194,7 @@ fn bails_on_bare_external_ref() {
         value: PBox::new(rec_fn),
         // `n` used bare (e.g. passed as an argument) — not first-applied.
         body: PBox::new(PseudoExpr::Tuple(
-            (vec![var("n", 50), PseudoExpr::Unit]).into(),
+            vec![var("n", 50), PseudoExpr::Unit].into(),
         )),
     };
     let out = run(input.clone());
@@ -280,7 +281,8 @@ fn bails_on_self_when_subject_name_used() {
                 guard: None,
                 body: var("b", 11),
             },
-        ],
+        ]
+        .into(),
     };
     let rec_fn = PseudoExpr::RecFn {
         name: Binder::new("x_111".to_string(), VarId::new(100)),
@@ -319,7 +321,8 @@ fn bails_on_target_ref_in_literal_pattern() {
             }),
             guard: None,
             body: var("a", 10),
-        }],
+        }]
+        .into(),
     };
     let rec_fn = PseudoExpr::RecFn {
         name: Binder::new("x_111".to_string(), VarId::new(100)),

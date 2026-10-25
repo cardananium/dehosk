@@ -50,7 +50,8 @@ fn a1_step1_pattern_inside_when_var_subject_groups_by_scrutinee() {
                 guard: None,
                 body: PseudoExpr::Unit,
             },
-        ],
+        ]
+        .into(),
     };
     let groups = collect_unresolved_constr_shapes(&expr);
     assert_eq!(groups.by_scrutinee.len(), 1);
@@ -92,7 +93,8 @@ fn a1_step1_non_var_subject_drops_patterns_to_arity_bucket() {
             pattern: unresolved_constr_pattern(0, 1),
             guard: None,
             body: PseudoExpr::Unit,
-        }],
+        }]
+        .into(),
     };
     let groups = collect_unresolved_constr_shapes(&expr);
     assert!(groups.by_scrutinee.is_empty());
@@ -119,7 +121,8 @@ fn a1_step1_same_var_subject_across_whens_merges_into_one_class() {
             pattern: unresolved_constr_pattern(1, 0),
             guard: None,
             body: PseudoExpr::Unit,
-        }],
+        }]
+        .into(),
     };
     let expr = PseudoExpr::When {
         subject: PBox::new(var_a),
@@ -128,7 +131,8 @@ fn a1_step1_same_var_subject_across_whens_merges_into_one_class() {
             pattern: unresolved_constr_pattern(0, 0),
             guard: None,
             body: inner_when_b,
-        }],
+        }]
+        .into(),
     };
     let groups = collect_unresolved_constr_shapes(&expr);
     assert_eq!(groups.by_scrutinee.len(), 1);
@@ -190,7 +194,8 @@ fn a1_step1_literal_pattern_with_inner_constr_recurses() {
             pattern: WhenPattern::Literal(unresolved_constr_expr(5, 1)),
             guard: None,
             body: PseudoExpr::Unit,
-        }],
+        }]
+        .into(),
     };
     let groups = collect_unresolved_constr_shapes(&expr);
     assert_eq!(
@@ -228,10 +233,12 @@ fn a1_def_use_aliased_subject_merges_with_canonical() {
                         pattern: unresolved_constr_pattern(1, 0),
                         guard: None,
                         body: PseudoExpr::Unit,
-                    }],
+                    }]
+                    .into(),
                 },
             ),
-        }],
+        }]
+        .into(),
     };
     let groups = collect_unresolved_constr_shapes(&outer_when);
     assert_eq!(
@@ -274,7 +281,8 @@ fn a1_def_use_let_bound_value_position_attributes_to_scrutinee() {
                 pattern: unresolved_constr_pattern(7, 1),
                 guard: None,
                 body: PseudoExpr::Unit,
-            }],
+            }]
+            .into(),
         },
     );
     let groups = collect_unresolved_constr_shapes(&expr);
@@ -339,7 +347,8 @@ fn a1_def_use_transitive_alias_chain_resolves_to_canonical() {
                     pattern: unresolved_constr_pattern(3, 0),
                     guard: None,
                     body: PseudoExpr::Unit,
-                }],
+                }]
+                .into(),
             },
         ),
     );
@@ -379,10 +388,12 @@ fn a1_def_use_rewrite_canonicalizes_aliased_subject_pattern() {
                         pattern: unresolved_constr_pattern(1, 0),
                         guard: None,
                         body: PseudoExpr::Unit,
-                    }],
+                    }]
+                    .into(),
                 },
             ),
-        }],
+        }]
+        .into(),
     };
     let groups = collect_unresolved_constr_shapes(&expr);
     let ordinals = assign_class_ordinals(&groups);
@@ -438,7 +449,8 @@ fn a1_def_use_rewrite_literal_pattern_constr_gets_scrutinee_hint() {
             pattern: WhenPattern::Literal(unresolved_constr_expr(5, 1)),
             guard: None,
             body: PseudoExpr::Unit,
-        }],
+        }]
+        .into(),
     };
     let groups = collect_unresolved_constr_shapes(&expr);
     let ordinals = assign_class_ordinals(&groups);
@@ -483,7 +495,8 @@ fn a1_def_use_rewrite_let_value_constr_gets_scrutinee_hint() {
                 pattern: unresolved_constr_pattern(7, 1),
                 guard: None,
                 body: PseudoExpr::Unit,
-            }],
+            }]
+            .into(),
         },
     );
     let groups = collect_unresolved_constr_shapes(&expr);
@@ -531,7 +544,8 @@ fn a1_step2_registers_scrutinee_stub_adt_in_registry() {
                 guard: None,
                 body: PseudoExpr::Unit,
             },
-        ],
+        ]
+        .into(),
     };
     let groups = collect_unresolved_constr_shapes(&expr);
     let ordinals = assign_class_ordinals(&groups);
@@ -583,7 +597,8 @@ fn a1_step2_registers_arity_fallback_stub_adt_alongside_scrutinee() {
             pattern: unresolved_constr_pattern(0, 0),
             guard: None,
             body: PseudoExpr::Unit,
-        }],
+        }]
+        .into(),
     };
     // Plus a stand-alone expression-position Constr<3>(unit) outside any When.
     let outer = PseudoExpr::Apply {
@@ -621,7 +636,8 @@ fn a1_step2_deterministic_names_across_runs() {
             pattern: unresolved_constr_pattern(2, 1),
             guard: None,
             body: PseudoExpr::Unit,
-        }],
+        }]
+        .into(),
     };
     let groups = collect_unresolved_constr_shapes(&expr);
     let ordinals = assign_class_ordinals(&groups);
@@ -651,7 +667,8 @@ fn a1_step3_attaches_type_hint_to_pattern_constructor() {
             pattern: unresolved_constr_pattern(2, 1),
             guard: None,
             body: PseudoExpr::Unit,
-        }],
+        }]
+        .into(),
     };
     let groups = collect_unresolved_constr_shapes(&expr);
     let ordinals = assign_class_ordinals(&groups);
@@ -741,7 +758,8 @@ fn a1_step4a_format_prefix_emits_both_scrutinee_and_arity_blocks() {
                 guard: None,
                 body: PseudoExpr::Unit,
             },
-        ],
+        ]
+        .into(),
     };
     let outer = PseudoExpr::Apply {
         function: PBox::new(PseudoExpr::var_with_id("f", VarId::fresh_binding())),
@@ -808,7 +826,8 @@ fn a1_same_tag_multiple_arities_emits_single_unsharded_type() {
                 guard: None,
                 body: PseudoExpr::Unit,
             },
-        ],
+        ]
+        .into(),
     };
     let groups = collect_unresolved_constr_shapes(&expr);
     let ordinals = assign_class_ordinals(&groups);
@@ -855,7 +874,8 @@ fn a1_conflict_only_no_sharding_when_no_real_conflict() {
                 guard: None,
                 body: PseudoExpr::Unit,
             },
-        ],
+        ]
+        .into(),
     };
     let groups = collect_unresolved_constr_shapes(&expr);
     let ordinals = assign_class_ordinals(&groups);
@@ -913,7 +933,8 @@ fn a1_step3_end_to_end_two_clause_when_resolves_to_same_class() {
                 guard: None,
                 body: PseudoExpr::Unit,
             },
-        ],
+        ]
+        .into(),
     };
     let groups = collect_unresolved_constr_shapes(&expr);
     let ordinals = assign_class_ordinals(&groups);

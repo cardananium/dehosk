@@ -222,7 +222,8 @@ fn skips_abort_candidate_capturing_literal_pattern_var() {
                 guard: None,
                 body: PseudoExpr::Unit,
             },
-        ],
+        ]
+        .into(),
     };
     let body = PseudoExpr::Let {
         name: "x".to_string(),
@@ -281,7 +282,8 @@ fn extracts_alpha_equivalent_when() {
                 function: PBox::new(var("f", 50)),
                 args: vec![var("x", 1), var("y", 2)].into(),
             },
-        }],
+        }]
+        .into(),
     };
     let w2 = PseudoExpr::When {
         subject: PBox::new(var("v", 100)),
@@ -296,7 +298,8 @@ fn extracts_alpha_equivalent_when() {
                 function: PBox::new(var("f", 50)),
                 args: vec![var("x_2", 3), var("y_2", 4)].into(),
             },
-        }],
+        }]
+        .into(),
     };
     let input = PseudoExpr::Lambda {
         params: vec![Binder::new("_".to_string(), VarId::new(99))],

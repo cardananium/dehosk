@@ -141,7 +141,8 @@ fn when_pattern_binder_and_ref_renumber_together() {
                 name: "v".to_string(),
                 id: Some(a),
             },
-        }],
+        }]
+        .into(),
     };
     let cloned = clone_with_fresh_binder_ids(&expr, VarId::fresh_binding);
     let PseudoExpr::When { clauses, .. } = &cloned else {

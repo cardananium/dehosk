@@ -71,7 +71,8 @@ fn test_analyze_function_binding_names_lookup_nested_int_wrapper() {
                                     }),
                                 },
                             ),
-                        ],
+                        ]
+                        .into(),
                     }),
                 }),
                 body: PBox::new(PseudoExpr::Let {
@@ -103,7 +104,8 @@ fn test_analyze_function_binding_names_lookup_nested_int_wrapper() {
                                     .into(),
                                 },
                             ),
-                        ],
+                        ]
+                        .into(),
                     }),
                     body: PBox::new(PseudoExpr::When {
                         subject: PBox::new(PseudoExpr::var("l2")),
@@ -127,7 +129,8 @@ fn test_analyze_function_binding_names_lookup_nested_int_wrapper() {
                                     .into(),
                                 },
                             ),
-                        ],
+                        ]
+                        .into(),
                     }),
                 }),
             }),
@@ -211,7 +214,8 @@ fn test_analyze_function_binding_ignores_same_name_different_id_lookup_nested_in
                                     }),
                                 },
                             ),
-                        ],
+                        ]
+                        .into(),
                     }),
                 }),
                 body: PBox::new(PseudoExpr::Let {
@@ -246,7 +250,8 @@ fn test_analyze_function_binding_ignores_same_name_different_id_lookup_nested_in
                                     .into(),
                                 },
                             ),
-                        ],
+                        ]
+                        .into(),
                     }),
                     body: PBox::new(PseudoExpr::When {
                         subject: PBox::new(PseudoExpr::var("l2")),
@@ -270,7 +275,8 @@ fn test_analyze_function_binding_ignores_same_name_different_id_lookup_nested_in
                                     .into(),
                                 },
                             ),
-                        ],
+                        ]
+                        .into(),
                     }),
                 }),
             }),

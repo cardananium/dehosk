@@ -95,7 +95,8 @@ fn test_replace_index_access_honors_when_pattern_shadow_for_name_fallback() {
                 collection: PBox::new(PseudoExpr::compat_var("fields")),
                 index: 0,
             },
-        )],
+        )]
+        .into(),
     };
 
     let replaced =

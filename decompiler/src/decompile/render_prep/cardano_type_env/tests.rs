@@ -86,7 +86,8 @@ fn types_w_as_governance_action_through_proposal_procedure() {
                 var("proposal_procedure", 11),
             ),
             fail_clause(),
-        ],
+        ]
+        .into(),
     };
     // let w@20 = <outer_when>.fields[2] in w
     let body = PseudoExpr::Let {
@@ -127,7 +128,8 @@ fn inert_under_wrong_version() {
                 var("proposal_procedure", 11),
             ),
             fail_clause(),
-        ],
+        ]
+        .into(),
     };
     let body = PseudoExpr::Let {
         name: "w".to_string(),
@@ -172,7 +174,8 @@ fn when_value_disagreeing_arms_is_none() {
                 var("index", 12),
             ),
             fail_clause(),
-        ],
+        ]
+        .into(),
     };
     let body = PseudoExpr::Let {
         name: "x".to_string(),
@@ -273,7 +276,8 @@ fn interproc_rejects_non_list_call_arg() {
                     body: PseudoExpr::Error { message: None },
                 },
                 cons_clause,
-            ],
+            ]
+            .into(),
         }),
     };
     let expr = PseudoExpr::Lambda {
@@ -323,7 +327,8 @@ fn option_strip_types_stake_credential_then_inner_credential() {
                 var("s", 41),
             ),
             fail_clause(),
-        ],
+        ]
+        .into(),
     };
     // when scred is { Some(inner) -> <inner_when>; None -> fail }
     let outer_when = PseudoExpr::When {
@@ -332,7 +337,8 @@ fn option_strip_types_stake_credential_then_inner_credential() {
         clauses: vec![
             ctor_clause(0, vec![binder("inner", 31)], inner_when), // Some(inner)
             ctor_clause(1, vec![], PseudoExpr::Error { message: None }), // None
-        ],
+        ]
+        .into(),
     };
     let body = PseudoExpr::Let {
         name: "scred".to_string(),
@@ -379,7 +385,8 @@ fn arity_mismatch_binds_no_payload() {
                 var("b", 11),
             ),
             fail_clause(),
-        ],
+        ]
+        .into(),
     };
     let body = PseudoExpr::Let {
         name: "w".to_string(),
@@ -511,7 +518,8 @@ fn option_round_trip_carries_the_list_element_type() {
                 guard: None,
                 body: PseudoExpr::constr_known(KnownConstructor::Some, vec![var("output", 3)]),
             },
-        ],
+        ]
+        .into(),
     };
     // when opt@5 is { Some(payload@6) -> payload@6; _ -> fail }
     let unwrap = PseudoExpr::When {
@@ -527,7 +535,8 @@ fn option_round_trip_carries_the_list_element_type() {
                 body: var("payload", 6),
             },
             fail_clause(),
-        ],
+        ]
+        .into(),
     };
     // let xs@2 = un_list_data(script_context.tx_info.outputs)
     // let opt@5 = <head_opt>
@@ -601,7 +610,8 @@ fn option_construction_over_unknown_inner_is_none() {
                             vec![var("output", 3)],
                         ),
                     },
-                ],
+                ]
+                .into(),
             }),
             body: PBox::new(var("opt", 5)),
         }),
@@ -645,7 +655,8 @@ fn field_index_rewrite_sees_interproc_seeded_params() {
                     body: PseudoExpr::Error { message: None },
                 },
                 cons_clause,
-            ],
+            ]
+            .into(),
         }),
     };
     let inputs = field(field(var("script_context", 1), "tx_info"), "inputs");

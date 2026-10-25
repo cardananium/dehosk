@@ -425,7 +425,7 @@ impl Simplifier {
             && let Some((elements, tail)) = list_literal_parts(&PseudoExpr::Constr {
                 type_hint: None,
                 tag,
-                fields: (fields.clone()).into(),
+                fields: fields.clone().into(),
                 shape,
             })
             && tail.is_none()
@@ -496,7 +496,7 @@ impl Simplifier {
                 {
                     return PseudoExpr::constr(
                         ConstructorShape::scott_positional(idx, args.len()),
-                        (args.clone()).into_vec(),
+                        args.clone().into_vec(),
                     );
                 }
             }
@@ -836,7 +836,7 @@ impl Walker for Simplifier {
                 subject,
                 subject_name,
                 clauses,
-            } => self.simplify_when(subject.into_inner(), subject_name, clauses),
+            } => self.simplify_when(subject.into_inner(), subject_name, clauses.into_vec()),
             PseudoExpr::UnOp { op, operand } => self.simplify_unop(op, operand.into_inner()),
             PseudoExpr::BuiltinCall { name, args } => {
                 self.simplify_builtin_call(name, args.into_vec())

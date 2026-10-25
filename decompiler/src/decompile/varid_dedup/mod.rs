@@ -416,7 +416,7 @@ impl VarIdDeduplicator {
                     } => {
                         steps.push(DedupStep::Post(DedupPost::WhenAfterSubject {
                             subject_name,
-                            clauses,
+                            clauses: clauses.into_vec(),
                         }));
                         steps.push(DedupStep::Visit(subject.into_inner()));
                     }
@@ -548,7 +548,7 @@ impl VarIdDeduplicator {
                         done.push(PseudoExpr::When {
                             subject: PBox::new(subject),
                             subject_name,
-                            clauses,
+                            clauses: clauses.into(),
                         });
                     }
                     DedupPost::Plain { shell, count } => {

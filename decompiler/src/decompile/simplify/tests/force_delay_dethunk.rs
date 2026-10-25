@@ -74,7 +74,8 @@ fn test_force_when_unwraps_delayed_clause_bodies() {
                 guard: None,
                 body: PseudoExpr::Delay(PBox::new(PseudoExpr::Bool(true))),
             },
-        ],
+        ]
+        .into(),
     }));
 
     let simplified = simplify(expr);

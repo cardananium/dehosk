@@ -68,7 +68,8 @@ fn ordering_consumer(fid: u32) -> PseudoExpr {
             WhenClause::new(ordering_when_pattern(0), var("A", 200)),
             WhenClause::new(ordering_when_pattern(1), var("B", 201)),
             WhenClause::new(ordering_when_pattern(2), var("C", 202)),
-        ],
+        ]
+        .into(),
     }
 }
 
@@ -254,7 +255,8 @@ fn leaves_comparator_honest_with_wildcard_consumer() {
             WhenClause::new(ordering_when_pattern(0), var("A", 200)),
             WhenClause::new(ordering_when_pattern(1), var("B", 201)),
             WhenClause::new(WhenPattern::Wildcard, var("C", 202)),
-        ],
+        ]
+        .into(),
     };
     let expr = PseudoExpr::Let {
         name: "cmp".to_string(),
@@ -289,7 +291,8 @@ fn leaves_comparator_honest_with_church_bool_consumer() {
             WhenClause::new(church_bool_pattern(KnownConstructor::False), var("A", 200)),
             WhenClause::new(church_bool_pattern(KnownConstructor::True), var("B", 201)),
             WhenClause::new(ordering_when_pattern(2), var("C", 202)),
-        ],
+        ]
+        .into(),
     };
     let expr = PseudoExpr::Let {
         name: "cmp".to_string(),
@@ -362,7 +365,7 @@ fn leaves_comparator_honest_with_unknown_stub_consumer() {
             args: vec![var("x", 100), var("y", 101)].into(),
         }),
         subject_name: None,
-        clauses: vec![unknown_arm(0), unknown_arm(1), unknown_arm(2)],
+        clauses: vec![unknown_arm(0), unknown_arm(1), unknown_arm(2)].into(),
     };
     let expr = PseudoExpr::Let {
         name: "cmp".to_string(),
@@ -400,7 +403,8 @@ fn disqualifies_helper_with_mixed_ordering_and_bool_when() {
             WhenClause::new(church_bool_pattern(KnownConstructor::False), var("A", 200)),
             WhenClause::new(church_bool_pattern(KnownConstructor::True), var("B", 201)),
             WhenClause::new(ordering_when_pattern(2), var("C", 202)),
-        ],
+        ]
+        .into(),
     };
     // Both consumers of the SAME fid 7 live in one tree.
     let body = PseudoExpr::Let {

@@ -39,7 +39,8 @@ fn mixed_bool_none_when() -> PseudoExpr {
                 guard: None,
                 body: none_val(),
             },
-        ],
+        ]
+        .into(),
     }
 }
 
@@ -107,7 +108,8 @@ fn leaves_genuine_option_operand_untouched() {
                 guard: None,
                 body: none_val(),
             },
-        ],
+        ]
+        .into(),
     };
     // Sits as an `&&` operand, but is not Bool (a Some tail).
     let input = PseudoExpr::BinOp {
@@ -154,7 +156,8 @@ fn leaves_non_tail_none_untouched() {
             guard: None,
             // tail is Some(None) — a constructor, NOT a bare None or Bool.
             body: PseudoExpr::constr_known(KnownConstructor::Some, vec![none_val()]),
-        }],
+        }]
+        .into(),
     };
     let input = PseudoExpr::BinOp {
         op: BinaryOp::And,

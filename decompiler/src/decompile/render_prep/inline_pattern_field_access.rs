@@ -186,7 +186,7 @@ fn rewrite(expr: PseudoExpr, scope: &PatternScope) -> PseudoExpr {
                             count: clauses.len(),
                         }));
                         steps.push(RwStep::WhenClauses {
-                            clauses,
+                            clauses: clauses.into_vec(),
                             scope: Rc::clone(&scope),
                         });
                         steps.push(RwStep::Visit(subject.into_inner(), scope));

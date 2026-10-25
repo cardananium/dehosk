@@ -627,7 +627,7 @@ fn rewrite(expr: PseudoExpr, seen: &mut HashSet<VarId>) -> PseudoExpr {
                     // admitted, so the admit is its own step.
                     steps.push(RwStep::WhenSubject {
                         subject_name,
-                        clauses,
+                        clauses: clauses.into_vec(),
                     });
                     steps.push(RwStep::Visit(subject.into_inner()));
                 }

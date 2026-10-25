@@ -55,7 +55,8 @@ fn test_collect_all_var_names_visitor_covers_nested_shapes() {
                             message: PBox::new(PseudoExpr::var("msg")),
                             value: PBox::new(PseudoExpr::var("y")),
                         },
-                    )],
+                    )]
+                    .into(),
                 }]
                 .into(),
             }),
@@ -208,7 +209,8 @@ fn collapse_tail_chains_does_not_substitute_when_pattern_shadow() {
             clauses: vec![WhenClause::new(
                 WhenPattern::Var(Binder::new("tail", pattern_tail_id)),
                 PseudoExpr::var_with_id("tail", pattern_tail_id),
-            )],
+            )]
+            .into(),
         },
     );
 
@@ -395,7 +397,8 @@ fn test_uniquify_when_pair_pattern_binders_rename_clause_body_by_var_id() {
                 ]
                 .into(),
             ),
-        )],
+        )]
+        .into(),
     };
 
     let result = uniquify_let_names(expr);
@@ -434,7 +437,8 @@ fn test_uniquify_when_subject_name_renames_clause_refs_by_var_id() {
         clauses: vec![WhenClause::new(
             WhenPattern::Wildcard,
             PseudoExpr::var_with_id("payload", subject_id),
-        )],
+        )]
+        .into(),
     };
 
     let result = uniquify_let_names(expr);

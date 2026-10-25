@@ -114,8 +114,9 @@ fn count_force_of_bindings_shadows_compat_refs_under_same_name_when_binders() {
         clauses: vec![WhenClause {
             pattern: WhenPattern::Var(foreign_pattern),
             guard: Some(compat_force_x()),
-            body: PseudoExpr::Tuple((vec![compat_force_x(), exact_force_x()]).into()),
-        }],
+            body: PseudoExpr::Tuple(vec![compat_force_x(), exact_force_x()].into()),
+        }]
+        .into(),
     };
 
     assert_eq!(
@@ -213,8 +214,9 @@ fn replace_force_of_var_with_id_shadows_compat_refs_under_same_name_when_binders
         clauses: vec![WhenClause {
             pattern: WhenPattern::Var(foreign_pattern),
             guard: Some(compat_force_x()),
-            body: PseudoExpr::Tuple((vec![compat_force_x(), exact_force_x()]).into()),
-        }],
+            body: PseudoExpr::Tuple(vec![compat_force_x(), exact_force_x()].into()),
+        }]
+        .into(),
     };
 
     let replaced =

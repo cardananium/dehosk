@@ -49,7 +49,8 @@ fn bool_predicate_fn(self_id: u32) -> PseudoExpr {
                     guard: None,
                     body: cons_body,
                 },
-            ],
+            ]
+            .into(),
         }),
     }
 }
@@ -134,7 +135,8 @@ fn leaves_genuine_list_fold_alone() {
                         })),
                     },
                 },
-            ],
+            ]
+            .into(),
         }),
     };
     let out = recover_inverse_cip_nil_as_true(list_fold, &ctx);

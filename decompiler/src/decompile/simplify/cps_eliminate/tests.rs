@@ -639,7 +639,8 @@ fn test_structural_when_selector() {
                 WhenPattern::constructor(ConstructorShape::unknown_data(1, 0), vec![]),
                 PseudoExpr::var("choose_snd"),
             ),
-        ],
+        ]
+        .into(),
     };
     let apply = PseudoExpr::Apply {
         function: PBox::new(selector),

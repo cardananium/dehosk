@@ -81,7 +81,8 @@ fn test_var_is_referenced_id_aware_ignores_compat_name_shadowed_by_lambda_or_whe
         clauses: vec![WhenClause::new(
             WhenPattern::Var(Binder::new("value", pattern_shadow_id)),
             PseudoExpr::var("value"),
-        )],
+        )]
+        .into(),
     };
     assert!(!var_is_referenced_id_aware(
         &when_pattern_shadow,
@@ -707,7 +708,8 @@ fn test_hoist_local_helpers_hoists_clause_local_recfn() {
                     }),
                 },
             ),
-        ],
+        ]
+        .into(),
     };
 
     let result = hoist_local_helpers(expr);
@@ -763,7 +765,8 @@ fn test_hoist_local_helpers_lambda_lifts_capture_across_outer_let() {
                                 }),
                             },
                         ),
-                    ],
+                    ]
+                    .into(),
                 }),
             }),
             body: PBox::new(PseudoExpr::Apply {
@@ -985,7 +988,8 @@ fn test_hoist_local_helpers_hoists_closed_helper_out_of_if_apply_arg_past_consta
                         },
                     ),
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -1216,7 +1220,8 @@ fn test_hoist_local_helpers_normalizes_and_hoists_inverted_recfn_helper_from_if_
                         },
                     ),
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 
@@ -1598,7 +1603,8 @@ fn test_hoist_local_helpers_idempotent_after_capture_lifting() {
                                 }),
                             },
                         ),
-                    ],
+                    ]
+                    .into(),
                 }),
             }),
             body: PBox::new(PseudoExpr::Apply {

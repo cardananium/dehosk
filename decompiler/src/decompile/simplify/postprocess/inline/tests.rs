@@ -22,7 +22,8 @@ fn test_has_any_var_named_detects_binders_and_refs() {
                     pattern: WhenPattern::Var("pattern_value".into()),
                     guard: None,
                     body: PseudoExpr::var("payload"),
-                }],
+                }]
+                .into(),
             }),
         }),
     };
@@ -53,7 +54,8 @@ fn test_collect_call_sites_simplified_collects_nested_multi_arg_calls() {
                         function: PBox::new(PseudoExpr::var("target")),
                         args: vec![PseudoExpr::int(2)].into(),
                     },
-                )],
+                )]
+                .into(),
             },
         ]
         .into(),
@@ -77,7 +79,8 @@ fn test_rename_var_simple_avoids_capture_under_when_subject_name() {
         clauses: vec![WhenClause::new(
             WhenPattern::Wildcard,
             PseudoExpr::var_with_id("fields_0_2", old_id),
-        )],
+        )]
+        .into(),
     };
 
     let result = rename_var_simple(expr, "fields_0_2", "policy_id");

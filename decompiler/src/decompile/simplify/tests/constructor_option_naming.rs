@@ -17,7 +17,8 @@ fn test_option_naming_in_when() {
                 WhenPattern::constructor(ConstructorShape::unknown_data(1, 0), vec![]),
                 PseudoExpr::var("default"),
             ),
-        ],
+        ]
+        .into(),
     };
     let simplified = simplify(expr);
     match &simplified {
@@ -70,7 +71,8 @@ fn test_no_naming_for_3_constructor_type() {
                 WhenPattern::constructor(ConstructorShape::unknown_data(2, 0), vec![]),
                 PseudoExpr::var("c"),
             ),
-        ],
+        ]
+        .into(),
     };
     let simplified = simplify(expr);
     match &simplified {

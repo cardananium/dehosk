@@ -27,7 +27,8 @@ fn test_readability_used_names_include_binders_before_allocating_fresh_names() {
                 clauses: vec![WhenClause::new(
                     WhenPattern::Var(Binder::new("field_0", pattern_id)),
                     PseudoExpr::var_with_id("condition_ok", condition_id),
-                )],
+                )]
+                .into(),
             }),
         }),
     };
@@ -185,7 +186,8 @@ fn test_ordered_lookup_recfn_keeps_explicit_key_binding() {
                         }),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }),
     };
 

@@ -378,7 +378,8 @@ fn test_rewrite_option_cps_calls_matches_lambda_self_by_name_when_var_id_drifted
                             }),
                         },
                     ),
-                ],
+                ]
+                .into(),
             }),
         }),
         body: PBox::new(PseudoExpr::Apply {

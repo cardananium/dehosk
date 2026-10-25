@@ -35,7 +35,8 @@ fn expect_chain(subject: PseudoExpr, pattern: WhenPattern, body: PseudoExpr) -> 
                 guard: None,
                 body: PseudoExpr::Error { message: None },
             },
-        ],
+        ]
+        .into(),
     }
 }
 
@@ -158,7 +159,8 @@ fn p4_3_skips_let_with_two_arm_when_no_fail_fallback() {
                     guard: None,
                     body: PseudoExpr::Bool(false),
                 },
-            ],
+            ]
+            .into(),
         }),
     };
     let folded = inline_expect_subjects(expr.clone());
@@ -187,7 +189,8 @@ fn p4_3_skips_let_with_wildcard_only_arm() {
                 pattern: WhenPattern::Wildcard,
                 guard: None,
                 body: PseudoExpr::var("body"),
-            }],
+            }]
+            .into(),
         }),
     };
     let folded = inline_expect_subjects(expr.clone());
@@ -219,7 +222,8 @@ fn p4_3_skips_when_with_guard() {
                     guard: None,
                     body: PseudoExpr::Error { message: None },
                 },
-            ],
+            ]
+            .into(),
         }),
     };
     let folded = inline_expect_subjects(expr.clone());

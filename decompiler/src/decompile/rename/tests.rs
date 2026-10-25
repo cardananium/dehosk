@@ -155,7 +155,8 @@ fn test_when_pair_pattern_binders_rename_clause_body_by_var_id() {
                 ]
                 .into(),
             ),
-        )],
+        )]
+        .into(),
     };
 
     let renamed = rename_variables(expr);
@@ -194,7 +195,8 @@ fn test_when_subject_name_renames_clause_refs_by_var_id() {
         clauses: vec![WhenClause::new(
             WhenPattern::Wildcard,
             PseudoExpr::var_with_id("payload", subject_id),
-        )],
+        )]
+        .into(),
     };
 
     let renamed = rename_variables(expr);

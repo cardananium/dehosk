@@ -140,7 +140,8 @@ fn rewires_reference_inside_a_literal_pattern() {
             )),
             guard: None,
             body: PseudoExpr::Unit,
-        }],
+        }]
+        .into(),
     };
     let expr = chain(
         vec![("field_0_64", const_id, recfn("any", self_id))],

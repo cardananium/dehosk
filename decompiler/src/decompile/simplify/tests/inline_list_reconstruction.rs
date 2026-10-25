@@ -33,7 +33,8 @@ fn test_inline_list_pair_destructure() {
             pattern: WhenPattern::Wildcard,
             guard: None,
             body,
-        }],
+        }]
+        .into(),
     };
     let simplified = simplify(expr);
     // Should have a List pattern now
@@ -204,7 +205,8 @@ fn test_inline_list_head_only_destructure() {
             pattern: WhenPattern::Wildcard,
             guard: None,
             body,
-        }],
+        }]
+        .into(),
     };
     let simplified = simplify(expr);
     match &simplified {
@@ -236,7 +238,8 @@ fn test_inline_list_head_field_access_destructure() {
             pattern: WhenPattern::Wildcard,
             guard: None,
             body,
-        }],
+        }]
+        .into(),
     };
     let simplified = simplify(expr);
     match &simplified {
@@ -270,7 +273,8 @@ fn test_inline_list_tail_only_destructure() {
             pattern: WhenPattern::Wildcard,
             guard: None,
             body,
-        }],
+        }]
+        .into(),
     };
     let simplified = simplify(expr);
     match &simplified {
@@ -304,7 +308,8 @@ fn test_inline_list_destructure_apply_form_tail() {
             pattern: WhenPattern::Wildcard,
             guard: None,
             body,
-        }],
+        }]
+        .into(),
     };
     let simplified = simplify(expr);
     match &simplified {
@@ -346,7 +351,8 @@ fn test_inline_list_destructure_with_subject_name() {
             pattern: WhenPattern::Wildcard,
             guard: None,
             body,
-        }],
+        }]
+        .into(),
     };
     let simplified = simplify(expr);
     match &simplified {

@@ -34,7 +34,8 @@ fn rec_iteration_and_param_seeding() {
                 ]
                 .into(),
             },
-        }],
+        }]
+        .into(),
     };
     let tree = PseudoExpr::Let {
         name: "use_fn".to_string(),

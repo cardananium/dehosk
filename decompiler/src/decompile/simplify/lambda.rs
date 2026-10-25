@@ -948,7 +948,8 @@ impl Simplifier {
                         else_branch: PBox::new(rewritten_else),
                     },
                 ),
-            ],
+            ]
+            .into(),
         }
     }
 

@@ -262,7 +262,7 @@ fn rewrite(expr: PseudoExpr, const_tags: &HashMap<VarId, usize>) -> PseudoExpr {
                 done.push(PseudoExpr::When {
                     subject: PBox::new(subject),
                     subject_name,
-                    clauses,
+                    clauses: clauses.into(),
                 });
             }
             RewriteStep::PostPlain(kind) => {
@@ -393,7 +393,8 @@ fn try_rewrite_via_generic_when(
                 guard: None,
                 body: new_arm1_body,
             },
-        ],
+        ]
+        .into(),
     };
     Some(new_when)
 }
@@ -552,7 +553,8 @@ fn try_rewrite_via_option_when(
                 guard: None,
                 body: new_none_body,
             },
-        ],
+        ]
+        .into(),
     };
     Some(new_when)
 }

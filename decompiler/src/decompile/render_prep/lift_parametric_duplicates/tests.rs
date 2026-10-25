@@ -32,7 +32,8 @@ fn big_when(subject: PseudoExpr, head: u32, tail: u32, extra: PseudoExpr) -> Pse
                 guard: None,
                 body: PseudoExpr::Error { message: None },
             },
-        ],
+        ]
+        .into(),
     }
 }
 
@@ -76,7 +77,11 @@ fn copies_that_differ_in_one_variable_share_a_helper() {
         ),
     );
     let out = lift_parametric_duplicates(program);
-    assert_eq!(count(&out, |e| matches!(e, PseudoExpr::When { .. })), 1, "{out:?}");
+    assert_eq!(
+        count(&out, |e| matches!(e, PseudoExpr::When { .. })),
+        1,
+        "{out:?}"
+    );
     assert_eq!(
         count(&out, |e| matches!(e, PseudoExpr::Apply { function, .. }
             if matches!(function.as_ref(), PseudoExpr::Var { name, .. } if name == "lifted"))),
@@ -159,9 +164,16 @@ fn closed_rec_fn_matching_one_in_an_enclosing_scope_is_reused() {
         ),
     );
     let out = lift_parametric_duplicates(program);
-    assert_eq!(count(&out, |e| matches!(e, PseudoExpr::RecFn { .. })), 1, "{out:?}");
     assert_eq!(
-        count(&out, |e| matches!(e, PseudoExpr::Var { id: Some(v), .. } if *v == VarId::new(2))),
+        count(&out, |e| matches!(e, PseudoExpr::RecFn { .. })),
+        1,
+        "{out:?}"
+    );
+    assert_eq!(
+        count(
+            &out,
+            |e| matches!(e, PseudoExpr::Var { id: Some(v), .. } if *v == VarId::new(2))
+        ),
         0,
         "every reference to the dropped copy must be redirected"
     );
