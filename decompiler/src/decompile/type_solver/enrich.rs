@@ -263,110 +263,132 @@ fn refine_function_entry(
 /// - `Unknown ⊓ T` = `T` (and vice versa).
 /// - Two identical concrete types: identity.
 /// - Same-arity Functions and same-shape wrappers (List, Option,
-///   Pair, Result, Tuple): recurse on each child.
+///   Pair, Result, Tuple): merge each child.
 /// - Conflicting concrete types: keep `existing` (never demote).
 ///
 /// Returns `existing` (no allocation) when the merger is a no-op,
 /// so callers can `Rc::ptr_eq(&merged, &existing)` to detect change.
+///
+/// Children are merged before their parent on a heap stack: a type is as
+/// deep as the value it was read off. Each result also says whether the
+/// pair was structurally equal, which is the identity rule's test for the
+/// parent — so it is answered once, bottom-up, rather than by comparing the
+/// whole remaining depth again at every level.
 fn merge_more_concrete(existing: &Rc<PseudoType>, candidate: &Rc<PseudoType>) -> Rc<PseudoType> {
-    // Pointer or structural identity → no-op
-    // (prevents Unknown/Unknown churn in the fixed-point counter).
-    if Rc::ptr_eq(existing, candidate) {
-        return existing.clone();
+    enum Step<'a> {
+        Visit(&'a Rc<PseudoType>, &'a Rc<PseudoType>),
+        /// Rebuild a same-shape pair, given its existing side, from its
+        /// `usize` child results — the last ones on `done`.
+        Build(&'a Rc<PseudoType>, usize),
     }
-    if existing.as_ref() == candidate.as_ref() {
-        return existing.clone();
-    }
-    match (existing.as_ref(), candidate.as_ref()) {
-        (PseudoType::Unknown, _) => candidate.clone(),
-        (_, PseudoType::Unknown) => existing.clone(),
-        (
-            PseudoType::Function {
-                params: ep,
-                ret: er,
-            },
-            PseudoType::Function {
-                params: cp,
-                ret: cr,
-            },
-        ) if ep.len() == cp.len() => {
-            let mut merged_params = Vec::with_capacity(ep.len());
-            let mut any_change = false;
-            for (e, c) in ep.iter().zip(cp.iter()) {
-                let merged = merge_more_concrete(e, c);
-                if !Rc::ptr_eq(&merged, e) {
-                    any_change = true;
+
+    let mut steps = vec![Step::Visit(existing, candidate)];
+    // (merged, the pair was structurally equal)
+    let mut done: Vec<(Rc<PseudoType>, bool)> = Vec::new();
+    while let Some(step) = steps.pop() {
+        match step {
+            Step::Visit(existing, candidate) => {
+                // Pointer identity → no-op (prevents Unknown/Unknown churn in
+                // the fixed-point counter).
+                if Rc::ptr_eq(existing, candidate) {
+                    done.push((existing.clone(), true));
+                    continue;
                 }
-                merged_params.push(merged);
+                let children: Vec<(&Rc<PseudoType>, &Rc<PseudoType>)> =
+                    match (existing.as_ref(), candidate.as_ref()) {
+                        (PseudoType::List(ei), PseudoType::List(ci))
+                        | (PseudoType::Option(ei), PseudoType::Option(ci)) => vec![(ei, ci)],
+                        (PseudoType::Pair(ea, eb), PseudoType::Pair(ca, cb))
+                        | (PseudoType::Result(ea, eb), PseudoType::Result(ca, cb)) => {
+                            vec![(ea, ca), (eb, cb)]
+                        }
+                        (PseudoType::Tuple(ev), PseudoType::Tuple(cv)) if ev.len() == cv.len() => {
+                            ev.iter().zip(cv).collect()
+                        }
+                        (
+                            PseudoType::Function {
+                                params: ep,
+                                ret: er,
+                            },
+                            PseudoType::Function {
+                                params: cp,
+                                ret: cr,
+                            },
+                        ) if ep.len() == cp.len() => {
+                            ep.iter().zip(cp).chain(std::iter::once((er, cr))).collect()
+                        }
+                        // Nothing to descend into: a leaf, or two shapes that
+                        // do not line up. Equality is a shallow test here.
+                        _ => {
+                            let equal = existing.as_ref() == candidate.as_ref();
+                            let merged = match (existing.as_ref(), candidate.as_ref()) {
+                                _ if equal => existing.clone(),
+                                (PseudoType::Unknown, _) => candidate.clone(),
+                                (_, PseudoType::Unknown) => existing.clone(),
+                                // Conflicting concretes: keep existing (never demote).
+                                _ => existing.clone(),
+                            };
+                            done.push((merged, equal));
+                            continue;
+                        }
+                    };
+                steps.push(Step::Build(existing, children.len()));
+                steps.extend(children.into_iter().rev().map(|(e, c)| Step::Visit(e, c)));
             }
-            let merged_ret = merge_more_concrete(er, cr);
-            if !Rc::ptr_eq(&merged_ret, er) {
-                any_change = true;
-            }
-            if !any_change {
-                existing.clone()
-            } else {
-                Rc::new(PseudoType::Function {
-                    params: merged_params,
-                    ret: merged_ret,
-                })
-            }
-        }
-        // Wrapper recursion: `List<Unknown>` ⊓ `List<Int>` refines
-        // to `List<Int>`; same for the other wrappers below.
-        (PseudoType::List(ei), PseudoType::List(ci)) => {
-            let merged = merge_more_concrete(ei, ci);
-            if Rc::ptr_eq(&merged, ei) {
-                existing.clone()
-            } else {
-                Rc::new(PseudoType::List(merged))
-            }
-        }
-        (PseudoType::Option(ei), PseudoType::Option(ci)) => {
-            let merged = merge_more_concrete(ei, ci);
-            if Rc::ptr_eq(&merged, ei) {
-                existing.clone()
-            } else {
-                Rc::new(PseudoType::Option(merged))
-            }
-        }
-        (PseudoType::Pair(ea, eb), PseudoType::Pair(ca, cb)) => {
-            let ma = merge_more_concrete(ea, ca);
-            let mb = merge_more_concrete(eb, cb);
-            if Rc::ptr_eq(&ma, ea) && Rc::ptr_eq(&mb, eb) {
-                existing.clone()
-            } else {
-                Rc::new(PseudoType::Pair(ma, mb))
-            }
-        }
-        (PseudoType::Result(eok, eerr), PseudoType::Result(cok, cerr)) => {
-            let mok = merge_more_concrete(eok, cok);
-            let merr = merge_more_concrete(eerr, cerr);
-            if Rc::ptr_eq(&mok, eok) && Rc::ptr_eq(&merr, eerr) {
-                existing.clone()
-            } else {
-                Rc::new(PseudoType::Result(mok, merr))
-            }
-        }
-        (PseudoType::Tuple(ev), PseudoType::Tuple(cv)) if ev.len() == cv.len() => {
-            let mut merged = Vec::with_capacity(ev.len());
-            let mut any_change = false;
-            for (e, c) in ev.iter().zip(cv.iter()) {
-                let m = merge_more_concrete(e, c);
-                if !Rc::ptr_eq(&m, e) {
-                    any_change = true;
+            Step::Build(existing, count) => {
+                let merged = done.split_off(done.len() - count);
+                // Same shape and every child equal: structural identity → no-op.
+                if merged.iter().all(|(_, equal)| *equal) {
+                    done.push((existing.clone(), true));
+                    continue;
                 }
-                merged.push(m);
-            }
-            if !any_change {
-                existing.clone()
-            } else {
-                Rc::new(PseudoType::Tuple(merged))
+                let mut merged: Vec<Rc<PseudoType>> = merged.into_iter().map(|(m, _)| m).collect();
+                let rebuilt = match existing.as_ref() {
+                    // Wrapper merge: `List<Unknown>` ⊓ `List<Int>` refines
+                    // to `List<Int>`; same for the other wrappers below.
+                    PseudoType::List(ei) => {
+                        let m = merged.pop().expect("one child");
+                        (!Rc::ptr_eq(&m, ei)).then(|| PseudoType::List(m))
+                    }
+                    PseudoType::Option(ei) => {
+                        let m = merged.pop().expect("one child");
+                        (!Rc::ptr_eq(&m, ei)).then(|| PseudoType::Option(m))
+                    }
+                    PseudoType::Pair(ea, eb) => {
+                        let mb = merged.pop().expect("second child");
+                        let ma = merged.pop().expect("first child");
+                        (!(Rc::ptr_eq(&ma, ea) && Rc::ptr_eq(&mb, eb)))
+                            .then(|| PseudoType::Pair(ma, mb))
+                    }
+                    PseudoType::Result(eok, eerr) => {
+                        let merr = merged.pop().expect("second child");
+                        let mok = merged.pop().expect("first child");
+                        (!(Rc::ptr_eq(&mok, eok) && Rc::ptr_eq(&merr, eerr)))
+                            .then(|| PseudoType::Result(mok, merr))
+                    }
+                    PseudoType::Tuple(ev) => {
+                        let any_change = merged.iter().zip(ev).any(|(m, e)| !Rc::ptr_eq(m, e));
+                        any_change.then(|| PseudoType::Tuple(merged))
+                    }
+                    PseudoType::Function {
+                        params: ep,
+                        ret: er,
+                    } => {
+                        let merged_ret = merged.pop().expect("return type");
+                        let any_change = merged.iter().zip(ep).any(|(m, e)| !Rc::ptr_eq(m, e))
+                            || !Rc::ptr_eq(&merged_ret, er);
+                        any_change.then(|| PseudoType::Function {
+                            params: merged,
+                            ret: merged_ret,
+                        })
+                    }
+                    _ => unreachable!("only same-shape pairs are rebuilt"),
+                };
+                done.push((rebuilt.map_or_else(|| existing.clone(), Rc::new), false));
             }
         }
-        // Conflicting concretes: keep existing (never demote).
-        _ => existing.clone(),
     }
+    done.pop().expect("one merge result").0
 }
 
 /// `derive_body_type_with_overlay` with an empty overlay, for

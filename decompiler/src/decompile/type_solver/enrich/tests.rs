@@ -692,3 +692,43 @@ fn slice_c_let_chain_body_propagates_to_ret() {
     // Silence unused warning for the Rc reference.
     let _ = Rc::clone(&ty);
 }
+
+/// Merging walks a heap stack: a type is as deep as the value it was read
+/// off. The identity rule still holds at every level — a structurally equal
+/// candidate, or one that adds nothing, hands back `existing` itself.
+#[test]
+fn merging_deep_types_never_recurses() {
+    use super::merge_more_concrete;
+
+    const DEPTH: usize = 100_000;
+    let handle = std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(|| {
+            let nest = |leaf: PseudoType| {
+                let mut ty = Rc::new(leaf);
+                for level in 0..DEPTH {
+                    ty = Rc::new(if level % 2 == 0 {
+                        PseudoType::List(ty)
+                    } else {
+                        PseudoType::Pair(ty, Rc::new(PseudoType::Int))
+                    });
+                }
+                ty
+            };
+            let unknown = nest(PseudoType::Unknown);
+            let int = nest(PseudoType::Int);
+
+            let refined = merge_more_concrete(&unknown, &int);
+            assert!(!Rc::ptr_eq(&refined, &unknown));
+            assert!(*refined == *int);
+            assert!(Rc::ptr_eq(&merge_more_concrete(&int, &unknown), &int));
+            assert!(Rc::ptr_eq(
+                &merge_more_concrete(&int, &nest(PseudoType::Int)),
+                &int
+            ));
+        })
+        .expect("spawn");
+    handle
+        .join()
+        .expect("deep types must not overflow the stack");
+}
