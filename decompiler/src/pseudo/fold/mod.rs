@@ -25,6 +25,9 @@ pub(crate) enum FoldStep {
     Enter(PseudoExpr),
     /// Its children are done: reassemble the node.
     Post(PostKind),
+    /// A `when`'s subject is done and its clauses come next
+    /// ([`ExprFolder::enter_clauses`]).
+    ClausesEnter(Option<Binder>),
     /// A clause's guard and body come next: open its scope
     /// ([`ExprFolder::enter_clause`]).
     ClauseEnter(Option<Binder>, WhenPattern),
@@ -354,6 +357,12 @@ pub(crate) trait ExprFolder {
     /// Called after folding a Let body.
     fn exit_let(&mut self, _name: &str) {}
 
+    /// Called once a `when`'s subject is folded, before its first clause —
+    /// for a `when` without clauses too — when the implementation opts in
+    /// through [`Self::machine_scopes_clauses`]. `subject` is the folded
+    /// subject; [`Self::post_when`] follows the last clause.
+    fn enter_clauses(&mut self, _subject: &PseudoExpr, _subject_name: Option<&Binder>) {}
+
     /// Called before folding a clause's guard and body — after its literal
     /// pattern, if the machine folds that — when the implementation opts in
     /// through [`Self::machine_scopes_clauses`]. `subject_name` is the
@@ -398,6 +407,10 @@ pub(crate) trait ExprFolder {
                         let finished = self.post_expr(rebuilt);
                         done.push(finished);
                     }
+                }
+                FoldStep::ClausesEnter(subject_name) => {
+                    let subject = done.last().expect("when subject");
+                    self.enter_clauses(subject, subject_name.as_ref());
                 }
                 FoldStep::ClauseEnter(subject_name, pattern) => {
                     self.enter_clause(subject_name.as_ref(), &pattern);
@@ -582,6 +595,8 @@ pub(crate) trait ExprFolder {
                     }
                     clause_meta.push((pattern, has_guard));
                 }
+                let clauses_enter =
+                    scope_clauses.then(|| FoldStep::ClausesEnter(subject_name.clone()));
                 steps.push(FoldStep::Post(PostKind::When {
                     subject_name,
                     clause_meta,
@@ -589,6 +604,7 @@ pub(crate) trait ExprFolder {
                 // Reversed so they pop in order; the subject goes last so it
                 // pops first, as `fold_when` folded it first.
                 steps.extend(clause_steps.into_iter().rev());
+                steps.extend(clauses_enter);
                 steps.push(FoldStep::Enter(subject.into_inner()));
             }
             // Leaves, and any `when` not handed over — see `fold_legacy_arm`.
@@ -791,7 +807,7 @@ pub(crate) trait ExprFolder {
     /// [`Self::exit_clause`] around each clause's guard and body, so a pass
     /// that tracks the binders a clause brings into scope can do it without
     /// overriding [`Self::fold_when`] — and without its call frame per
-    /// nested `when`.
+    /// nested `when`. [`Self::enter_clauses`] opens the `when` itself.
     fn machine_scopes_clauses(&self) -> bool {
         false
     }

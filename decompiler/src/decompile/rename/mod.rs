@@ -7,9 +7,24 @@ use crate::pseudo::ast::PBox;
 use std::collections::HashMap;
 
 use crate::pseudo::OptionVarIdGet;
-use crate::pseudo::ast::{Binder, PseudoExpr, WhenClause};
+use crate::pseudo::ast::{Binder, PseudoExpr, WhenClause, WhenPattern};
 use crate::pseudo::fold::ExprFolder;
 use crate::pseudo::var_id::VarId;
+
+/// A binding [`Renamer::pop_scope`] undoes: the key and what it mapped to
+/// before.
+enum ScopeUndo {
+    Name(String, Option<String>),
+    Id(VarId, Option<String>),
+}
+
+/// The renamed binders of a `when` whose clauses are being folded, put in
+/// place by `post_when`.
+struct WhenRenames {
+    subject_name: Option<Binder>,
+    /// One per clause folded so far.
+    patterns: Vec<WhenPattern>,
+}
 
 /// Renamer for making variable names unique and meaningful.
 pub(crate) struct Renamer {
@@ -17,14 +32,23 @@ pub(crate) struct Renamer {
     counter: usize,
     /// Mapping from old names to new names in current scope
     scope: HashMap<String, String>,
-    /// Stack of scopes for nested bindings
-    scope_stack: Vec<HashMap<String, String>>,
     /// VarId-based scope (authoritative, prevents naming collisions)
     scope_by_id: HashMap<VarId, String>,
-    /// Stack of id scopes for nested bindings
-    scope_by_id_stack: Vec<HashMap<VarId, String>>,
+    /// Every binding made to `scope` / `scope_by_id`, with what it replaced.
+    /// Popping a scope unwinds it to the scope's mark, so a scope costs its
+    /// own bindings rather than a copy of everything visible — the nesting
+    /// is script-controlled.
+    scope_undo: Vec<ScopeUndo>,
+    /// `scope_undo`'s length when each open scope was pushed.
+    scope_marks: Vec<usize>,
     /// Track all names in use to prevent collisions
     names_in_use: std::collections::HashSet<String>,
+    /// Per hint, the lowest `_<n>` suffix not yet known to be taken.
+    /// `names_in_use` only grows, so every suffix below it stays taken and
+    /// the search for a free one resumes there instead of at 2.
+    next_suffix: HashMap<String, usize>,
+    /// One per `when` whose clauses are being folded, innermost last.
+    when_renames: Vec<WhenRenames>,
     /// With `tag_synthetic` on, every Let binder whose name or
     /// value-derived hint looks like a Simplifier-generated helper
     /// (`f`, `fn`, `rec_fn`, `<name>_result`, …). Drained via
@@ -42,10 +66,12 @@ impl Renamer {
         Self {
             counter: 0,
             scope: HashMap::new(),
-            scope_stack: Vec::new(),
             scope_by_id: HashMap::new(),
-            scope_by_id_stack: Vec::new(),
+            scope_undo: Vec::new(),
+            scope_marks: Vec::new(),
             names_in_use: std::collections::HashSet::new(),
+            next_suffix: HashMap::new(),
+            when_renames: Vec::new(),
             synthetic_binder_ids: Vec::new(),
             tag_synthetic: false,
         }
@@ -102,13 +128,13 @@ impl Renamer {
             if !self.names_in_use.contains(h) {
                 h.to_string()
             } else {
-                let mut suffix = 2;
+                let next = self.next_suffix.entry(h.to_string()).or_insert(2);
                 loop {
-                    let candidate = format!("{}_{}", h, suffix);
+                    let candidate = format!("{}_{}", h, *next);
+                    *next += 1;
                     if !self.names_in_use.contains(&candidate) {
                         break candidate;
                     }
-                    suffix += 1;
                 }
             }
         } else {
@@ -132,17 +158,30 @@ impl Renamer {
 
     /// Push a new scope.
     fn push_scope(&mut self) {
-        self.scope_stack.push(self.scope.clone());
-        self.scope_by_id_stack.push(self.scope_by_id.clone());
+        self.scope_marks.push(self.scope_undo.len());
     }
 
-    /// Pop a scope.
+    /// Pop a scope: drop every binding made since it was pushed, restoring
+    /// what each one shadowed.
     fn pop_scope(&mut self) {
-        if let Some(prev) = self.scope_stack.pop() {
-            self.scope = prev;
-        }
-        if let Some(prev) = self.scope_by_id_stack.pop() {
-            self.scope_by_id = prev;
+        let Some(mark) = self.scope_marks.pop() else {
+            return;
+        };
+        while self.scope_undo.len() > mark {
+            match self.scope_undo.pop().expect("undo entry above the mark") {
+                ScopeUndo::Name(name, Some(prev)) => {
+                    self.scope.insert(name, prev);
+                }
+                ScopeUndo::Name(name, None) => {
+                    self.scope.remove(&name);
+                }
+                ScopeUndo::Id(id, Some(prev)) => {
+                    self.scope_by_id.insert(id, prev);
+                }
+                ScopeUndo::Id(id, None) => {
+                    self.scope_by_id.remove(&id);
+                }
+            }
         }
     }
 
@@ -154,9 +193,12 @@ impl Renamer {
         hint: Option<&str>,
     ) -> String {
         let new_name = self.fresh_name(hint);
-        self.scope.insert(old_name.to_string(), new_name.clone());
+        let prev = self.scope.insert(old_name.to_string(), new_name.clone());
+        self.scope_undo
+            .push(ScopeUndo::Name(old_name.to_string(), prev));
         if let Some(vid) = var_id {
-            self.scope_by_id.insert(vid, new_name.clone());
+            let prev = self.scope_by_id.insert(vid, new_name.clone());
+            self.scope_undo.push(ScopeUndo::Id(vid, prev));
         }
         new_name
     }
@@ -183,12 +225,7 @@ impl Renamer {
             .unwrap_or_else(|| name.to_string())
     }
 
-    fn rename_pattern_binders(
-        &mut self,
-        pattern: crate::pseudo::ast::WhenPattern,
-    ) -> crate::pseudo::ast::WhenPattern {
-        use crate::pseudo::ast::WhenPattern;
-
+    fn rename_pattern_binders(&mut self, pattern: WhenPattern) -> WhenPattern {
         match pattern {
             WhenPattern::Constructor {
                 type_hint,
@@ -226,38 +263,6 @@ impl Renamer {
             }
             WhenPattern::Wildcard => WhenPattern::Wildcard,
             WhenPattern::Literal(expr) => WhenPattern::Literal(self.fold(expr)),
-        }
-    }
-
-    fn fold_when_scoped(
-        &mut self,
-        subject: PseudoExpr,
-        subject_name: Option<Binder>,
-        clauses: Vec<WhenClause>,
-    ) -> PseudoExpr {
-        let subject = self.fold(subject);
-        self.push_scope();
-        let subject_name = subject_name.map(|name| self.bind_binder(&name, Some(name.as_str())));
-        let clauses = clauses
-            .into_iter()
-            .map(|clause| {
-                self.push_scope();
-                let pattern = self.rename_pattern_binders(clause.pattern);
-                let guard = clause.guard.map(|guard| self.fold(guard));
-                let body = self.fold(clause.body);
-                self.pop_scope();
-                WhenClause {
-                    pattern,
-                    guard,
-                    body,
-                }
-            })
-            .collect();
-        self.pop_scope();
-        PseudoExpr::When {
-            subject: PBox::new(subject),
-            subject_name,
-            clauses,
         }
     }
 
@@ -463,24 +468,66 @@ impl ExprFolder for Renamer {
     // Folded flat: this implementation overrides none of
     // `fold_when` / `fold_clause` / `fold_pattern`, so the machine
     // can reassemble a `when` itself instead of recursing through
-    // the hook once per nesting level.
+    // the hook once per nesting level. The scopes a `when` opens go
+    // through the machine's clause hooks for the same reason: whens
+    // nest as deep as the script makes them.
     fn machine_folds_when(&self) -> bool {
         true
     }
-    fn pre_expr(&mut self, expr: &PseudoExpr) -> crate::pseudo::fold::FoldAction {
-        if let PseudoExpr::When {
-            subject,
+
+    // Literal payloads are folded in `enter_clause`, inside the clause's
+    // scope as before; the machine leaves them alone.
+    fn machine_keeps_pattern_literals(&self) -> bool {
+        true
+    }
+
+    fn machine_scopes_clauses(&self) -> bool {
+        true
+    }
+
+    fn enter_clauses(&mut self, _subject: &PseudoExpr, subject_name: Option<&Binder>) {
+        self.push_scope();
+        let subject_name = subject_name.map(|name| self.bind_binder(name, Some(name.as_str())));
+        self.when_renames.push(WhenRenames {
             subject_name,
-            clauses,
-        } = expr
-        {
-            return crate::pseudo::fold::FoldAction::Replace(self.fold_when_scoped(
-                subject.as_ref().clone(),
-                subject_name.clone(),
-                clauses.clone(),
-            ));
+            patterns: Vec::new(),
+        });
+    }
+
+    fn enter_clause(&mut self, _subject_name: Option<&Binder>, pattern: &WhenPattern) {
+        self.push_scope();
+        let pattern = self.rename_pattern_binders(pattern.clone());
+        self.when_renames
+            .last_mut()
+            .expect("enter_clauses opened this when")
+            .patterns
+            .push(pattern);
+    }
+
+    fn exit_clause(&mut self, _subject_name: Option<&Binder>, _pattern: &WhenPattern) {
+        self.pop_scope();
+    }
+
+    fn post_when(
+        &mut self,
+        subject: PseudoExpr,
+        _subject_name: Option<Binder>,
+        clauses: Vec<WhenClause>,
+    ) -> PseudoExpr {
+        let renames = self
+            .when_renames
+            .pop()
+            .expect("enter_clauses opened this when");
+        self.pop_scope();
+        PseudoExpr::When {
+            subject: PBox::new(subject),
+            subject_name: renames.subject_name,
+            clauses: clauses
+                .into_iter()
+                .zip(renames.patterns)
+                .map(|(clause, pattern)| WhenClause { pattern, ..clause })
+                .collect(),
         }
-        crate::pseudo::fold::FoldAction::Walk
     }
 
     fn post_var(&mut self, name: String, id: Option<VarId>) -> PseudoExpr {
@@ -547,21 +594,6 @@ impl ExprFolder for Renamer {
 
     fn exit_recfn(&mut self, _name: &Binder, _params: &[Binder]) {
         self.pop_scope();
-    }
-
-    fn post_when(
-        &mut self,
-        subject: PseudoExpr,
-        subject_name: Option<Binder>,
-        clauses: Vec<WhenClause>,
-    ) -> PseudoExpr {
-        let new_subject_name =
-            subject_name.map(|n| n.renamed(self.lookup_with_id(n.as_ref(), Some(n.id))));
-        PseudoExpr::When {
-            subject: PBox::new(subject),
-            subject_name: new_subject_name,
-            clauses,
-        }
     }
 }
 
