@@ -864,6 +864,41 @@ fn wrap_in_tail_list<'a>(
 // participate through the fixpoint. `[N..]` slices need no gate: you cannot
 // slice a tuple.
 
+/// Whether `doc`, rendered at `width`, has a line longer than `width`.
+///
+/// Stops at the first such line: rendering a nested literal whole to measure
+/// it, at every level, costs time quadratic in a nesting the script chooses.
+fn renders_wider_than(doc: &PrettyDoc<'_>, width: usize) -> bool {
+    struct Measure {
+        width: usize,
+        line: usize,
+        wider: bool,
+    }
+    impl fmt::Write for Measure {
+        fn write_str(&mut self, s: &str) -> fmt::Result {
+            for ch in s.chars() {
+                if ch == '\n' {
+                    self.line = 0;
+                } else {
+                    self.line += ch.len_utf8();
+                    if self.line > self.width {
+                        self.wider = true;
+                        return Err(fmt::Error);
+                    }
+                }
+            }
+            Ok(())
+        }
+    }
+    let mut measure = Measure {
+        width,
+        line: 0,
+        wider: false,
+    };
+    let _ = doc.clone().render_fmt(width, &mut measure);
+    measure.wider
+}
+
 /// The deepest column a line is indented to. Deeper lines start at it.
 ///
 /// Every nesting level indents each of its lines further, so without a cap
@@ -3168,12 +3203,7 @@ impl PrettyPrinter {
                             .append(arena.intersperse(items.clone(), arena.text(", ")))
                             .append(arena.text("]"))
                             .group();
-                        let flat_len = {
-                            let mut s = String::new();
-                            flat.clone().render_fmt(self.config.width, &mut s).unwrap();
-                            s.lines().map(str::len).max().unwrap_or(0)
-                        };
-                        let doc = if flat_len > self.config.width {
+                        let doc = if renders_wider_than(&flat, self.config.width) {
                             let elems =
                                 arena.intersperse(items, arena.text(",").append(arena.hardline()));
                             arena
