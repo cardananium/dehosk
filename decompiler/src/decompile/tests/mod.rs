@@ -359,6 +359,7 @@ fn resolve_scott_constructor_lambdas_skips_selector_param_as_field() {
 
 pub(crate) mod architecture_regression;
 pub(crate) mod basic;
+mod deep_scripts;
 mod disambiguate;
 mod mir_pipeline;
 pub(crate) mod nameless_corpus;

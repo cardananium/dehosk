@@ -1667,7 +1667,7 @@ impl PseudoExpr {
 
 impl PartialEq for PseudoExpr {
     fn eq(&self, other: &Self) -> bool {
-        crate::stack::grow_deep(|| structural_eq_no_clone(self, other))
+        structural_eq_no_clone(self, other)
     }
 }
 

@@ -400,8 +400,7 @@ fn contains_self_application(expr: &MidExpr) -> bool {
 /// Tag the closure under a chain of thunks as recursive on `self_var`.
 ///
 /// A loop, not tail recursion: the thunk chain is as deep as the script makes
-/// it, and this walk carried NO `stacker` guard — a `(delay (delay …))` spine,
-/// which costs half a byte per level to write, would have overflowed here.
+/// it — a `(delay (delay …))` spine costs half a byte per level to write.
 fn mark_closure_recursive(expr: &mut MidExpr, self_var: VarId) {
     let mut current = expr;
     loop {

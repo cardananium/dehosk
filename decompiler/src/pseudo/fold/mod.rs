@@ -411,7 +411,7 @@ pub(crate) trait ExprFolder {
 
     /// Entry point. Folds an expression bottom-up with stack safety.
     fn fold(&mut self, expr: PseudoExpr) -> PseudoExpr {
-        crate::stack::grow_deep(|| self.fold_inner(expr))
+        self.fold_inner(expr)
     }
 
     /// Inner fold — an iterative machine over an explicit step stack.
@@ -987,7 +987,7 @@ pub(crate) trait ExprVisitor {
 
     /// Entry point. Walks the expression with stack safety.
     fn walk(&mut self, expr: &PseudoExpr) {
-        crate::stack::grow_deep(|| self.walk_inner(expr))
+        self.walk_inner(expr)
     }
 
     /// Inner walk — an explicit worklist over the tree.

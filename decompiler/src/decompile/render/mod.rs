@@ -1080,22 +1080,16 @@ impl PrettyPrinter {
     ) -> (String, Vec<(PseudoNodeId, SourceSpan)>) {
         // The church-decode notes come back with the tree: their `VarId`
         // keys match THIS prepare's binders and no other's.
-        let prepared = crate::stack::grow_deep(|| {
-            crate::decompile::render_prep::prepare_for_render_with_notes(
-                expr,
-                &self.config.render_ctx,
-            )
-        });
+        let prepared = crate::decompile::render_prep::prepare_for_render_with_notes(
+            expr,
+            &self.config.render_ctx,
+        );
         let (disambiguated, church_notes) = (prepared.expr, prepared.church_notes);
         let node_ids = collect_node_ids(&disambiguated);
         let arena: PrettyArena<'_> = Arena::new();
-        let doc = crate::stack::grow_deep(|| {
-            self.to_doc(&arena, &disambiguated, &node_ids, &church_notes)
-        });
+        let doc = self.to_doc(&arena, &disambiguated, &node_ids, &church_notes);
         let mut writer = SpanWriter::default();
-        crate::stack::grow_deep(|| {
-            doc.render_raw(self.config.width, &mut writer).unwrap();
-        });
+        doc.render_raw(self.config.width, &mut writer).unwrap();
         let strip_terminator = spine_ends_in_unit(&disambiguated);
         writer.finish(|rendered| {
             if strip_terminator {
@@ -1499,7 +1493,7 @@ impl PrettyPrinter {
             },
         }
 
-        crate::stack::grow_deep(|| {
+        {
             let expect_sugar_positions = collect_expect_sugar_positions(expr);
             // From the display map, so the name never drifts from `builtin.*`.
             let head_list_name = BuiltinId::ListHead.display_name(BuiltinDisplayStyle::Pretty);
@@ -3786,7 +3780,7 @@ impl PrettyPrinter {
             }
 
             pop_doc(&mut out)
-        })
+        }
     }
 
     /// Wrap a rendered doc in a `{ … }` block on its own lines. Used

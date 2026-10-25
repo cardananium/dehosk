@@ -22,7 +22,6 @@ pub mod decompile;
 pub mod error;
 pub mod fixtures;
 pub mod pseudo;
-mod stack;
 
 pub use builtins::BuiltinId;
 pub use debug::{DebugBundle, decompile_program_debug, decompile_program_debug_with_options};
@@ -90,8 +89,9 @@ where
 /// Decompile on a dedicated large-stack thread to avoid stack overflows on deep scripts.
 ///
 /// NATIVE ONLY — it spawns a thread, which `wasm32-unknown-unknown` has
-/// no support for. In the browser call [`decompile`] directly; the deep
-/// walks there grow their own stack through `crate::stack`.
+/// no support for. In the browser call [`decompile`] directly: every walk
+/// over a script's nesting runs on a heap work stack, so a 64 KiB call
+/// stack serves any script up to 32 KiB of flat.
 pub fn decompile_with_large_stack(hex_code: &str, options: DecompileOptions) -> Result<String> {
     let hex_owned = hex_code.to_string();
     run_on_large_stack("decompile", move || decompile(&hex_owned, options))

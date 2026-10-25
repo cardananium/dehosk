@@ -146,4 +146,4 @@ flowchart LR
 
 AST: `Var.id` / `Let.id` are `Option<VarId>` (`None` = symbolic/compat). `Binder.id` is always concrete.
 
-Recursion is deep: `stacker` (512 KiB red zone, 16 MiB) in `pseudo/fold`, MIR fold/translate/lower; `simplify/transform` goes through `self.fold`. `decompile()` itself runs on a 64 MiB thread.
+Nesting depth is the script's to choose — 32 KiB of flat nests ~65,000 levels — and on `wasm32` the call stack cannot be grown, so no walk over a tree recurses per level: the folder (`pseudo/fold`) and the simplifier run on its step stack, the IRs (`PseudoExpr`, `NamelessExpr`, `MidExpr`, `PseudoData`, `PseudoType`) clone, compare and drop on heap work lists, and output indentation is capped (UPLC echo at 64 columns, pseudocode at 256) so the text stays linear in the program. `decompile_with_large_stack` still runs native callers on a 64 MiB thread.

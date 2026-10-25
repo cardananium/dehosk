@@ -228,7 +228,7 @@ fn orient<'a>(
     if depth == 0 {
         return None;
     }
-    crate::stack::grow_pass(|| match expr {
+    match expr {
         MidExpr::Thunk { body, .. } | MidExpr::Trace { body, .. } => {
             orient(body, env, visiting, depth - 1)
         }
@@ -343,7 +343,7 @@ fn orient<'a>(
             }
         }
         _ => None,
-    })
+    }
 }
 
 /// Structurally classify a 2-parameter selector constant: `\a b -> a`
@@ -360,7 +360,7 @@ fn classify_selector<'a>(
     if depth == 0 {
         return None;
     }
-    crate::stack::grow_pass(|| match expr {
+    match expr {
         MidExpr::Thunk { body, .. } | MidExpr::Trace { body, .. } => {
             classify_selector(body, env, visiting, depth - 1)
         }
@@ -407,7 +407,7 @@ fn classify_selector<'a>(
             }
         }
         _ => None,
-    })
+    }
 }
 
 /// Resolve a value to its defining non-wrapper expression (for `Apply`
@@ -528,7 +528,7 @@ fn orient_datatag<'a>(
     if depth == 0 {
         return None;
     }
-    crate::stack::grow_pass(|| match expr {
+    match expr {
         MidExpr::Thunk { body, .. } | MidExpr::Trace { body, .. } => {
             orient_datatag(body, env, visiting, depth - 1)
         }
@@ -589,7 +589,7 @@ fn orient_datatag<'a>(
             join_datatag(branches.iter().map(|b| &b.body), env, visiting, depth - 1)
         }
         _ => None,
-    })
+    }
 }
 
 /// Is `expr` church-bool-VALUED — i.e. a valid arm body of a genuine Bool

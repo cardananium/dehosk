@@ -32,7 +32,6 @@ clap = { version = "4.4", features = ["derive"] }
 
 # Pretty printing
 pretty = "0.12"
-stacker = "0.1"
 
 # Itertools
 itertools = "0.12"
