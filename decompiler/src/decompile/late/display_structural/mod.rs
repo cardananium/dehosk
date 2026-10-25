@@ -58,15 +58,29 @@ pub(crate) fn try_reorder_inverted_if_arg_lets(
     })
 }
 
+/// Swap a `let` whose value refers to its own binder and whose body does
+/// not.
+///
+/// `scans_pure` says the tree holds no id-less `let`, so neither reference
+/// scan mints a placeholder id and their order is free: when the value is
+/// itself a `let` — a step of a chain nested through values, as long as the
+/// script makes it — the body is scanned first, and only it in the common
+/// case that it uses the binder.
 pub(crate) fn try_repair_self_referenced_let(
     name: String,
     id: VarId,
     value: PseudoExpr,
     body: PseudoExpr,
+    scans_pure: bool,
 ) -> Result<PseudoExpr, LetParts> {
-    if !var_is_referenced_id_aware(&value, id, &name)
-        || var_is_referenced_id_aware(&body, id, &name)
-    {
+    let repairs = if scans_pure && matches!(value, PseudoExpr::Let { .. }) {
+        !var_is_referenced_id_aware(&body, id, &name)
+            && var_is_referenced_id_aware(&value, id, &name)
+    } else {
+        var_is_referenced_id_aware(&value, id, &name)
+            && !var_is_referenced_id_aware(&body, id, &name)
+    };
+    if !repairs {
         return Err((name, value, body));
     }
 

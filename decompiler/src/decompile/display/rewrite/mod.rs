@@ -40,9 +40,32 @@ fn normalize_display_rewrites_fixpoint(expr: PseudoExpr) -> PseudoExpr {
 }
 
 fn normalize_display_rewrites_round(expr: PseudoExpr) -> PseudoExpr {
+    let scans_pure = !has_idless_let(&expr);
     rewrite_int_operator_helpers(deduplicate_identical_lets(rename_pair_entry_binders(
-        LateDisplayRewriter.fold(expr),
+        LateDisplayRewriter { scans_pure }.fold(expr),
     )))
+}
+
+/// Whether some `let` in `expr` carries no id — the only node a reference
+/// scan mints a placeholder id for. A worklist, not recursion: the depth is
+/// the script's.
+fn has_idless_let(expr: &PseudoExpr) -> bool {
+    let mut pending: Vec<&PseudoExpr> = vec![expr];
+    while let Some(current) = pending.pop() {
+        if let PseudoExpr::Let { id: None, .. } = current {
+            return true;
+        }
+        pending.extend(crate::decompile::render_prep::scope_recurse::children(
+            current,
+        ));
+        if let PseudoExpr::When { clauses, .. } = current {
+            pending.extend(clauses.iter().filter_map(|clause| match &clause.pattern {
+                WhenPattern::Literal(literal) => Some(literal),
+                _ => None,
+            }));
+        }
+    }
+    false
 }
 
 fn rewrite_int_operator_helpers(expr: PseudoExpr) -> PseudoExpr {
@@ -341,7 +364,11 @@ fn rename_var_display_name(
     .fold(expr)
 }
 
-struct LateDisplayRewriter;
+struct LateDisplayRewriter {
+    /// No `let` in the tree lacks an id, so no reference scan has a side
+    /// effect.
+    scans_pure: bool,
+}
 
 #[derive(Debug, Clone)]
 struct IntOperatorHelper {
@@ -797,6 +824,7 @@ impl ExprFolder for LateDisplayRewriter {
             id.unwrap_or_else(VarId::fresh_compat_placeholder),
             value,
             body,
+            self.scans_pure,
         ) {
             Ok(rewritten) => return rewritten,
             Err(parts) => parts,

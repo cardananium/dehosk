@@ -68,6 +68,7 @@ fn test_try_repair_self_referenced_let_ignores_same_name_different_id() {
         outer_id,
         PseudoExpr::var_with_id("x", unrelated_id),
         PseudoExpr::Unit,
+        false,
     );
 
     assert!(
