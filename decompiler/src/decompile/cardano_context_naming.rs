@@ -10,36 +10,57 @@ use crate::pseudo::ast::{Binder, PseudoExpr};
 use crate::pseudo::nameless::VarKind;
 use crate::pseudo::var_id::VarId;
 
+/// A binding [`ScopedTypeEnv::pop_scope`] undoes: the key and the type it
+/// had before.
+enum TypeUndo {
+    Id(VarId, Option<CardanoTypeRef>),
+    Name(String, Option<CardanoTypeRef>),
+}
+
+/// Variable types under lexical scoping: a binding shadows the same id or
+/// name bound in an enclosing scope until its own scope is popped.
+///
+/// The maps hold only the innermost binding of each key; popping a scope
+/// replays the undo log back to the scope's mark. A lookup is then one hash
+/// probe rather than a walk over every open scope, whose number the script
+/// controls.
 #[derive(Default)]
-struct ScopeFrame {
+struct ScopedTypeEnv {
     types_by_id: HashMap<VarId, CardanoTypeRef>,
     types_by_name: HashMap<String, CardanoTypeRef>,
-}
-
-struct ScopedTypeEnv {
-    frames: Vec<ScopeFrame>,
-}
-
-impl Default for ScopedTypeEnv {
-    fn default() -> Self {
-        Self {
-            frames: vec![ScopeFrame::default()],
-        }
-    }
+    undo: Vec<TypeUndo>,
+    /// `undo`'s length when each open scope (all but the root) was pushed.
+    marks: Vec<usize>,
 }
 
 impl ScopedTypeEnv {
     fn push_scope(&mut self) {
-        self.frames.push(ScopeFrame::default());
+        self.marks.push(self.undo.len());
     }
 
     fn pop_scope(&mut self) {
         debug_assert!(
-            self.frames.len() > 1,
+            !self.marks.is_empty(),
             "cardano_context_naming attempted to pop the root type scope"
         );
-        if self.frames.len() > 1 {
-            self.frames.pop();
+        let Some(mark) = self.marks.pop() else {
+            return;
+        };
+        while self.undo.len() > mark {
+            match self.undo.pop().expect("undo entry above the mark") {
+                TypeUndo::Id(vid, Some(prev)) => {
+                    self.types_by_id.insert(vid, prev);
+                }
+                TypeUndo::Id(vid, None) => {
+                    self.types_by_id.remove(&vid);
+                }
+                TypeUndo::Name(name, Some(prev)) => {
+                    self.types_by_name.insert(name, prev);
+                }
+                TypeUndo::Name(name, None) => {
+                    self.types_by_name.remove(&name);
+                }
+            }
         }
     }
 
@@ -47,14 +68,12 @@ impl ScopedTypeEnv {
         if name == "_" {
             return;
         }
-        let frame = self
-            .frames
-            .last_mut()
-            .expect("ScopedTypeEnv always keeps a root frame");
         if let Some(vid) = id {
-            frame.types_by_id.insert(vid, ty);
+            let prev = self.types_by_id.insert(vid, ty);
+            self.undo.push(TypeUndo::Id(vid, prev));
         }
-        frame.types_by_name.insert(name.to_string(), ty);
+        let prev = self.types_by_name.insert(name.to_string(), ty);
+        self.undo.push(TypeUndo::Name(name.to_string(), prev));
     }
 
     fn bind_binder(&mut self, binder: &Binder, ty: CardanoTypeRef) {
@@ -62,16 +81,8 @@ impl ScopedTypeEnv {
     }
 
     fn lookup_var(&self, name: &str, id: Option<VarId>) -> Option<CardanoTypeRef> {
-        self.frames
-            .iter()
-            .rev()
-            .find_map(|frame| id.and_then(|vid| frame.types_by_id.get(&vid).copied()))
-            .or_else(|| {
-                self.frames
-                    .iter()
-                    .rev()
-                    .find_map(|frame| frame.types_by_name.get(name).copied())
-            })
+        id.and_then(|vid| self.types_by_id.get(&vid).copied())
+            .or_else(|| self.types_by_name.get(name).copied())
     }
 }
 
@@ -135,12 +146,26 @@ fn propagate_types_and_name_constructors_impl(
     use crate::pseudo::constructor::ConstructorShape;
     use crate::pseudo::fold::{ExprFolder, FoldAction};
 
+    /// The constructor names a `when` subject's sum type gives its patterns.
+    type ConstructorHint = (TypeHintId, &'static [&'static str]);
+
+    /// A `when` whose clauses are being folded.
+    struct WhenScope {
+        subject_type: Option<CardanoTypeRef>,
+        constructor_hint: Option<ConstructorHint>,
+        /// One per clause folded so far: its pattern, literal payload folded
+        /// and constructor names filled in, put in place by `post_when`.
+        patterns: Vec<WhenPattern>,
+    }
+
     struct TypePropagator<'a> {
         var_types: ScopedTypeEnv,
         version: ScriptVersion,
         registry: &'a mut BlueprintHintRegistry,
         blueprint_hints: Option<&'a BlueprintHints>,
         kind_annotations: Option<&'a mut HashMap<VarId, VarKind>>,
+        /// One per `when` whose clauses are being folded, innermost last.
+        when_scopes: Vec<WhenScope>,
     }
 
     impl<'a> TypePropagator<'a> {
@@ -383,7 +408,7 @@ fn propagate_types_and_name_constructors_impl(
         fn constructor_hint(
             &mut self,
             subject_type: Option<CardanoTypeRef>,
-        ) -> Option<(TypeHintId, &'static [&'static str])> {
+        ) -> Option<ConstructorHint> {
             let sum = subject_type?.sum()?;
             let ctor_names = sum_type_constructor_names(sum, self.version)?;
             let hint = TypeHintId::new(Rc::<str>::from(sum.display_name()));
@@ -396,7 +421,7 @@ fn propagate_types_and_name_constructors_impl(
         fn annotate_pattern(
             &self,
             pattern: WhenPattern,
-            constructor_hint: Option<&(TypeHintId, &'static [&'static str])>,
+            constructor_hint: Option<&ConstructorHint>,
         ) -> WhenPattern {
             let Some((type_hint, ctor_names)) = constructor_hint else {
                 return pattern;
@@ -496,59 +521,6 @@ fn propagate_types_and_name_constructors_impl(
                 args: folded_args.into(),
             })
         }
-
-        fn fold_when_scoped(
-            &mut self,
-            subject: PseudoExpr,
-            subject_name: Option<Binder>,
-            clauses: Vec<WhenClause>,
-        ) -> PseudoExpr {
-            let subject = self.fold(subject);
-            let subject_type = self.infer_type(&subject);
-            let constructor_hint = self.constructor_hint(subject_type);
-
-            self.var_types.push_scope();
-            if let (Some(subject_name), Some(subject_type)) = (subject_name.as_ref(), subject_type)
-            {
-                self.var_types.bind_binder(subject_name, subject_type);
-            }
-
-            let clauses = clauses
-                .into_iter()
-                .map(|clause| {
-                    self.var_types.push_scope();
-                    let pattern = self.fold_pattern(clause.pattern);
-                    if let Some(subject_type) = subject_type {
-                        self.register_pattern_bindings(&pattern, subject_type);
-                    }
-                    // User-ADT field naming from the pattern's own
-                    // `TypeHintId`; runs regardless of subject_type,
-                    // so patterns over an uninferable subject (e.g.
-                    // Data) still get blueprint field names.
-                    self.register_user_adt_field_bindings(&pattern);
-                    let guard = clause.guard.map(|guard| self.fold(guard));
-                    let body = self.fold(clause.body);
-                    self.var_types.pop_scope();
-                    let pattern = self.annotate_pattern(pattern, constructor_hint.as_ref());
-                    // Re-run after `annotate_pattern`, which may attach
-                    // a Cardano-schema `TypeHintId`; the early
-                    // `SumTypeId::from_display_name` skip keeps those out.
-                    self.register_user_adt_field_bindings(&pattern);
-                    WhenClause {
-                        pattern,
-                        guard,
-                        body,
-                    }
-                })
-                .collect();
-
-            self.var_types.pop_scope();
-            PseudoExpr::When {
-                subject: PBox::new(subject),
-                subject_name,
-                clauses,
-            }
-        }
     }
 
     impl<'a> ExprFolder for TypePropagator<'a> {
@@ -569,15 +541,99 @@ fn propagate_types_and_name_constructors_impl(
             }
         }
 
-        /// A `when`'s clause bodies are folded with the subject's Cardano type
-        /// and the pattern's payload binders in scope.
-        fn fold_when(
+        // A `when`'s clause bodies are folded with the subject's Cardano type
+        // and the pattern's payload binders in scope. Folded flat, through the
+        // machine's clause hooks: a `when` nests as deep as the script makes
+        // it, and `fold_when` would recurse once per level. Literal payloads
+        // are folded in `enter_clause`, inside the clause's scope as before.
+        fn machine_folds_when(&self) -> bool {
+            true
+        }
+
+        fn machine_keeps_pattern_literals(&self) -> bool {
+            true
+        }
+
+        fn machine_scopes_clauses(&self) -> bool {
+            true
+        }
+
+        fn enter_clauses(&mut self, subject: &PseudoExpr, subject_name: Option<&Binder>) {
+            let subject_type = self.infer_type(subject);
+            let constructor_hint = self.constructor_hint(subject_type);
+
+            self.var_types.push_scope();
+            if let (Some(subject_name), Some(subject_type)) = (subject_name, subject_type) {
+                self.var_types.bind_binder(subject_name, subject_type);
+            }
+            self.when_scopes.push(WhenScope {
+                subject_type,
+                constructor_hint,
+                patterns: Vec::new(),
+            });
+        }
+
+        fn enter_clause(&mut self, _subject_name: Option<&Binder>, pattern: &WhenPattern) {
+            self.var_types.push_scope();
+            let pattern = self.fold_pattern(pattern.clone());
+            let scope = self
+                .when_scopes
+                .last()
+                .expect("enter_clauses opened this when");
+            if let Some(subject_type) = scope.subject_type {
+                self.register_pattern_bindings(&pattern, subject_type);
+            }
+            // User-ADT field naming from the pattern's own
+            // `TypeHintId`; runs regardless of subject_type,
+            // so patterns over an uninferable subject (e.g.
+            // Data) still get blueprint field names.
+            self.register_user_adt_field_bindings(&pattern);
+            self.when_scopes
+                .last_mut()
+                .expect("enter_clauses opened this when")
+                .patterns
+                .push(pattern);
+        }
+
+        fn exit_clause(&mut self, _subject_name: Option<&Binder>, _pattern: &WhenPattern) {
+            self.var_types.pop_scope();
+            let mut scope = self
+                .when_scopes
+                .pop()
+                .expect("enter_clauses opened this when");
+            let pattern = scope
+                .patterns
+                .pop()
+                .expect("enter_clause recorded this clause");
+            let pattern = self.annotate_pattern(pattern, scope.constructor_hint.as_ref());
+            // Re-run after `annotate_pattern`, which may attach
+            // a Cardano-schema `TypeHintId`; the early
+            // `SumTypeId::from_display_name` skip keeps those out.
+            self.register_user_adt_field_bindings(&pattern);
+            scope.patterns.push(pattern);
+            self.when_scopes.push(scope);
+        }
+
+        fn post_when(
             &mut self,
             subject: PseudoExpr,
             subject_name: Option<Binder>,
             clauses: Vec<WhenClause>,
         ) -> PseudoExpr {
-            self.fold_when_scoped(subject, subject_name, clauses)
+            let scope = self
+                .when_scopes
+                .pop()
+                .expect("enter_clauses opened this when");
+            self.var_types.pop_scope();
+            PseudoExpr::When {
+                subject: PBox::new(subject),
+                subject_name,
+                clauses: clauses
+                    .into_iter()
+                    .zip(scope.patterns)
+                    .map(|(clause, pattern)| WhenClause { pattern, ..clause })
+                    .collect(),
+            }
         }
 
         fn enter_lambda(&mut self, params: &[Binder]) -> Vec<Binder> {
@@ -631,6 +687,7 @@ fn propagate_types_and_name_constructors_impl(
         registry,
         blueprint_hints,
         kind_annotations,
+        when_scopes: Vec::new(),
     };
     propagator.fold(expr)
 }
@@ -676,6 +733,10 @@ fn resolve_cardano_field_names_impl(
         var_types: ScopedTypeEnv,
         version: ScriptVersion,
         kind_annotations: Option<&'a mut HashMap<VarId, VarKind>>,
+        /// One per `when` whose clauses are being folded, innermost last:
+        /// its subject's type, and per clause folded so far the pattern with
+        /// its literal payload folded, put in place by `post_when`.
+        when_scopes: Vec<(Option<CardanoTypeRef>, Vec<WhenPattern>)>,
     }
 
     impl CardanoFieldResolver<'_> {
@@ -1040,48 +1101,6 @@ fn resolve_cardano_field_names_impl(
                 args: folded_args.into(),
             })
         }
-
-        fn fold_when_scoped(
-            &mut self,
-            subject: PseudoExpr,
-            subject_name: Option<Binder>,
-            clauses: Vec<WhenClause>,
-        ) -> PseudoExpr {
-            let subject = self.fold(subject);
-            let subject_type = self.infer_type(&subject);
-
-            self.var_types.push_scope();
-            if let (Some(subject_name), Some(subject_type)) = (subject_name.as_ref(), subject_type)
-            {
-                self.var_types.bind_binder(subject_name, subject_type);
-            }
-
-            let clauses = clauses
-                .into_iter()
-                .map(|clause| {
-                    self.var_types.push_scope();
-                    let pattern = self.fold_pattern(clause.pattern);
-                    if let Some(subject_type) = subject_type {
-                        self.register_pattern_bindings(&pattern, subject_type);
-                    }
-                    let guard = clause.guard.map(|guard| self.fold(guard));
-                    let body = self.fold(clause.body);
-                    self.var_types.pop_scope();
-                    WhenClause {
-                        pattern,
-                        guard,
-                        body,
-                    }
-                })
-                .collect();
-
-            self.var_types.pop_scope();
-            PseudoExpr::When {
-                subject: PBox::new(subject),
-                subject_name,
-                clauses,
-            }
-        }
     }
 
     impl ExprFolder for CardanoFieldResolver<'_> {
@@ -1102,15 +1121,74 @@ fn resolve_cardano_field_names_impl(
             }
         }
 
-        /// A `when`'s clause bodies are folded with the subject's Cardano type
-        /// and the pattern's payload binders in scope.
-        fn fold_when(
+        // A `when`'s clause bodies are folded with the subject's Cardano type
+        // and the pattern's payload binders in scope. Folded flat, through the
+        // machine's clause hooks: a `when` nests as deep as the script makes
+        // it, and `fold_when` would recurse once per level. Literal payloads
+        // are folded in `enter_clause`, inside the clause's scope as before.
+        fn machine_folds_when(&self) -> bool {
+            true
+        }
+
+        fn machine_keeps_pattern_literals(&self) -> bool {
+            true
+        }
+
+        fn machine_scopes_clauses(&self) -> bool {
+            true
+        }
+
+        fn enter_clauses(&mut self, subject: &PseudoExpr, subject_name: Option<&Binder>) {
+            let subject_type = self.infer_type(subject);
+
+            self.var_types.push_scope();
+            if let (Some(subject_name), Some(subject_type)) = (subject_name, subject_type) {
+                self.var_types.bind_binder(subject_name, subject_type);
+            }
+            self.when_scopes.push((subject_type, Vec::new()));
+        }
+
+        fn enter_clause(&mut self, _subject_name: Option<&Binder>, pattern: &WhenPattern) {
+            self.var_types.push_scope();
+            let pattern = self.fold_pattern(pattern.clone());
+            let (subject_type, _) = self
+                .when_scopes
+                .last()
+                .expect("enter_clauses opened this when");
+            if let Some(subject_type) = *subject_type {
+                self.register_pattern_bindings(&pattern, subject_type);
+            }
+            self.when_scopes
+                .last_mut()
+                .expect("enter_clauses opened this when")
+                .1
+                .push(pattern);
+        }
+
+        fn exit_clause(&mut self, _subject_name: Option<&Binder>, _pattern: &WhenPattern) {
+            self.var_types.pop_scope();
+        }
+
+        fn post_when(
             &mut self,
             subject: PseudoExpr,
             subject_name: Option<Binder>,
             clauses: Vec<WhenClause>,
         ) -> PseudoExpr {
-            self.fold_when_scoped(subject, subject_name, clauses)
+            let (_, patterns) = self
+                .when_scopes
+                .pop()
+                .expect("enter_clauses opened this when");
+            self.var_types.pop_scope();
+            PseudoExpr::When {
+                subject: PBox::new(subject),
+                subject_name,
+                clauses: clauses
+                    .into_iter()
+                    .zip(patterns)
+                    .map(|(clause, pattern)| WhenClause { pattern, ..clause })
+                    .collect(),
+            }
         }
 
         fn enter_lambda(&mut self, params: &[Binder]) -> Vec<Binder> {
@@ -1208,6 +1286,7 @@ fn resolve_cardano_field_names_impl(
         var_types: ScopedTypeEnv::default(),
         version,
         kind_annotations,
+        when_scopes: Vec::new(),
     };
     resolver.fold(expr)
 }
