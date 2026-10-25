@@ -29,7 +29,7 @@ use super::scope_recurse::rewrite_top_down_pruning;
 use std::collections::HashMap;
 
 pub(super) fn const_fold_church_bytestring(expr: PseudoExpr) -> PseudoExpr {
-    let mut env: HashMap<VarId, PseudoExpr> = HashMap::new();
+    let mut env: HashMap<VarId, HelperKind> = HashMap::new();
     collect_let_bindings(&expr, &mut env);
     let folded = rewrite(expr, &env);
     // Folding can leave the `o5`/`s5` helper lets unreferenced.
@@ -165,7 +165,18 @@ fn contains_var_id_ref(expr: &PseudoExpr, target: VarId) -> bool {
 
 /// Collect every `Let { id: Some(vid), value, .. }` into a flat env;
 /// binders are globally unique by `VarId`, so no scoping is needed.
-fn collect_let_bindings(expr: &PseudoExpr, env: &mut HashMap<VarId, PseudoExpr>) {
+/// What a let-bound value is, as far as the fold cares. Recorded instead of
+/// a copy of the value: values hold the rest of a chain, and copying each
+/// would cost memory quadratic in a depth the script chooses.
+#[derive(Clone, Copy)]
+struct HelperKind {
+    /// `is_church_list_to_bytestring_fold` (the `s5` helper).
+    list_to_bytes: bool,
+    /// `is_bytes_to_church_list` (the `o5` helper).
+    bytes_to_list: bool,
+}
+
+fn collect_let_bindings(expr: &PseudoExpr, env: &mut HashMap<VarId, HelperKind>) {
     let mut pending = vec![expr];
     while let Some(cur) = pending.pop() {
         match cur {
@@ -175,7 +186,13 @@ fn collect_let_bindings(expr: &PseudoExpr, env: &mut HashMap<VarId, PseudoExpr>)
                 body,
                 ..
             } => {
-                env.insert(*vid, (**value).clone());
+                env.insert(
+                    *vid,
+                    HelperKind {
+                        list_to_bytes: is_church_list_to_bytestring_fold(value),
+                        bytes_to_list: is_bytes_to_church_list(value),
+                    },
+                );
                 pending.push(body);
                 pending.push(value);
             }
@@ -257,13 +274,13 @@ fn collect_let_bindings(expr: &PseudoExpr, env: &mut HashMap<VarId, PseudoExpr>)
 
 /// Top-down with pruning, as before: firing at a node replaces the subtree,
 /// so it is never walked. `recurse` is gone — the helper does that descent.
-fn rewrite(expr: PseudoExpr, env: &HashMap<VarId, PseudoExpr>) -> PseudoExpr {
+fn rewrite(expr: PseudoExpr, env: &HashMap<VarId, HelperKind>) -> PseudoExpr {
     rewrite_top_down_pruning(expr, |node| try_fold(node, env))
 }
 
 /// Try to fold the entire `s5(o5([bytes]))` pattern. Returns the
 /// resulting `ByteArray` literal on success, `None` on any mismatch.
-fn try_fold(expr: &PseudoExpr, env: &HashMap<VarId, PseudoExpr>) -> Option<PseudoExpr> {
+fn try_fold(expr: &PseudoExpr, env: &HashMap<VarId, HelperKind>) -> Option<PseudoExpr> {
     // Outer: Apply(s5, [inner_call])
     let PseudoExpr::Apply { function, args } = expr else {
         return None;
@@ -272,8 +289,7 @@ fn try_fold(expr: &PseudoExpr, env: &HashMap<VarId, PseudoExpr>) -> Option<Pseud
         return None;
     }
     let s5_id = var_id_of(function)?;
-    let s5_def = env.get(&s5_id)?;
-    if !is_church_list_to_bytestring_fold(s5_def) {
+    if !env.get(&s5_id)?.list_to_bytes {
         return None;
     }
 
@@ -289,8 +305,7 @@ fn try_fold(expr: &PseudoExpr, env: &HashMap<VarId, PseudoExpr>) -> Option<Pseud
         return None;
     }
     let o5_id = var_id_of(inner_fn)?;
-    let o5_def = env.get(&o5_id)?;
-    if !is_bytes_to_church_list(o5_def) {
+    if !env.get(&o5_id)?.bytes_to_list {
         return None;
     }
 

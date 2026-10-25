@@ -27,41 +27,68 @@ use std::collections::{HashMap, HashSet};
 
 use crate::pseudo::ast::PseudoExpr;
 use crate::pseudo::constructor::{ConstructorShape, KnownConstructor};
-use crate::pseudo::fold::ExprVisitor;
 use crate::pseudo::var_id::VarId;
 
 use super::scope_recurse::rewrite_bottom_up;
 
 pub(super) fn recover_constr_cons_spread(expr: PseudoExpr) -> PseudoExpr {
-    let table = collect_let_values(&expr);
-    rewrite(expr, &table)
+    let lists = let_bound_lists(&expr);
+    rewrite(expr, &lists)
 }
 
-/// Map every `Let` binder `VarId` to a clone of its bound value. Uses
-/// `fold::ExprVisitor` so nested lets and `WhenPattern::Literal` payloads are
-/// all seen.
-fn collect_let_values(expr: &PseudoExpr) -> HashMap<VarId, PseudoExpr> {
-    struct Collector {
-        table: HashMap<VarId, PseudoExpr>,
+/// For every `Let` binder `VarId` (the first binding of an id wins), whether
+/// its bound value provably renders as a list — [`resolves_to_list`] chasing
+/// the other bindings by `VarId`. Nested lets and `WhenPattern::Literal`
+/// payloads are all seen.
+///
+/// Answered up front from borrowed values, where it used to keep a clone of
+/// every bound value: a value holds the rest of a chain, and the copies cost
+/// memory quadratic in a depth the script chooses.
+fn let_bound_lists(expr: &PseudoExpr) -> HashMap<VarId, bool> {
+    enum Step<'a> {
+        Enter(&'a PseudoExpr),
+        /// The value of a `let` with this id has been walked.
+        Bound(VarId, &'a PseudoExpr),
     }
-    impl ExprVisitor for Collector {
-        fn visit_let_value_post(&mut self, _name: &str, id: &Option<VarId>, value: &PseudoExpr) {
-            if let Some(vid) = id {
-                self.table.entry(*vid).or_insert_with(|| value.clone());
+    // The visitor's order: a `let`'s value, then its binding, then its body.
+    let mut table: HashMap<VarId, &PseudoExpr> = HashMap::new();
+    let mut steps = vec![Step::Enter(expr)];
+    let mut kids: Vec<&PseudoExpr> = Vec::new();
+    while let Some(step) = steps.pop() {
+        match step {
+            Step::Bound(vid, value) => {
+                table.entry(vid).or_insert(value);
+            }
+            Step::Enter(PseudoExpr::Let {
+                id: Some(vid),
+                value,
+                body,
+                ..
+            }) => {
+                steps.push(Step::Enter(body));
+                steps.push(Step::Bound(*vid, value));
+                steps.push(Step::Enter(value));
+            }
+            Step::Enter(node) => {
+                kids.clear();
+                node.child_refs_into(&mut kids);
+                steps.extend(kids.iter().rev().map(|kid| Step::Enter(kid)));
             }
         }
     }
-    let mut c = Collector {
-        table: HashMap::new(),
-    };
-    c.walk(expr);
-    c.table
+    table
+        .keys()
+        .map(|vid| {
+            let mut visiting = HashSet::from([*vid]);
+            (*vid, resolves_to_list(table[vid], &table, &mut visiting))
+        })
+        .collect()
 }
 
 /// Bottom-up rewrite: each node is rebuilt from its already-rewritten
 /// children, then handed to [`try_fold_cons_spread`].
-fn rewrite(expr: PseudoExpr, table: &HashMap<VarId, PseudoExpr>) -> PseudoExpr {
-    rewrite_bottom_up(expr, |e| try_fold_cons_spread(e, table))
+fn rewrite(expr: PseudoExpr, lists: &HashMap<VarId, bool>) -> PseudoExpr {
+    rewrite_bottom_up(expr, |e| try_fold_cons_spread(e, lists))
 }
 
 /// A tag-1 arity-2 constructor is a cons-cell candidate — either the church/
@@ -103,7 +130,7 @@ fn is_nil_shape(shape: &ConstructorShape) -> bool {
 /// respects the shared stub, which this pass does not attempt.
 fn resolves_to_list(
     expr: &PseudoExpr,
-    table: &HashMap<VarId, PseudoExpr>,
+    table: &HashMap<VarId, &PseudoExpr>,
     visiting: &mut HashSet<VarId>,
 ) -> bool {
     let mut current = expr;
@@ -130,7 +157,7 @@ fn resolves_to_list(
                 }
                 inserted.push(*vid);
                 match table.get(vid) {
-                    Some(value) => current = value,
+                    Some(value) => current = *value,
                     None => break false,
                 }
             }
@@ -143,10 +170,37 @@ fn resolves_to_list(
     result
 }
 
+/// [`resolves_to_list`] over a rewritten subtree: through its cons tails, and
+/// at the first `Var` the answer computed for that binding.
+fn tail_resolves_to_list(expr: &PseudoExpr, lists: &HashMap<VarId, bool>) -> bool {
+    let mut current = expr;
+    loop {
+        match current {
+            PseudoExpr::List { .. } => return true,
+            PseudoExpr::Constr {
+                tag, fields, shape, ..
+            } => {
+                if is_nil_shape(shape) {
+                    return true;
+                }
+                if is_cons_shape(shape) && *tag == 1 && fields.len() == 2 {
+                    current = &fields[1];
+                    continue;
+                }
+                return false;
+            }
+            PseudoExpr::Var { id: Some(vid), .. } => {
+                return lists.get(vid).copied().unwrap_or(false);
+            }
+            _ => return false,
+        }
+    }
+}
+
 /// If `expr` is a cons-cell `Constr<1>(head, tail)` whose tail provably
 /// resolves to a list, fold the (possibly nested inline) cons chain into a
 /// `List { elements, tail }` spread. Otherwise return `expr` unchanged.
-fn try_fold_cons_spread(expr: PseudoExpr, table: &HashMap<VarId, PseudoExpr>) -> PseudoExpr {
+fn try_fold_cons_spread(expr: PseudoExpr, lists: &HashMap<VarId, bool>) -> PseudoExpr {
     let PseudoExpr::Constr {
         tag: 1,
         ref fields,
@@ -162,7 +216,7 @@ fn try_fold_cons_spread(expr: PseudoExpr, table: &HashMap<VarId, PseudoExpr>) ->
     // Gate: the tail (second field) must provably resolve to a list — what
     // distinguishes a genuine cons cell from a coincidental tag-1 arity-2
     // constructor whose second field is opaque.
-    if !resolves_to_list(&fields[1], table, &mut HashSet::new()) {
+    if !tail_resolves_to_list(&fields[1], lists) {
         return expr;
     }
 
