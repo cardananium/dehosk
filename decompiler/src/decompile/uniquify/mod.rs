@@ -19,19 +19,32 @@ use crate::pseudo::var_id::VarId;
 // Shared helpers
 // ============================================================
 
-fn make_unique(name: &str, global_names: &mut HashSet<String>) -> String {
-    if !global_names.contains(name) {
-        global_names.insert(name.to_string());
-        return name.to_string();
-    }
-    let mut idx = 2usize;
-    loop {
-        let candidate = format!("{}_{}", name, idx);
-        if !global_names.contains(&candidate) {
-            global_names.insert(candidate.clone());
-            return candidate;
+/// Every name handed out so far, for [`Self::make_unique`].
+#[derive(Default)]
+struct UniqueNames {
+    names: HashSet<String>,
+    /// Per name, the lowest `_<n>` suffix not yet known to be taken. `names`
+    /// only grows, so every suffix below it stays taken and the search for a
+    /// free one resumes there instead of at 2 — a script can repeat one name
+    /// tens of thousands of times.
+    next_suffix: HashMap<String, usize>,
+}
+
+impl UniqueNames {
+    fn make_unique(&mut self, name: &str) -> String {
+        if !self.names.contains(name) {
+            self.names.insert(name.to_string());
+            return name.to_string();
         }
-        idx += 1;
+        let next = self.next_suffix.entry(name.to_string()).or_insert(2);
+        loop {
+            let candidate = format!("{}_{}", name, *next);
+            *next += 1;
+            if !self.names.contains(&candidate) {
+                self.names.insert(candidate.clone());
+                return candidate;
+            }
+        }
     }
 }
 
@@ -167,11 +180,16 @@ fn register_free_vars(
 
 pub(crate) fn uniquify_let_names(expr: PseudoExpr) -> PseudoExpr {
     let mut folder = UniquifyFolder {
-        global_names: HashSet::new(),
+        global_names: UniqueNames::default(),
         renames: HashMap::new(),
         renames_by_id: HashMap::new(),
         scope_stack: Vec::new(),
-        id_scope_stack: Vec::new(),
+        id_undo: Vec::new(),
+        id_marks: Vec::new(),
+        let_recfn_names: Vec::new(),
+        pending_recfn_name: None,
+        recfn_frames: Vec::new(),
+        when_renames: Vec::new(),
     };
     folder.fold(expr)
 }
@@ -194,19 +212,47 @@ fn collect_all_var_names(expr: &PseudoExpr, names: &mut HashSet<String>) {
 /// A saved rename entry: (original_name, previous_mapping_if_any).
 type SavedRename = (String, Option<String>);
 
+/// The uniquified binders of a `when` whose clauses are being folded, put in
+/// place by `post_when`.
+struct WhenRenames {
+    subject_name: Option<Binder>,
+    /// One per clause folded so far.
+    patterns: Vec<WhenPattern>,
+}
+
 struct UniquifyFolder {
-    global_names: HashSet<String>,
+    global_names: UniqueNames,
     /// Maps original name -> current unique name.
     renames: HashMap<String, String>,
     /// Maps binding VarId -> current unique name.
     renames_by_id: HashMap<VarId, String>,
     /// Stack of saved renames per scope, so exit_* can restore them.
     scope_stack: Vec<Vec<SavedRename>>,
-    /// Snapshots of id-based renames per scope.
-    id_scope_stack: Vec<HashMap<VarId, String>>,
+    /// Every `renames_by_id` binding with what it replaced. Popping a scope
+    /// unwinds it to the scope's mark, so a scope costs its own bindings
+    /// rather than a copy of the whole map — the nesting is script-controlled.
+    id_undo: Vec<(VarId, Option<String>)>,
+    /// `id_undo`'s length when each scope on `scope_stack` was opened.
+    id_marks: Vec<usize>,
+    /// One entry per `pre_let`, taken back by that let's `enter_let`: the
+    /// shared unique name when the let binds a same-named `rec fn`.
+    let_recfn_names: Vec<Option<String>>,
+    /// That shared name, for the `enter_recfn` of the `rec fn` value
+    /// `pre_let` has just seen.
+    pending_recfn_name: Option<String>,
+    /// Per open `rec fn`, how many scopes its `exit_recfn` closes.
+    recfn_frames: Vec<usize>,
+    /// One per `when` whose clauses are being folded, innermost last.
+    when_renames: Vec<WhenRenames>,
 }
 
 impl UniquifyFolder {
+    /// Map `id` to `name`, recording what it replaced for `pop_scope`.
+    fn bind_id(&mut self, id: VarId, name: String) {
+        let prev = self.renames_by_id.insert(id, name);
+        self.id_undo.push((id, prev));
+    }
+
     fn push_rename(&mut self, old: String, new: String) -> SavedRename {
         let prev = self.renames.insert(old.clone(), new);
         (old, prev)
@@ -223,9 +269,11 @@ impl UniquifyFolder {
         }
     }
 
-    fn push_scope_frame(&mut self, saved: Vec<SavedRename>, saved_ids: HashMap<VarId, String>) {
+    /// Open a scope that restores `saved` and unwinds `renames_by_id` to
+    /// `id_mark` (an `id_undo` length) when popped.
+    fn push_scope_frame(&mut self, saved: Vec<SavedRename>, id_mark: usize) {
         self.scope_stack.push(saved);
-        self.id_scope_stack.push(saved_ids);
+        self.id_marks.push(id_mark);
     }
 
     fn lookup_with_id(&self, name: &str, var_id: Option<VarId>) -> String {
@@ -241,8 +289,8 @@ impl UniquifyFolder {
     }
 
     fn uniquify_binder(&mut self, binder: &Binder) -> (Binder, Option<SavedRename>) {
-        let new_name = make_unique(binder.as_str(), &mut self.global_names);
-        self.renames_by_id.insert(binder.id, new_name.clone());
+        let new_name = self.global_names.make_unique(binder.as_str());
+        self.bind_id(binder.id, new_name.clone());
         let saved = if new_name != binder.as_str() {
             Some(self.push_rename(binder.to_string(), new_name.clone()))
         } else {
@@ -255,7 +303,7 @@ impl UniquifyFolder {
         &mut self,
         params: &[crate::pseudo::ast::Binder],
     ) -> Vec<crate::pseudo::ast::Binder> {
-        let saved_ids = self.renames_by_id.clone();
+        let id_mark = self.id_undo.len();
         let mut saved = Vec::new();
         let new_params: Vec<_> = params
             .iter()
@@ -267,7 +315,7 @@ impl UniquifyFolder {
                 new_param
             })
             .collect();
-        self.push_scope_frame(saved, saved_ids);
+        self.push_scope_frame(saved, id_mark);
         new_params
     }
 
@@ -314,98 +362,23 @@ impl UniquifyFolder {
         }
     }
 
-    fn fold_when_scoped(
-        &mut self,
-        subject: PseudoExpr,
-        subject_name: Option<Binder>,
-        clauses: Vec<WhenClause>,
-    ) -> PseudoExpr {
-        let subject = self.fold(subject);
-        self.push_scope_frame(Vec::new(), self.renames_by_id.clone());
-        let subject_name = subject_name.map(|binder| self.uniquify_binder(&binder).0);
-        let clauses = clauses
-            .into_iter()
-            .map(|clause| {
-                self.push_scope_frame(Vec::new(), self.renames_by_id.clone());
-                let pattern = self.uniquify_pattern_binders(clause.pattern);
-                let guard = clause.guard.map(|guard| self.fold(guard));
-                let body = self.fold(clause.body);
-                self.pop_scope();
-                WhenClause {
-                    pattern,
-                    guard,
-                    body,
-                }
-            })
-            .collect();
-        self.pop_scope();
-        PseudoExpr::When {
-            subject: PBox::new(subject),
-            subject_name,
-            clauses,
-        }
-    }
-
     fn pop_scope(&mut self) {
         if let Some(saved) = self.scope_stack.pop() {
             for s in saved.into_iter().rev() {
                 self.restore_rename(s);
             }
         }
-        if let Some(prev) = self.id_scope_stack.pop() {
-            self.renames_by_id = prev;
-        }
-    }
-
-    /// Handle `let name = rec fn name(params) { fn_body } in body` as a unit.
-    /// The Let name and RecFn name are the same binding — they must be renamed together.
-    fn fold_let_recfn(
-        &mut self,
-        let_name: String,
-        let_id: Option<VarId>,
-        fn_name: crate::pseudo::ast::Binder,
-        fn_params: Vec<crate::pseudo::ast::Binder>,
-        fn_body: PseudoExpr,
-        let_body: PseudoExpr,
-    ) -> PseudoExpr {
-        // One unique name, shared by the Let binder and the RecFn name.
-        let new_name = make_unique(&let_name, &mut self.global_names);
-        let saved_ids = self.renames_by_id.clone();
-
-        // The rename covers both RecFn body self-refs and Let body refs.
-        let mut name_saved = Vec::new();
-        if new_name != let_name {
-            name_saved.push(self.push_rename(let_name, new_name.clone()));
-        }
-        if let Some(let_id) = let_id.get() {
-            self.renames_by_id.insert(let_id, new_name.clone());
-        }
-        self.renames_by_id.insert(fn_name.id, new_name.clone());
-        self.push_scope_frame(name_saved, saved_ids);
-
-        let new_params = self.uniquify_param_binders(&fn_params);
-
-        // The name rename is active, so self-references are renamed too.
-        let new_fn_body = self.fold(fn_body);
-
-        // Params are not in scope for the Let body.
-        self.pop_scope();
-
-        // The name rename is still active for references from the Let body.
-        let new_let_body = self.fold(let_body);
-
-        // Restore name/id rename scope for the let/recfn binder
-        self.pop_scope();
-
-        PseudoExpr::Let {
-            name: new_name.clone(),
-            id: let_id,
-            value: PBox::new(PseudoExpr::RecFn {
-                name: fn_name.renamed(new_name),
-                params: new_params,
-                body: PBox::new(new_fn_body),
-            }),
-            body: PBox::new(new_let_body),
+        if let Some(mark) = self.id_marks.pop() {
+            while self.id_undo.len() > mark {
+                match self.id_undo.pop().expect("undo entry above the mark") {
+                    (id, Some(prev)) => {
+                        self.renames_by_id.insert(id, prev);
+                    }
+                    (id, None) => {
+                        self.renames_by_id.remove(&id);
+                    }
+                }
+            }
         }
     }
 }
@@ -414,47 +387,49 @@ impl ExprFolder for UniquifyFolder {
     // Folded flat: this implementation overrides none of
     // `fold_when` / `fold_clause` / `fold_pattern`, so the machine
     // can reassemble a `when` itself instead of recursing through
-    // the hook once per nesting level.
+    // the hook once per nesting level. Clause scopes and the
+    // `let f = rec fn f(…)` unit go through the machine's hooks for the
+    // same reason: both nest as deep as the script makes them.
     fn machine_folds_when(&self) -> bool {
         true
     }
-    fn pre_expr(&mut self, expr: &PseudoExpr) -> FoldAction {
-        // Intercept Let-wrapping-RecFn with the same name to handle as a unit.
-        if let PseudoExpr::Let {
-            name,
-            id,
-            value,
-            body,
-        } = expr
-            && let PseudoExpr::RecFn {
-                name: fn_name,
-                params,
-                body: fn_body,
-            } = value.as_ref()
-            && fn_name == name
-        {
-            let result = self.fold_let_recfn(
-                name.clone(),
-                *id,
-                fn_name.clone(),
-                params.clone(),
-                fn_body.as_ref().clone(),
-                body.as_ref().clone(),
-            );
-            return FoldAction::Replace(result);
+
+    /// `let name = rec fn name(params) { fn_body } in body` is one binding:
+    /// the Let name and the RecFn name share one unique name, in scope over
+    /// the RecFn body (self-references) and the Let body alike. Bind it here,
+    /// before the value is folded; the value's `enter_recfn` and this let's
+    /// `enter_let` pick it up instead of uniquifying again, and `exit_let`
+    /// closes the scope opened here.
+    fn pre_let(
+        &mut self,
+        name: &str,
+        id: &Option<VarId>,
+        value: &PseudoExpr,
+        _body: &PseudoExpr,
+    ) -> FoldAction {
+        let PseudoExpr::RecFn { name: fn_name, .. } = value else {
+            self.let_recfn_names.push(None);
+            return FoldAction::Walk;
+        };
+        if fn_name != name {
+            self.let_recfn_names.push(None);
+            return FoldAction::Walk;
         }
-        if let PseudoExpr::When {
-            subject,
-            subject_name,
-            clauses,
-        } = expr
-        {
-            return FoldAction::Replace(self.fold_when_scoped(
-                subject.as_ref().clone(),
-                subject_name.clone(),
-                clauses.clone(),
-            ));
+        let new_name = self.global_names.make_unique(name);
+        let id_mark = self.id_undo.len();
+
+        let mut name_saved = Vec::new();
+        if new_name != name {
+            name_saved.push(self.push_rename(name.to_string(), new_name.clone()));
         }
+        if let Some(let_id) = id.get() {
+            self.bind_id(let_id, new_name.clone());
+        }
+        self.bind_id(fn_name.id, new_name.clone());
+        self.push_scope_frame(name_saved, id_mark);
+
+        self.pending_recfn_name = Some(new_name.clone());
+        self.let_recfn_names.push(Some(new_name));
         FoldAction::Walk
     }
 
@@ -464,16 +439,19 @@ impl ExprFolder for UniquifyFolder {
     }
 
     fn enter_let(&mut self, name: &str, id: &Option<VarId>, _value: &PseudoExpr) -> String {
-        let saved_ids = self.renames_by_id.clone();
-        let new_name = make_unique(name, &mut self.global_names);
+        if let Some(Some(shared)) = self.let_recfn_names.pop() {
+            return shared;
+        }
+        let id_mark = self.id_undo.len();
+        let new_name = self.global_names.make_unique(name);
         let mut saved = Vec::new();
         if new_name != name {
             saved.push(self.push_rename(name.to_string(), new_name.clone()));
         }
         if let Some(var_id) = id.get() {
-            self.renames_by_id.insert(var_id, new_name.clone());
+            self.bind_id(var_id, new_name.clone());
         }
-        self.push_scope_frame(saved, saved_ids);
+        self.push_scope_frame(saved, id_mark);
         new_name
     }
 
@@ -494,17 +472,24 @@ impl ExprFolder for UniquifyFolder {
         name: &crate::pseudo::ast::Binder,
         params: &[crate::pseudo::ast::Binder],
     ) -> (crate::pseudo::ast::Binder, Vec<crate::pseudo::ast::Binder>) {
+        // The value of a `let f = rec fn f(…)`: the name is already bound.
+        if let Some(shared) = self.pending_recfn_name.take() {
+            let new_params = self.uniquify_param_binders(params);
+            self.recfn_frames.push(1);
+            return (name.renamed(shared), new_params);
+        }
         // Uniquify the recfn name
-        let saved_ids = self.renames_by_id.clone();
+        let id_mark = self.id_undo.len();
         let mut name_saved = Vec::new();
-        let new_name = make_unique(name.as_str(), &mut self.global_names);
-        self.renames_by_id.insert(name.id, new_name.clone());
+        let new_name = self.global_names.make_unique(name.as_str());
+        self.bind_id(name.id, new_name.clone());
         if new_name != name.as_str() {
             name_saved.push(self.push_rename(name.to_string(), new_name.clone()));
         }
-        self.push_scope_frame(name_saved, saved_ids);
+        self.push_scope_frame(name_saved, id_mark);
         // Uniquify params (this pushes its own scope)
         let new_params = self.uniquify_param_binders(params);
+        self.recfn_frames.push(2);
         (name.renamed(new_name), new_params)
     }
 
@@ -513,25 +498,66 @@ impl ExprFolder for UniquifyFolder {
         _name: &crate::pseudo::ast::Binder,
         _params: &[crate::pseudo::ast::Binder],
     ) {
-        // Pop param scope (pushed by uniquify_params)
-        self.pop_scope();
-        // Pop name scope (pushed before the params)
+        // The param scope, then (unless a `let` owns it) the name scope.
+        for _ in 0..self.recfn_frames.pop().unwrap_or(2) {
+            self.pop_scope();
+        }
+    }
+
+    // Literal payloads are folded in `enter_clause`, inside the clause's
+    // scope as before; the machine leaves them alone.
+    fn machine_keeps_pattern_literals(&self) -> bool {
+        true
+    }
+
+    fn machine_scopes_clauses(&self) -> bool {
+        true
+    }
+
+    fn enter_clauses(&mut self, _subject: &PseudoExpr, subject_name: Option<&Binder>) {
+        let id_mark = self.id_undo.len();
+        self.push_scope_frame(Vec::new(), id_mark);
+        let subject_name = subject_name.map(|binder| self.uniquify_binder(binder).0);
+        self.when_renames.push(WhenRenames {
+            subject_name,
+            patterns: Vec::new(),
+        });
+    }
+
+    fn enter_clause(&mut self, _subject_name: Option<&Binder>, pattern: &WhenPattern) {
+        let id_mark = self.id_undo.len();
+        self.push_scope_frame(Vec::new(), id_mark);
+        let pattern = self.uniquify_pattern_binders(pattern.clone());
+        self.when_renames
+            .last_mut()
+            .expect("enter_clauses opened this when")
+            .patterns
+            .push(pattern);
+    }
+
+    fn exit_clause(&mut self, _subject_name: Option<&Binder>, _pattern: &WhenPattern) {
         self.pop_scope();
     }
 
     fn post_when(
         &mut self,
         subject: PseudoExpr,
-        subject_name: Option<Binder>,
+        _subject_name: Option<Binder>,
         clauses: Vec<WhenClause>,
     ) -> PseudoExpr {
-        // Rename subject_name if it's in the renames map
-        let new_subject_name =
-            subject_name.map(|n| n.renamed(self.lookup_with_id(n.as_ref(), Some(n.id))));
+        let renames = self
+            .when_renames
+            .pop()
+            .expect("enter_clauses opened this when");
+        self.pop_scope();
         PseudoExpr::When {
             subject: PBox::new(subject),
-            subject_name: new_subject_name,
-            clauses,
+            subject_name: renames.subject_name,
+            clauses: clauses
+                .into_iter()
+                .zip(renames.patterns)
+                .map(|(clause, pattern)| WhenClause { pattern, ..clause })
+                .collect(),
         }
     }
 }
@@ -700,27 +726,10 @@ impl SubstVarFolder {
         pattern_shadows_target_id(pattern, self.target_id)
     }
 
-    fn fold_clause_with_subject(
-        &mut self,
-        subject_name: Option<&Binder>,
-        clause: WhenClause,
-    ) -> WhenClause {
-        let pattern = self.fold_pattern(clause.pattern);
-        let blocks = subject_name.is_some_and(|subject_name| self.binder_shadows(subject_name))
-            || self.pattern_shadows(&pattern);
-        if blocks {
-            self.blocked_depth += 1;
-        }
-        let guard = clause.guard.map(|guard| self.fold(guard));
-        let body = self.fold(clause.body);
-        if blocks {
-            self.blocked_depth -= 1;
-        }
-        WhenClause {
-            pattern,
-            guard,
-            body,
-        }
+    /// Whether a clause's binders shadow the target for its guard and body.
+    fn clause_blocks(&self, subject_name: Option<&Binder>, pattern: &WhenPattern) -> bool {
+        subject_name.is_some_and(|subject_name| self.binder_shadows(subject_name))
+            || self.pattern_shadows(pattern)
     }
 }
 
@@ -728,8 +737,14 @@ impl ExprFolder for SubstVarFolder {
     // Folded flat: this implementation overrides none of
     // `fold_when` / `fold_clause` / `fold_pattern`, so the machine
     // can reassemble a `when` itself instead of recursing through
-    // the hook once per nesting level.
+    // the hook once per nesting level. A clause whose binders shadow
+    // the target blocks it through the machine's clause hooks, for
+    // the same reason.
     fn machine_folds_when(&self) -> bool {
+        true
+    }
+
+    fn machine_scopes_clauses(&self) -> bool {
         true
     }
     fn pre_expr(&mut self, expr: &PseudoExpr) -> FoldAction {
@@ -751,24 +766,6 @@ impl ExprFolder for SubstVarFolder {
             {
                 FoldAction::Replace(expr.clone())
             }
-            PseudoExpr::When {
-                subject,
-                subject_name,
-                clauses,
-            } => {
-                let subject = self.fold((**subject).clone());
-                let subject_name = subject_name.clone();
-                let clauses = clauses
-                    .clone()
-                    .into_iter()
-                    .map(|clause| self.fold_clause_with_subject(subject_name.as_ref(), clause))
-                    .collect();
-                FoldAction::Replace(PseudoExpr::When {
-                    subject: PBox::new(subject),
-                    subject_name,
-                    clauses,
-                })
-            }
             _ => FoldAction::Walk,
         }
     }
@@ -784,6 +781,19 @@ impl ExprFolder for SubstVarFolder {
 
     fn exit_let(&mut self, _name: &str) {
         if self.let_block_stack.pop().unwrap_or(false) {
+            self.blocked_depth -= 1;
+        }
+    }
+
+    // The pattern literal is folded before this, outside the block.
+    fn enter_clause(&mut self, subject_name: Option<&Binder>, pattern: &WhenPattern) {
+        if self.clause_blocks(subject_name, pattern) {
+            self.blocked_depth += 1;
+        }
+    }
+
+    fn exit_clause(&mut self, subject_name: Option<&Binder>, pattern: &WhenPattern) {
+        if self.clause_blocks(subject_name, pattern) {
             self.blocked_depth -= 1;
         }
     }
@@ -812,6 +822,19 @@ pub(crate) fn collapse_tail_chains(expr: PseudoExpr) -> PseudoExpr {
 struct TailCollapseFolder;
 
 impl ExprFolder for TailCollapseFolder {
+    // Folded flat, so a `when` nested as deep as the script makes it does
+    // not recurse once per level. The original hand-rolled recursion left
+    // `when` clause patterns untouched (only `subject`, `guard`, and `body`
+    // were walked) — keep that rather than folding `WhenPattern::Literal`'s
+    // inner expression.
+    fn machine_folds_when(&self) -> bool {
+        true
+    }
+
+    fn machine_keeps_pattern_literals(&self) -> bool {
+        true
+    }
+
     fn post_let(
         &mut self,
         name: String,
@@ -832,14 +855,6 @@ impl ExprFolder for TailCollapseFolder {
             value: PBox::new(value),
             body: PBox::new(body),
         }
-    }
-
-    // The original hand-rolled recursion left `when` clause patterns
-    // untouched (only `subject`, `guard`, and `body` were walked) — match
-    // that exactly rather than picking up the default's recursion into
-    // `WhenPattern::Literal`'s inner expression.
-    fn fold_pattern(&mut self, pattern: WhenPattern) -> WhenPattern {
-        pattern
     }
 }
 
