@@ -18,12 +18,44 @@ use crate::pseudo::var_id::VarId;
 /// Abstract interpreter state.
 pub(crate) struct Analyzer {
     env: HashMap<VarId, AbstractValue>,
+    /// Every change to `env`, with the value it replaced, so a scope is
+    /// restored by unwinding its own changes rather than by keeping a copy
+    /// of the whole env per scope — the scopes nest as deep as the script
+    /// makes them.
+    undo: Vec<(VarId, Option<AbstractValue>)>,
 }
 
 impl Analyzer {
     pub(crate) fn new() -> Self {
         Self {
             env: HashMap::new(),
+            undo: Vec::new(),
+        }
+    }
+
+    /// Bind `var` in the env, recording what it replaced.
+    fn bind(&mut self, var: VarId, value: AbstractValue) {
+        let prev = self.env.insert(var, value);
+        self.undo.push((var, prev));
+    }
+
+    /// Drop `var` from the env, recording what it held.
+    fn unbind(&mut self, var: VarId) {
+        let prev = self.env.remove(&var);
+        self.undo.push((var, prev));
+    }
+
+    /// Put the env back as it was when `undo` was `mark` long.
+    fn restore(&mut self, mark: usize) {
+        while self.undo.len() > mark {
+            match self.undo.pop().expect("undo entry above the mark") {
+                (var, Some(prev)) => {
+                    self.env.insert(var, prev);
+                }
+                (var, None) => {
+                    self.env.remove(&var);
+                }
+            }
         }
     }
 
@@ -60,25 +92,26 @@ impl Analyzer {
 
         let mut tasks = vec![Task::Enter(root)];
         let mut done: Vec<MidExpr> = Vec::new();
-        let mut saved: Vec<HashMap<VarId, AbstractValue>> = Vec::new();
+        // Per open snapshot, the `undo` length to restore to.
+        let mut saved: Vec<usize> = Vec::new();
 
         while let Some(task) = tasks.pop() {
             match task {
                 Task::Save(bindings) => {
-                    saved.push(self.env.clone());
+                    saved.push(self.undo.len());
                     for (var, value) in bindings {
-                        self.env.insert(var, value);
+                        self.bind(var, value);
                     }
                 }
                 Task::RestoreKeep => {
-                    self.env = saved.last().expect("unbalanced env snapshot").clone();
+                    self.restore(*saved.last().expect("unbalanced env snapshot"));
                 }
                 Task::RestorePop => {
-                    self.env = saved.pop().expect("unbalanced env snapshot");
+                    self.restore(saved.pop().expect("unbalanced env snapshot"));
                 }
                 Task::BindLet(var) => {
                     let av = self.abstract_eval(done.last().expect("let value"));
-                    self.env.insert(var, av);
+                    self.bind(var, av);
                 }
                 Task::Exit { mut shell, arity } => {
                     let at = done.len() - arity;
@@ -130,9 +163,9 @@ impl Analyzer {
                     // bindings from leaking out past the body.
                     let is_closure = matches!(node, MidExpr::Closure { .. });
                     if let MidExpr::Closure { params, .. } = &node {
-                        saved.push(self.env.clone());
+                        saved.push(self.undo.len());
                         for p in params {
-                            self.env.remove(p);
+                            self.unbind(*p);
                         }
                     }
                     let is_case = matches!(node, MidExpr::Case { .. });
