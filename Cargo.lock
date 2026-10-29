@@ -1193,7 +1193,7 @@ checksum = "d211803b9b6b570f68772237e415a029d5a50c65d382910b879fb19d3271f94d"
 [[package]]
 name = "pallas-addresses"
 version = "0.35.1"
-source = "git+file:///home/evgenii/svc/pallas?rev=437295c63d1846a50692129655205ed2182c54f3#437295c63d1846a50692129655205ed2182c54f3"
+source = "git+https://github.com/cardananium/pallas.git?rev=437295c63d1846a50692129655205ed2182c54f3#437295c63d1846a50692129655205ed2182c54f3"
 dependencies = [
  "base58",
  "bech32",
@@ -1208,7 +1208,7 @@ dependencies = [
 [[package]]
 name = "pallas-codec"
 version = "0.35.1"
-source = "git+file:///home/evgenii/svc/pallas?rev=437295c63d1846a50692129655205ed2182c54f3#437295c63d1846a50692129655205ed2182c54f3"
+source = "git+https://github.com/cardananium/pallas.git?rev=437295c63d1846a50692129655205ed2182c54f3#437295c63d1846a50692129655205ed2182c54f3"
 dependencies = [
  "hex",
  "minicbor",
@@ -1220,7 +1220,7 @@ dependencies = [
 [[package]]
 name = "pallas-crypto"
 version = "0.35.1"
-source = "git+file:///home/evgenii/svc/pallas?rev=437295c63d1846a50692129655205ed2182c54f3#437295c63d1846a50692129655205ed2182c54f3"
+source = "git+https://github.com/cardananium/pallas.git?rev=437295c63d1846a50692129655205ed2182c54f3#437295c63d1846a50692129655205ed2182c54f3"
 dependencies = [
  "cryptoxide 0.4.4",
  "hex",
@@ -1234,7 +1234,7 @@ dependencies = [
 [[package]]
 name = "pallas-primitives"
 version = "0.35.1"
-source = "git+file:///home/evgenii/svc/pallas?rev=437295c63d1846a50692129655205ed2182c54f3#437295c63d1846a50692129655205ed2182c54f3"
+source = "git+https://github.com/cardananium/pallas.git?rev=437295c63d1846a50692129655205ed2182c54f3#437295c63d1846a50692129655205ed2182c54f3"
 dependencies = [
  "base58",
  "bech32",
@@ -1249,7 +1249,7 @@ dependencies = [
 [[package]]
 name = "pallas-traverse"
 version = "0.35.1"
-source = "git+file:///home/evgenii/svc/pallas?rev=437295c63d1846a50692129655205ed2182c54f3#437295c63d1846a50692129655205ed2182c54f3"
+source = "git+https://github.com/cardananium/pallas.git?rev=437295c63d1846a50692129655205ed2182c54f3#437295c63d1846a50692129655205ed2182c54f3"
 dependencies = [
  "hex",
  "itertools 0.13.0",
@@ -2044,7 +2044,7 @@ checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 [[package]]
 name = "uplc"
 version = "1.1.24"
-source = "git+file:///home/evgenii/svc/aiken?rev=4d86266351658f9d8560ecd5d65b33ab1c35ef2c#4d86266351658f9d8560ecd5d65b33ab1c35ef2c"
+source = "git+https://github.com/cardananium/aiken.git?rev=2e0311a9e553657f02d2a8c1defa5c4937c4015f#2e0311a9e553657f02d2a8c1defa5c4937c4015f"
 dependencies = [
  "bitvec",
  "blst",
